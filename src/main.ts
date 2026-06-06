@@ -64,4 +64,4 @@ async function bootstrap() {
 	console.info(`ACCESS SWAGGER DOCUMENTATION AT http://localhost:${PORT}/docs`);
 	return;
 }
-void bootstrap();
+bootstrap();
