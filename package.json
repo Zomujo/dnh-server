@@ -16,7 +16,8 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:cov": "vitest run --coverage",
-		"test:e2e": "vitest run --config ./test/vitest.e2e.config.ts"
+		"test:e2e": "vitest run --config ./test/vitest.e2e.config.ts",
+		"prepare": "husky"
 	},
 	"dependencies": {
 		"@keyv/redis": "^5.1.6",
@@ -55,6 +56,8 @@
 		"@types/supertest": "^7.0.0",
 		"@vitest/coverage-v8": "^4.1.8",
 		"globals": "^17.0.0",
+		"husky": "^9.1.7",
+		"lint-staged": "^17.0.7",
 		"source-map-support": "^0.5.21",
 		"supertest": "^7.0.0",
 		"ts-loader": "^9.5.2",
@@ -64,6 +67,14 @@
 		"unplugin-swc": "^1.5.9",
 		"vitest": "^4.1.8",
 		"vitest-mock-extended": "^4.0.0"
+	},
+	"husky": {
+		"hooks": {
+			"pre-commit": "lint-staged"
+		}
+	},
+	"lint-staged": {
+		"*.{js,ts}": ["biome check --write --no-errors-on-unmatched"]
 	},
 	"packageManager": "pnpm@11.5.2+sha512.71c631e382066efc25625d5cf029075de07b61b37f6e27350fbd84b1bda5864c8c1967adc280776b45c30a715c0359a3be08fef42d5bb09e2b99029979692916"
 }
