@@ -10,6 +10,8 @@ export {
 	ChronicCareChatMessageDto,
 	ChronicCareQueryDto,
 	ChronicChatMessagesQueryDto,
+	MedicationAdherenceDayDto,
+	MedicationAdherenceDto,
 	MessagesPayload,
 } from './get.dto';
 export { UpdateChronicCareDto } from './update.dto';

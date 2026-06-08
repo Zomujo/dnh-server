@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { endOfWeek, startOfWeek, subDays } from 'date-fns';
 import { Model } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
@@ -173,6 +174,89 @@ export class AdherencesService {
 			.sort({ takenAt: -1 })
 			.limit(limit)
 			.select('taken takenAt');
+	}
+
+	async aggregateMedicationAdherence(userId: string) {
+		const thirtyDaysAgo = subDays(new Date(), 30);
+
+		const result = await this.adherenceLogModel.aggregate([
+			{
+				$match: {
+					userId,
+					targetType: TargetType.MEDICATION,
+					takenAt: { $gte: thirtyDaysAgo },
+				},
+			},
+			{
+				$group: {
+					_id: null,
+					total: { $sum: 1 },
+					taken: { $sum: { $cond: ['$taken', 1, 0] } },
+				},
+			},
+		]);
+
+		if (!result.length) {
+			return 0;
+		}
+
+		return Math.round((result[0].taken / result[0].total) * 100);
+	}
+
+	async aggregateMedicationTakenByWeek(userId: string) {
+		const now = new Date();
+		const weekStart = startOfWeek(now, { weekStartsOn: 1 });
+		const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+
+		const logs = await this.adherenceLogModel.find({
+			userId,
+			targetType: TargetType.MEDICATION,
+			takenAt: { $gte: weekStart, $lte: weekEnd },
+		});
+
+		const takenDates = new Set<string>();
+		for (const log of logs) {
+			if (log.taken) {
+				const dateKey = log.takenAt.toISOString().slice(0, 10);
+				takenDates.add(dateKey);
+			}
+		}
+
+		const today = new Date();
+		const todayKey = today.toISOString().slice(0, 10);
+
+		const dayLabels: Record<number, string> = {
+			1: 'M',
+			2: 'T',
+			3: 'W',
+			4: 'T',
+			5: 'F',
+			6: 'S',
+			0: 'S',
+		};
+
+		const days: { taken: boolean | null; dateTaken: Date; label: string }[] =
+			[];
+		for (let i = 0; i < 7; i++) {
+			const date = new Date(weekStart);
+			date.setDate(date.getDate() + i);
+			const dateKey = date.toISOString().slice(0, 10);
+
+			let taken: boolean | null;
+			if (dateKey >= todayKey) {
+				taken = null;
+			} else {
+				taken = takenDates.has(dateKey);
+			}
+
+			days.push({
+				taken,
+				dateTaken: date,
+				label: dayLabels[date.getDay()],
+			});
+		}
+
+		return days;
 	}
 
 	async aggregateAdherencePatterns(

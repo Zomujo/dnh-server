@@ -57,6 +57,14 @@ class VitalHistoryInputDto extends PickType(VitalHistoryDto, [
 	'severity',
 ]) {}
 
+export class LoadVitalHistoryDto extends PickType(VitalHistoryDto, [
+	'vitalType',
+	'value',
+	'recordedAt',
+]) {
+	patient: string;
+}
+
 export class CreateVitalHistoryDto extends PickType(VitalHistoryDto, [
 	'notes',
 	'patient',

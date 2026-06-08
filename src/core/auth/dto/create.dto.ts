@@ -1,5 +1,15 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+	IsArray,
+	IsEmail,
+	IsEnum,
+	IsNotEmpty,
+	IsNumber,
+	IsOptional,
+	IsString,
+	MinLength,
+} from 'class-validator';
+import { GenderEnum } from '@/features/patients/entities/patient.entity';
 
 export class TestNotificationDto {
 	@ApiProperty({
@@ -21,12 +31,52 @@ export class TestNotificationDto {
 export class CreateAuthDto {
 	@ApiProperty({ example: 'user@email.com' })
 	@IsNotEmpty()
-	// @IsEmail()
+	@IsEmail()
 	email: string;
 
 	@ApiProperty({ example: 'FiGgjHM5y767&' })
 	@IsNotEmpty()
+	@MinLength(6)
 	password: string;
+
+	@ApiProperty({ example: 'GHA-123456789-0' })
+	@IsString()
+	@IsNotEmpty()
+	ghanaCardNumber: string;
+
+	@ApiProperty({ example: 'John' })
+	@IsString()
+	@IsNotEmpty()
+	firstname: string;
+
+	@ApiProperty({ example: 'Doe' })
+	@IsString()
+	@IsNotEmpty()
+	lastname: string;
+
+	@ApiProperty({
+		description: 'Gender of the patient',
+		enum: GenderEnum,
+		example: 'male',
+	})
+	@IsEnum(GenderEnum)
+	gender: GenderEnum;
+
+	@ApiPropertyOptional({ example: 'NHIS-123456789' })
+	@IsString()
+	@IsOptional()
+	nhisNumber?: string;
+
+	@ApiProperty({ example: 1990 })
+	@IsNumber()
+	@IsNotEmpty()
+	yearOfBirth: number;
+
+	@ApiProperty({ example: ['hypertension', 'diabetes'] })
+	@IsArray()
+	@IsString({ each: true })
+	@IsNotEmpty()
+	chronicConditions: string[];
 }
 
 export class GoogleLoginDto {

@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Message } from 'firebase-admin/messaging';
 import { OAuth2Client } from 'google-auth-library';
+import { PatientsService } from '@/features/patients/patients.service';
 import { FirebaseService } from '../firebase/firebase.service';
 import {
 	CreateAuthDto,
@@ -25,9 +26,33 @@ export class AuthService {
 		private firebaseService: FirebaseService,
 		private jwtService: JwtService,
 		private configService: ConfigService,
+		private readonly patientsService: PatientsService,
 	) {
 		this.googleClientId = this.configService.get('GOOGLE_CLIENT_ID')!;
 		this.googleClient = new OAuth2Client(this.googleClientId);
+	}
+
+	async signup(dto: CreateAuthDto) {
+		const authUser = await this.firebaseService.auth.createUser({
+			email: dto.email,
+			emailVerified: false,
+			disabled: false,
+			password: dto.password,
+			displayName: `${dto.firstname} ${dto.lastname}`,
+		});
+
+		// retriever user id and create patient in mongodb.
+		await this.patientsService.create({
+			userId: authUser.uid,
+			name: `${dto.firstname} ${dto.lastname}`,
+			yearOfBirth: dto.yearOfBirth,
+			gender: dto.gender,
+			ghanaCardNumber: dto.ghanaCardNumber,
+			nhisNumber: dto.nhisNumber,
+			chronicConditions: dto.chronicConditions,
+		});
+
+		return authUser.uid;
 	}
 
 	async login(dto: CreateAuthDto) {

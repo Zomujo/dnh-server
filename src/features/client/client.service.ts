@@ -21,6 +21,7 @@ import { VitalHistoriesService } from '@/features/vital-histories/vital-historie
 import { DhVectorsService } from '../dh-vectors/dh-vectors.service';
 import {
 	BpTrendsQueryDto,
+	LoadVitalHistoryDto,
 	VitalHistoryTrendsQueryDto,
 } from '../vital-histories/dto';
 import { ClientAIService } from './ai/ai.service';
@@ -250,7 +251,7 @@ export class ClientService {
 	async fetchPatientData(userId: string) {
 		const patient = await this.patientsService.findPatientByUserId(
 			userId,
-			'userId name dateOfBirth patientCode height gender',
+			'userId name yearOfBirth patientCode height gender',
 		);
 		if (!patient) {
 			throw new NotFoundException('Patient not found');
@@ -293,6 +294,22 @@ export class ClientService {
 		return { medications: medications || [], count };
 	}
 
+	async logVitalHistory(dto: LoadVitalHistoryDto, userId: string) {
+		const patient = await this.patientsService.findPatientByUserId(
+			userId,
+			'_id',
+		);
+
+		if (!patient) {
+			throw new NotFoundException('Patient not found');
+		}
+
+		return this.vitalHistoryService.loadVitalHistory(
+			{ ...dto, patient: patient._id.toString() },
+			userId,
+		);
+	}
+
 	async fetchVitalHistory(userId: string) {
 		const response = await this.vitalHistoryService.fetchVitalHistory(userId);
 		return response;
@@ -332,6 +349,19 @@ export class ClientService {
 		});
 
 		return { rows: result, count: total };
+	}
+
+	async fetchMedicationAdherence(userId: string, showWeekdays?: boolean) {
+		const rate =
+			await this.adherencesService.aggregateMedicationAdherence(userId);
+
+		if (!showWeekdays) {
+			return { rate };
+		}
+
+		const days =
+			await this.adherencesService.aggregateMedicationTakenByWeek(userId);
+		return { rate, days };
 	}
 
 	async fetchConcerns(query: ChronicCareQueryDto, userId: string) {

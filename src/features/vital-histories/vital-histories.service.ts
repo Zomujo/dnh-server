@@ -15,6 +15,7 @@ import {
 	FilterVitalHistoriesDto,
 	fullDayMap,
 	getDateRangeFilter,
+	LoadVitalHistoryDto,
 	shortenedDay,
 	UpdateVitalHistoryDto,
 	VitalHistoryQueryFilter,
@@ -34,6 +35,77 @@ export class VitalHistoriesService {
 		private vitalHistoryModel: Model<VitalHistory>,
 		private readonly patientsService: PatientsService,
 	) {}
+
+	async loadVitalHistory(dto: LoadVitalHistoryDto, userId: string) {
+		const severity = this.determineSeverity(dto.vitalType, dto.value);
+		const unit =
+			dto.vitalType === 'bloodPressure'
+				? 'mmHg'
+				: dto.vitalType === 'bloodSugar'
+					? 'mmol/L'
+					: '';
+
+		const vitalHistory = await this.vitalHistoryModel.create({
+			userId,
+			patient: new Types.ObjectId(dto.patient),
+			vitalType: dto.vitalType,
+			value: dto.value,
+			unit,
+			recordedAt: dto.recordedAt,
+			severity,
+		});
+
+		return vitalHistory._id;
+	}
+
+	private determineSeverity(
+		vitalType: string,
+		value: string,
+	): VitalSeverityEnum {
+		if (vitalType === 'bloodPressure') {
+			const parts = value.split('/');
+			if (parts.length !== 2) {
+				return VitalSeverityEnum.NORMAL;
+			}
+
+			const systolic = Number.parseFloat(parts[0]);
+			const diastolic = Number.parseFloat(parts[1]);
+
+			if (Number.isNaN(systolic) || Number.isNaN(diastolic)) {
+				return VitalSeverityEnum.NORMAL;
+			}
+
+			if (systolic >= 140 || diastolic >= 90) {
+				return VitalSeverityEnum.CRITICAL;
+			}
+
+			if (systolic >= 130 || diastolic >= 85) {
+				return VitalSeverityEnum.ELEVATED;
+			}
+
+			return VitalSeverityEnum.NORMAL;
+		}
+
+		if (vitalType === 'bloodSugar') {
+			const mgdl = Number.parseFloat(value);
+
+			if (Number.isNaN(mgdl)) {
+				return VitalSeverityEnum.NORMAL;
+			}
+
+			if (mgdl <= 3.9 || mgdl > 11.0) {
+				return VitalSeverityEnum.CRITICAL;
+			}
+
+			if (mgdl > 7.0) {
+				return VitalSeverityEnum.ELEVATED;
+			}
+
+			return VitalSeverityEnum.NORMAL;
+		}
+
+		return VitalSeverityEnum.NORMAL;
+	}
 
 	async create(dto: CreateVitalHistoryDto, personnelId: string) {
 		const clusterId = new Types.ObjectId();

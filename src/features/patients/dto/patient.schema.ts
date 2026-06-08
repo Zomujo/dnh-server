@@ -29,10 +29,10 @@ export const PatientUpsertSchema = z.object({
 		)
 		.optional(),
 
-	dateOfBirth: z
-		.string()
-		.regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be in YYYY-MM-DD format')
-		.describe('Date of birth of the patient in YYYY-MM-DD format')
+	yearOfBirth: z
+		.number()
+		.min(1900)
+		.describe('Year of birth of the patient in YYYY format')
 		.optional(),
 
 	gender: GenderEnum.describe(

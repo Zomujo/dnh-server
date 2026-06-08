@@ -3,6 +3,7 @@ export {
 	DateRange,
 	fullDayMap,
 	getDateRangeFilter,
+	LoadVitalHistoryDto,
 	QueryDateRange,
 	shortenedDay,
 	VitalType,

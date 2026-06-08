@@ -18,7 +18,9 @@ import {
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '@/common/entities';
 import { generateFilter } from '@/common/factory';
+import { generateCode } from '@/common/utils/helpers';
 import { CacheService } from '@/core/caching/caching.service';
+import { ChronicConditionsService } from '../chronic-conditions/chronic-conditions.service';
 import {
 	CreatePatientDto,
 	FilterPatientsDto,
@@ -46,6 +48,7 @@ export class PatientsService {
 	constructor(
 		@InjectModel(Patient.name) private patientModel: Model<Patient>,
 		@InjectModel(Summary.name) private summaryModel: Model<Summary>,
+		private readonly chronicConditionsService: ChronicConditionsService,
 		private readonly summaryCacheService: CacheService<string>,
 	) {
 		this.llm = new ChatGoogleGenerativeAI({
@@ -55,11 +58,31 @@ export class PatientsService {
 		});
 	}
 
-	create(_createPatientDto: CreatePatientDto) {
-		return 'This action adds a new patient';
+	async create(dto: CreatePatientDto) {
+		dto.patientCode = generateCode();
+		const patient = await this.patientModel.create({ ...dto });
+
+		await Promise.all(
+			dto.chronicConditions.map((conditionName) =>
+				this.chronicConditionsService.upsertChronicCondition(
+					{
+						userId: dto.userId,
+						patient: patient._id.toString(),
+						conditionName,
+					},
+					{
+						userId: dto.userId,
+						patient: patient._id.toString(),
+						conditionName,
+					},
+				),
+			),
+		);
+
+		return patient._id;
 	}
 
-	async upsertPatient(filters: Record<string, any>, dto: CreatePatientDto) {
+	async upsertPatient(filters: Record<string, any>, dto: Record<string, any>) {
 		const qdrantId = uuidv7();
 
 		const patient = await this.patientModel.findOneAndUpdate(
@@ -91,8 +114,8 @@ export class PatientsService {
 		const parts: string[] = [];
 
 		// 1. Basic Demographics & Vital Identity
-		const age = patient.dateOfBirth
-			? `${new Date().getFullYear() - new Date(patient.dateOfBirth).getFullYear()} years old`
+		const age = patient.yearOfBirth
+			? `${new Date().getFullYear() - patient.yearOfBirth} years old`
 			: 'unknown age';
 
 		parts.push(

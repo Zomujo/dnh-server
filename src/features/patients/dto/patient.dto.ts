@@ -12,7 +12,6 @@ import {
 } from '@nestjs/swagger';
 import {
 	IsArray,
-	IsDateString,
 	IsEnum,
 	IsNotEmpty,
 	IsNumber,
@@ -22,12 +21,13 @@ import {
 	MaxLength,
 	Min,
 } from 'class-validator';
+import { GenderEnum } from '../entities/patient.entity';
 
 export class PatientDto {
 	@ApiResponseProperty({
 		example: 'ZC-JJ86234',
 	})
-	patientCode: string;
+	patientCode?: string;
 
 	@ApiProperty({
 		description: 'The ID of the user associated with the patient',
@@ -36,6 +36,22 @@ export class PatientDto {
 	@IsString()
 	@IsNotEmpty()
 	userId: string;
+
+	@ApiProperty({
+		description: 'Ghana card number of the patient',
+		example: 'GHA-123456789-0',
+	})
+	@IsString()
+	@IsNotEmpty()
+	ghanaCardNumber: string;
+
+	@ApiPropertyOptional({
+		description: 'NHIS number of the patient',
+		example: 'NHIS-123456789',
+	})
+	@IsString()
+	@IsOptional()
+	nhisNumber?: string;
 
 	@ApiProperty({
 		description: 'First name of the patient',
@@ -54,11 +70,12 @@ export class PatientDto {
 	phoneNumber: string;
 
 	@ApiProperty({
-		description: 'Date of birth of the patient (ISO 8601 format)',
-		example: '1990-05-21',
+		description: 'Year Of Birth of the patient',
+		example: 1963,
 	})
-	@IsDateString()
-	dateOfBirth: Date;
+	@IsNumber()
+	@Min(1900)
+	yearOfBirth: number;
 
 	@ApiResponseProperty({
 		example: 35,
@@ -71,7 +88,7 @@ export class PatientDto {
 		example: 'male',
 	})
 	@IsEnum(['male', 'female', 'other'])
-	gender: string;
+	gender: GenderEnum;
 
 	@ApiPropertyOptional({
 		description: 'Height of the patient in centimeters',

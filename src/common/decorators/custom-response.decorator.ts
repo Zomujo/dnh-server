@@ -10,12 +10,12 @@ import {
 } from '@nestjs/swagger';
 import { UserType } from '@/core/auth/enums';
 import { ApiErrorResponse } from '../dto';
-import {
-	HandleCreate,
-	HandleSuccess,
-	HandleSuccessNull,
-	HandleUpdate,
-} from '../interceptors/handler-wrappers';
+// import {
+// 	HandleCreate,
+// 	HandleSuccess,
+// 	HandleSuccessNull,
+// 	HandleUpdate,
+// } from '../interceptors/handler-wrappers';
 import { Authorize } from './authorize.decorator';
 import { ApiOkResponsePaginated } from './paginated-success.decorator';
 import {
@@ -50,7 +50,7 @@ export function CustomApiResponse(
 					ApiCreatedSuccessResponse({
 						description: options.message || 'Request successful',
 					}),
-					HandleCreate(),
+					// HandleCreate(),
 				);
 				break;
 			case 'updated':
@@ -58,7 +58,7 @@ export function CustomApiResponse(
 					ApiUpdatedSuccessResponse({
 						description: options.message || 'Update request successful',
 					}),
-					HandleUpdate(),
+					// HandleUpdate(),
 				);
 				break;
 			case 'success':
@@ -68,7 +68,7 @@ export function CustomApiResponse(
 						description: options.message || 'Request successful',
 						isArray: options.isArray,
 					}),
-					HandleSuccess(),
+					// HandleSuccess(),
 				);
 				break;
 			case 'successNull':
@@ -76,7 +76,7 @@ export function CustomApiResponse(
 					ApiSuccessResponseNullData({
 						description: options.message || 'Request successful',
 					}),
-					HandleSuccessNull(),
+					// HandleSuccessNull(),
 				);
 				break;
 			case 'successNoWrap':
@@ -94,7 +94,7 @@ export function CustomApiResponse(
 						type: options.type,
 						description: options.message || 'Resources retrieved successfully',
 					}),
-					HandleSuccess(),
+					// HandleSuccess(),
 				);
 				break;
 			case 'authorize':

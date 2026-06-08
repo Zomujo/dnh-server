@@ -12,7 +12,7 @@ export class GetPatientDto extends IntersectionType(
 		'patientCode',
 		'age',
 		'name',
-		'dateOfBirth',
+		'yearOfBirth',
 		'height',
 		'gender',
 	]),

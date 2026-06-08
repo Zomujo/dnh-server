@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ChronicConditionsModule } from '../chronic-conditions/chronic-conditions.module';
 import { DhVectorsModule } from '../dh-vectors/dh-vectors.module';
 import { Patient, PatientSchema } from './entities/patient.entity';
 import { Summary, SummarySchema } from './entities/summary.entity';
@@ -13,6 +14,7 @@ import { PatientsService } from './patients.service';
 			{ name: Summary.name, schema: SummarySchema },
 		]),
 		DhVectorsModule,
+		ChronicConditionsModule,
 	],
 	controllers: [PatientsController],
 	providers: [PatientsService],

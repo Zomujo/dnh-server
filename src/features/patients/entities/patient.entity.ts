@@ -1,5 +1,4 @@
 import { Prop, Schema, SchemaFactory, Virtual } from '@nestjs/mongoose';
-import { differenceInYears } from 'date-fns';
 import { ObjectId } from 'mongodb';
 import { BaseDH } from '@/common/entities/base-dh.entity';
 import { deleteByPattern } from '@/core/caching/utils';
@@ -54,6 +53,16 @@ export class Patient extends BaseDH {
 	userId: string;
 
 	@Prop({
+		description: 'Ghana card number for identification',
+	})
+	ghanaCardNumber: string;
+
+	@Prop({
+		description: 'National Health Insurance Scheme number',
+	})
+	nhisNumber: string;
+
+	@Prop({
 		default: 'English',
 		description: 'Preferred language for the patient',
 	})
@@ -68,8 +77,8 @@ export class Patient extends BaseDH {
 	})
 	phoneNumber: string;
 
-	@Prop({ description: 'Date of birth of the patient in YYYY-MM-DD format' })
-	dateOfBirth: Date;
+	@Prop({ description: 'Year of birth of the patient in YYYY format' })
+	yearOfBirth: number;
 
 	@Prop({
 		type: String,
@@ -147,7 +156,7 @@ export class Patient extends BaseDH {
 
 	@Virtual({
 		get: function (this: Patient) {
-			const age = differenceInYears(new Date(), this.dateOfBirth);
+			const age = new Date().getFullYear() - this.yearOfBirth;
 			return age;
 		},
 	})

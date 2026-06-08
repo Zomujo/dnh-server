@@ -38,6 +38,7 @@ import {
 	BpTrendsQueryDto,
 	BpTrendsResponseDto,
 	GetVitalHistoryDto,
+	LoadVitalHistoryDto,
 	VitalHistoryTrendsQueryDto,
 	VitalHistoryTrendsResponseDto,
 } from '@/features/vital-histories/dto';
@@ -50,6 +51,7 @@ import {
 	ChronicCareQueryDto,
 	ChronicChatMessagesQueryDto,
 	CreateChronicCareDto,
+	MedicationAdherenceDto,
 } from './dto';
 
 @ApiTags('Client')
@@ -257,6 +259,26 @@ export class ClientController {
 		}
 	}
 
+	@CustomApiResponse(['created', 'authorize'], {
+		message: 'Vital history logged successfully',
+	})
+	@Post('vital-histories/log')
+	async logVitalHistory(
+		@Body() dto: LoadVitalHistoryDto,
+		@GetUser('sub') userId: string,
+	) {
+		try {
+			const response = await this.clientService.logVitalHistory(dto, userId);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.CREATED,
+				'Vital history logged successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
 	@CustomApiResponse(['success', 'authorize'], {
 		type: GetVitalHistoryDto,
 		isArray: true,
@@ -367,6 +389,31 @@ export class ClientController {
 			return new ApiSuccessResponseNoData(
 				HttpStatus.OK,
 				'Patient data cleaned successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['success', 'authorize'], {
+		type: MedicationAdherenceDto,
+		message: 'Medication adherence fetched successfully',
+	})
+	@Get('medication-adherence')
+	@ApiQuery({ name: 'showWeekdays', type: Boolean, required: false })
+	async fetchMedicationAdherence(
+		@GetUser('sub') userId: string,
+		@Query('showWeekdays') showWeekdays?: string,
+	) {
+		try {
+			const response = await this.clientService.fetchMedicationAdherence(
+				userId,
+				showWeekdays === 'true',
+			);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				'Medication adherence fetched successfully',
 			);
 		} catch (error) {
 			throwError(this.logger, error);

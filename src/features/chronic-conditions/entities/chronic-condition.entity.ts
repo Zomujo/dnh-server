@@ -26,7 +26,7 @@ export enum CurrentStatusEnum {
 			const id = ret._id;
 			delete ret._id;
 			delete ret.__v;
-			delete ret.diagnosedDate._id;
+			if (ret.diagnosedDate) delete ret.diagnosedDate._id;
 			return { id, ...ret };
 		},
 	},

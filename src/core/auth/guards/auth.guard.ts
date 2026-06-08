@@ -47,6 +47,9 @@ export class AuthGuard implements CanActivate {
 
 		switch (tokenAudience) {
 			case UserType.DH_CLIENTS:
+			case UserType.DEV:
+				verifyToken = (token) => this.firebaseService.verifyAsync(token);
+				break;
 			case UserType.CHRONIC_CARE:
 				verifyToken = (token) => this.authService.verifyChronicCareToken(token);
 				break;

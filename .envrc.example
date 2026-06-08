@@ -1,0 +1,76 @@
+# shellcheck disable=all
+# =========================
+# Application Configuration
+# =========================
+export PORT=4815
+export NODE_ENV=development
+
+# =========================
+# Database Configuration
+# =========================
+export DB_NAME=dnh_db
+export DB_CONNECTION_STRING=mongodb+srv://<user>:<password>@<cluster>.mongodb.net
+# LOCAL_DB_CONNECTION_STRING=mongodb://localhost:27017
+
+# STAGING DB CONFIGURATION
+# export DB_CONNECTION_STRING=mongodb://mongo:<password>@<host>:11005
+
+# =========================
+# Redis Configuration
+# =========================
+# export REDIS_URL="redis://default:<password>@<host>:<port>"
+export REDIS_URL=redis://localhost:6379/5
+
+# =========================
+# Authentication
+# =========================
+export JWT_SECRET=<your-jwt-secret>
+export JWT_TTL=1d
+
+# =========================
+# Firebase - Base App
+# =========================
+# export FIREBASE_BASE_PROJECT_ID=<project-id>
+# export FIREBASE_BASE_PRIVATE_KEY_ID=<private-key-id>
+# export FIREBASE_BASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n<your-private-key>\n-----END PRIVATE KEY-----\n"
+# export FIREBASE_BASE_CLIENT_EMAIL=<client-email>
+# export FIREBASE_BASE_CLIENT_ID=<client-id>
+# export FIREBASE_BASE_CLIENT_CERT_URL=<client-cert-url>
+
+# =========================
+# Firebase - Dev App
+# =========================
+export FIREBASE_BASE_PROJECT_ID=<dev-project-id>
+export FIREBASE_BASE_PRIVATE_KEY_ID=<dev-private-key-id>
+export FIREBASE_BASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n<dev-private-key>\n-----END PRIVATE KEY-----\n"
+export FIREBASE_BASE_CLIENT_EMAIL=<dev-client-email>
+export FIREBASE_BASE_CLIENT_ID=<dev-client-id>
+export FIREBASE_BASE_CLIENT_CERT_URL=<dev-client-cert-url>
+
+# =========================
+# Logging / Observability
+# =========================
+export LOGTAIL_HOST=<logtail-host>
+export LOGTAIL_SOURCE_TOKEN=<logtail-token>
+
+# =========================
+# AI / LLM
+# =========================
+export GOOGLE_API_KEY=<google-api-key>
+
+# =========================
+# Qdrant Configuration
+# =========================
+export QDRANT_HOST=
+export QDRANT_URL=<qdrant-url>
+export QDRANT_API_KEY=<qdrant-api-key>
+
+# =========================
+# Queue Configuration
+# =========================
+export QUEUE_TLS=
+
+# =========================
+# Nanoid Configuration
+# =========================
+export NANOID_GEN=AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz1234567890
