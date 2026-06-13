@@ -38,7 +38,9 @@ export class CreateAuthDto {
 	@IsNotEmpty()
 	@MinLength(6)
 	password: string;
+}
 
+export class OnboardDto {
 	@ApiProperty({ example: 'GHA-123456789-0' })
 	@IsString()
 	@IsNotEmpty()

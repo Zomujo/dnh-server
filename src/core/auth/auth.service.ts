@@ -13,6 +13,7 @@ import { FirebaseService } from '../firebase/firebase.service';
 import {
 	CreateAuthDto,
 	LocalAuthUserPayload,
+	OnboardDto,
 	TestNotificationDto,
 } from './dto';
 
@@ -38,12 +39,16 @@ export class AuthService {
 			emailVerified: false,
 			disabled: false,
 			password: dto.password,
-			displayName: `${dto.firstname} ${dto.lastname}`,
+			displayName: `${dto.email}`,
 		});
 
+		return authUser.uid;
+	}
+
+	async onboarding(userId: string, dto: OnboardDto) {
 		// retriever user id and create patient in mongodb.
-		await this.patientsService.create({
-			userId: authUser.uid,
+		const patientId = await this.patientsService.create({
+			userId: userId,
 			name: `${dto.firstname} ${dto.lastname}`,
 			yearOfBirth: dto.yearOfBirth,
 			gender: dto.gender,
@@ -52,7 +57,7 @@ export class AuthService {
 			chronicConditions: dto.chronicConditions,
 		});
 
-		return authUser.uid;
+		return patientId;
 	}
 
 	async login(dto: CreateAuthDto) {

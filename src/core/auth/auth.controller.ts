@@ -9,11 +9,11 @@ import {
 	Post,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { CustomApiResponse } from '@/common/decorators';
+import { CustomApiResponse, GetUser } from '@/common/decorators';
 import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import { ApiSuccessResponseDto, throwError } from '@/common/utils/responses';
 import { AuthService } from './auth.service';
-import { CreateAuthDto, TestNotificationDto } from './dto';
+import { CreateAuthDto, OnboardDto, TestNotificationDto } from './dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -37,6 +37,23 @@ export class AuthController {
 				response,
 				HttpStatus.CREATED,
 				'Patient account created successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@Post('onboard')
+	@CustomApiResponse(['created', 'authorize'], {
+		message: 'Patient onboarded successfully',
+	})
+	async onboard(@GetUser('sub') userId: string, @Body() dto: OnboardDto) {
+		try {
+			const response = await this.authService.onboarding(userId, dto);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.CREATED,
+				'Patient onboarded successfully',
 			);
 		} catch (error) {
 			throwError(this.logger, error);

@@ -1,6 +1,7 @@
 export {
 	CreateAuthDto,
 	GoogleLoginDto,
+	OnboardDto,
 	TestNotificationDto,
 	UserPayload,
 } from './create.dto';
