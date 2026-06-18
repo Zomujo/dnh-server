@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createMongoQuerySchema } from '@/features/client/ai/agents/requiem/state';
+import { FrequencySchema } from '@/features/notifications/dto/notification.schema';
 
 export const MedicationUpsertSchema = z.object({
 	userId: z
@@ -41,12 +42,7 @@ export const MedicationUpsertSchema = z.object({
 		.describe('Dosage information (e.g., 500mg)')
 		.optional(),
 
-	frequency: z
-		.string()
-		.min(2)
-		.max(50)
-		.describe('Frequency of administration (e.g., twice daily)')
-		.optional(),
+	frequency: FrequencySchema.optional(),
 
 	route: z
 		.string()

@@ -121,8 +121,8 @@ export class FirebaseService {
 	 * @example
 	 * // Deleting a specific file
 	 * await this.firebaseService.deleteFile('https://firebasestorage.googleapis.com/v0/b/dh-base.appspot.com/o/chronic_care_chat_audios%2Fsession_123%2F2023-01-01T12:00:00.000Z.mp3?alt=media&token=123456789');
-	 *
 	 */
+
 	async deleteFile(url: string) {
 		try {
 			const baseUrl = '/o/';

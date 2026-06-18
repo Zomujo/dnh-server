@@ -79,6 +79,9 @@ export class VitalHistoryTrendsResponseDto {
 		example: [10],
 	})
 	values: number[];
+
+	@ApiResponseProperty({ example: 50 })
+	latestValue: number | null;
 }
 
 export class BpTrendsResponseDto extends PickType(
@@ -94,6 +97,9 @@ export class BpTrendsResponseDto extends PickType(
 		example: [70],
 	})
 	diastolic: number[];
+
+	@ApiResponseProperty({ example: '120/80' })
+	latestValue: string | null;
 }
 
 export class FilterVitalHistoriesDto extends PickType(PaginationRequestDto, [

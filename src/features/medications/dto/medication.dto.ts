@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Expose } from 'class-transformer';
+import { Expose, Type } from 'class-transformer';
 import {
 	IsArray,
 	IsDateString,
@@ -9,7 +9,9 @@ import {
 	IsOptional,
 	IsString,
 	Length,
+	ValidateNested,
 } from 'class-validator';
+import { Frequency } from '@/features/notifications/dto/notification.dto';
 
 export class MedicationDto {
 	@ApiProperty({
@@ -74,13 +76,13 @@ export class MedicationDto {
 	dosage: string;
 
 	@ApiProperty({
-		description: 'Frequency of administration (e.g., twice daily)',
-		example: 'twice daily',
+		description: 'Settings for medication frequency',
+		type: Frequency,
 	})
-	@IsString()
+	@ValidateNested()
+	@Type(() => Frequency)
 	@IsNotEmpty()
-	@Length(2, 50)
-	frequency: string;
+	frequency: Frequency;
 
 	@ApiProperty({
 		description: 'Route of administration (e.g., oral, injection)',

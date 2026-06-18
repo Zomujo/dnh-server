@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { AdherencesService } from '@/features/adherences/adherences.service';
-import { TargetType } from '@/features/adherences/dto/target-type.enum';
 import { UpdateAdherenceLogQueryDto } from '@/features/adherences/dto/update.dto';
+import type { Frequency } from '@/features/notifications/dto/notification.dto';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
 import { DhVectorsService } from '../dh-vectors/dh-vectors.service';
 import { DHDocumentType } from '../dh-vectors/dto';
@@ -73,12 +73,23 @@ export class MedicationsService {
 		return medication._id;
 	}
 
+	private formatFrequency(freq: Frequency): string {
+		const typeMap: Record<string, string> = {
+			daily: 'day',
+			weekly: 'week',
+			monthly: 'month',
+			yearly: 'year',
+			hourly: 'hour',
+		};
+		const unit = typeMap[freq.repetitionType] || freq.repetitionType;
+		return `every ${freq.repeatEvery} ${unit}${freq.repeatEvery > 1 ? 's' : ''}`;
+	}
+
 	private generateMedicationDescription(
 		medication: Partial<Medication>,
 	): string {
 		const parts: string[] = [];
 
-		// 1. Identity & Purpose (The "What" and "Why")
 		if (medication.name) {
 			parts.push(`Medication: ${medication.name}.`);
 		}
@@ -86,11 +97,12 @@ export class MedicationsService {
 			parts.push(`Purpose: Used for ${medication.purpose}.`);
 		}
 
-		// 2. Instructions (The "How")
 		if (medication.dosage || medication.frequency || medication.route) {
 			const dosageInfo = [
 				medication.dosage,
-				medication.frequency,
+				medication.frequency
+					? this.formatFrequency(medication.frequency)
+					: null,
 				medication.route ? `via ${medication.route} route` : null,
 			]
 				.filter(Boolean)
@@ -98,14 +110,12 @@ export class MedicationsService {
 			parts.push(`Instructions: Take ${dosageInfo}.`);
 		}
 
-		// 3. Clinical Context (Side Effects & Description)
 		if (medication.sideEffects?.length) {
 			parts.push(
 				`Known side effects include: ${medication.sideEffects.join(', ')}.`,
 			);
 		}
 
-		// 4. Logistics (Prescriber & Quantity)
 		if (medication.prescribedBy) {
 			parts.push(`Prescribed by: ${medication.prescribedBy}.`);
 		}
@@ -121,7 +131,6 @@ export class MedicationsService {
 			);
 		}
 
-		// Combine into a single paragraph
 		return parts.join(' ');
 	}
 	async findAllByQuery(filters: MedicationQueryFilter) {
@@ -186,33 +195,19 @@ export class MedicationsService {
 			]);
 	}
 
-	async findMedicationsWithAdherence(
-		userId: string,
-		offset: number,
-		limit: number,
-	) {
-		const medications = await this.findByUserId(userId, offset, limit);
+	async findById(id: string) {
+		const medication = await this.medicationModel.findById(id);
+		if (!medication) {
+			throw new NotFoundException('Medication not found');
+		}
+		return medication;
+	}
 
-		const populatedMedications = await Promise.all(
-			medications.map(async (medication) => {
-				const jsonMedication = medication.toJSON();
-				const aLogs = await this.adherencesService.findAdherenceLogsByTarget(
-					userId,
-					TargetType.MEDICATION,
-					medication.name,
-					14,
-				);
-
-				const adherenceLogs = aLogs.map((log) => log.toJSON());
-				return {
-					...jsonMedication,
-					lastTaken: adherenceLogs[0]?.takenAt || null,
-					adherenceLogs,
-				};
-			}),
-		);
-
-		return populatedMedications;
+	async findAllByUserId(userId: string) {
+		return this.medicationModel
+			.find({ userId })
+			.select(['name', 'dosage', 'purpose', 'startDate', 'frequency'])
+			.lean();
 	}
 
 	async countByUserId(userId: string): Promise<number> {

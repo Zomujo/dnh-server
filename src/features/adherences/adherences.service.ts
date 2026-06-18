@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { endOfWeek, startOfWeek, subDays } from 'date-fns';
+import {
+	endOfMonth,
+	endOfWeek,
+	startOfMonth,
+	startOfWeek,
+	subDays,
+} from 'date-fns';
 import { Model } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
@@ -164,13 +170,45 @@ export class AdherencesService {
 		targetType: TargetType,
 		targetName: string,
 		limit: number = 14,
+		date?: Date,
 	) {
+		const filter: Record<string, any> = {
+			userId,
+			targetType,
+			targetName: new RegExp(targetName, 'i'),
+		};
+
+		if (date) {
+			const start = startOfMonth(date);
+			const end = endOfMonth(date);
+			filter.takenAt = { $gte: start, $lte: end };
+
+			const results = await this.adherenceLogModel.aggregate([
+				{ $match: filter },
+				{ $sort: { takenAt: -1 } },
+				{
+					$group: {
+						_id: {
+							$dateToString: { format: '%Y-%m-%d', date: '$takenAt' },
+						},
+						doc: { $first: '$$ROOT' },
+					},
+				},
+				{ $replaceRoot: { newRoot: '$doc' } },
+				{ $sort: { takenAt: -1 } },
+				{ $limit: limit },
+				{ $project: { _id: 1, taken: 1, takenAt: 1 } },
+			]);
+
+			return results.map((r) => ({
+				id: String(r._id),
+				taken: r.taken,
+				takenAt: r.takenAt,
+			}));
+		}
+
 		return this.adherenceLogModel
-			.find({
-				userId,
-				targetType,
-				targetName: new RegExp(targetName, 'i'),
-			})
+			.find(filter)
 			.sort({ takenAt: -1 })
 			.limit(limit)
 			.select('taken takenAt');

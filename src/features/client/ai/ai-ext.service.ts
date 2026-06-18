@@ -3,6 +3,7 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { END, START, StateGraph } from '@langchain/langgraph';
 import { MongoDBSaver } from '@langchain/langgraph-checkpoint-mongodb';
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
 import * as fs from 'fs/promises';
@@ -30,6 +31,7 @@ export class ExtClientAIService {
 		private clientAIChatModel: Model<ClientAIChat>,
 		private eventEmitter: EventEmitter2,
 		private firebaseService: FirebaseService,
+		private configService: ConfigService,
 	) {}
 
 	private statePersister = async (state: typeof ClientAIState.State) => {
@@ -126,12 +128,13 @@ export class ExtClientAIService {
 	}) {
 		const timestamp = new Date();
 		const fileName = `chronic_care_chat_audios/${payload.userId}/${payload.fileName}`;
+		const bucket = this.configService.get<string>('BASE_STORAGE_BUCKET');
 
 		await this.clientAIChatModel.create({
 			_id: payload.audioMongoId,
 			userId: payload.userId,
 			role: AIMessageRole.USER,
-			content: `https://firebasestorage.googleapis.com/v0/b/zyptyk-base.appspot.com/o/${encodeURIComponent(fileName)}?alt=media&token=${payload.uuidToken}`,
+			content: `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(fileName)}?alt=media&token=${payload.uuidToken}`,
 			type: 'audio',
 			localChatId: payload.audioId,
 			createdAt: timestamp,

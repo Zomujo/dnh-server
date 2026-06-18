@@ -1,6 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
 import { deleteByPattern } from '@/core/caching/utils';
+import {
+	Frequency,
+	FrequencySchema,
+} from '@/features/notifications/entities/notification.entity';
 import { BaseDH } from '../../../common/entities/base-dh.entity';
 import { AdherenceLog } from '../../adherences/entities/adherence-log.entity';
 import { Patient } from '../../patients/entities/patient.entity';
@@ -49,8 +53,12 @@ export class Medication extends BaseDH {
 	@Prop({ description: 'Dosage information (e.g., 500mg)' })
 	dosage: string;
 
-	@Prop({ description: 'Frequency of administration (e.g., twice daily)' })
-	frequency: string;
+	@Prop({
+		type: FrequencySchema,
+		description:
+			'Settings for medication frequency. Example: { repeatEvery: 2, repetitionType: daily }',
+	})
+	frequency: Frequency;
 
 	@Prop({ description: 'Route of administration (e.g., oral, injection)' })
 	route: string;

@@ -22,6 +22,7 @@ import {
 	VitalHistoryTrendsQueryDto,
 	VitalHistoryTrendsResponseDto,
 	VitalHistoryUpsertInput,
+	VitalTypes,
 } from './dto';
 import {
 	VitalHistory,
@@ -569,18 +570,88 @@ export class VitalHistoriesService {
 		return { rows: vitalHistories, count: total };
 	}
 
+	async listVitalHistoryLogs(userId: string, page: number, pageSize: number) {
+		const skip = (page - 1) * pageSize;
+
+		const results = await this.vitalHistoryModel.aggregate<
+			Record<string, unknown>
+		>([
+			{
+				$match: {
+					$or: [{ userId }, { patient: userId }],
+				},
+			},
+			{ $sort: { createdAt: -1 } },
+			{ $skip: skip },
+			{ $limit: pageSize },
+			{
+				$addFields: {
+					vitalName: {
+						$switch: {
+							branches: [
+								{
+									case: { $eq: ['$vitalType', 'bloodPressure'] },
+									then: 'Blood Pressure',
+								},
+								{
+									case: { $eq: ['$vitalType', 'heartRate'] },
+									then: 'Heart Rate',
+								},
+								{
+									case: { $eq: ['$vitalType', 'temperature'] },
+									then: 'Temperature',
+								},
+								{
+									case: { $eq: ['$vitalType', 'respirationRate'] },
+									then: 'Respiration Rate',
+								},
+								{
+									case: { $eq: ['$vitalType', 'oxygenSaturation'] },
+									then: 'Oxygen Saturation',
+								},
+								{ case: { $eq: ['$vitalType', 'weight'] }, then: 'Weight' },
+								{
+									case: { $eq: ['$vitalType', 'bloodSugar'] },
+									then: 'Blood Sugar',
+								},
+							],
+							default: '$vitalType',
+						},
+					},
+				},
+			},
+			{
+				$project: {
+					id: '$_id',
+					_id: 0,
+					vitalType: 1,
+					vitalName: 1,
+					value: 1,
+					unit: 1,
+					severity: 1,
+				},
+			},
+		]);
+
+		const count = await this.vitalHistoryModel.countDocuments({
+			$or: [{ userId }, { patient: userId }],
+		});
+
+		return { rows: results, count };
+	}
+
 	async fetchBPTrend(userId: string, query: BpTrendsQueryDto) {
 		const { dateRange } = query;
 		const { timestamp } = getDateRangeFilter(dateRange)!;
 
+		const match = {
+			$or: [{ userId }, { patient: userId }],
+			vitalType: VitalTypes.BLOOD_PRESSURE,
+			recordedAt: timestamp,
+		};
+
 		const vitalTrend = await this.vitalHistoryModel.aggregate([
-			{
-				$match: {
-					$or: [{ userId }, { patient: userId }],
-					vitalType: 'bloodPressure',
-					recordedAt: timestamp,
-				},
-			},
+			{ $match: match },
 			{
 				$addFields: {
 					pressureParts: { $split: ['$value', '/'] },
@@ -606,24 +677,22 @@ export class VitalHistoriesService {
 			{ $unset: '_id' },
 		]);
 
+		const latest = await this.vitalHistoryModel
+			.findOne(match)
+			.sort({ recordedAt: -1 })
+			.select('value')
+			.lean();
+
 		let formattedVitalTrend = vitalTrend[0];
 
 		if (!formattedVitalTrend) {
-			return { labels: [], systolic: [], diastolic: [] };
+			return { labels: [], systolic: [], diastolic: [], latestValue: null };
 		}
 
-		// formattedVitalTrend.labels = this.formatLabels(
-		// 	formattedVitalTrend.labels,
-		// 	dateRange,
-		// );
-		//
-		// formattedVitalTrend = this.normalizeBpChartData(
-		// 	dateRange,
-		// 	formattedVitalTrend,
-		// 	timestamp,
-		// );
-
-		return formattedVitalTrend;
+		return {
+			...formattedVitalTrend,
+			latestValue: latest?.value ?? null,
+		};
 	}
 
 	private normalizeBpChartData(
@@ -702,24 +771,29 @@ export class VitalHistoriesService {
 			{ $unset: '_id' },
 		]);
 
+		const latest = await this.vitalHistoryModel
+			.findOne({
+				$or: [{ userId }, { patient: userId }],
+				...matchRecord,
+			})
+			.sort({ recordedAt: -1 })
+			.select('value')
+			.lean();
+
 		let formattedVitalTrend = vitalTrend[0];
 
 		if (!formattedVitalTrend) {
-			return { labels: [], values: [] };
+			return {
+				labels: [],
+				values: [],
+				latestValue: null,
+			};
 		}
-		//
-		// formattedVitalTrend.labels = this.formatLabels(
-		// 	formattedVitalTrend.labels,
-		// 	dateRange,
-		// );
-		//
-		// formattedVitalTrend = this.normalizeChartData(
-		// 	dateRange,
-		// 	formattedVitalTrend,
-		// 	timestamp,
-		// );
 
-		return formattedVitalTrend;
+		return {
+			...formattedVitalTrend,
+			latestValue: latest ? Number(latest.value) : null,
+		};
 	}
 
 	private normalizeChartData(

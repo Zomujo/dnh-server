@@ -1,6 +1,27 @@
 import { OpenAIWhisperAudio } from '@langchain/community/document_loaders/fs/openai_whisper_audio';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
+import {
+	differenceInCalendarMonths,
+	differenceInCalendarYears,
+	differenceInDays,
+	differenceInWeeks,
+	eachDayOfInterval,
+	endOfDay,
+	endOfMonth,
+	getDate,
+	getDay,
+	getHours,
+	getMilliseconds,
+	getMinutes,
+	getMonth,
+	getSeconds,
+	isFuture,
+	isToday,
+	set,
+	startOfDay,
+	startOfMonth,
+} from 'date-fns';
 import * as fs from 'fs/promises';
 import { toHeaderCase } from 'js-convert-case';
 import { Collection, Connection, isValidObjectId, Types } from 'mongoose';
@@ -12,9 +33,12 @@ import { generateCode } from '@/common/utils/helpers';
 import { CacheService } from '@/core/caching/caching.service';
 import { FirebaseService } from '@/core/firebase/firebase.service';
 import { AdherencesService } from '@/features/adherences/adherences.service';
+import { TargetType } from '@/features/adherences/dto/target-type.enum';
 import { ChronicConditionsService } from '@/features/chronic-conditions/chronic-conditions.service';
 import { ConcernsService } from '@/features/concerns/concerns.service';
+import { MedicationSection } from '@/features/medications/dto';
 import { MedicationsService } from '@/features/medications/medications.service';
+import type { Frequency } from '@/features/notifications/dto/notification.dto';
 import { NotificationsService } from '@/features/notifications/notifications.service';
 import { PatientsService } from '@/features/patients/patients.service';
 import { VitalHistoriesService } from '@/features/vital-histories/vital-histories.service';
@@ -147,6 +171,7 @@ export class ClientService {
 						_id: response.id,
 						text: response.content,
 						createdAt: response.createdAt,
+						suggestions: [],
 					},
 					inResponse: {
 						_id: audioIdPresent.id,
@@ -282,16 +307,256 @@ export class ClientService {
 	async fetchMedications(query: ChronicCareQueryDto, userId: string) {
 		const { pageFilter } = generateFilter(query);
 
-		const medications =
-			await this.medicationsService.findMedicationsWithAdherence(
-				userId,
-				pageFilter.offset,
-				pageFilter.limit,
-			);
+		const medications = await this.medicationsService.findByUserId(
+			userId,
+			pageFilter.offset,
+			pageFilter.limit,
+		);
 
 		const count = await this.medicationsService.countByUserId(userId);
 
 		return { medications: medications || [], count };
+	}
+
+	private shouldTakeToday(startDate: Date, frequency: Frequency): boolean {
+		const now = new Date();
+		const start = new Date(startDate);
+		if (start > now) return false;
+
+		const repType = frequency.repetitionType;
+		const repeatEvery = frequency.repeatEvery || 1;
+
+		switch (repType) {
+			case 'daily':
+			case 'hourly':
+			case 'everyMinute':
+			case 'everySecond': {
+				return differenceInDays(now, start) % repeatEvery === 0;
+			}
+			case 'weekly': {
+				return (
+					differenceInWeeks(now, start) % repeatEvery === 0 &&
+					getDay(now) === getDay(start)
+				);
+			}
+			case 'monthly': {
+				return (
+					differenceInCalendarMonths(now, start) % repeatEvery === 0 &&
+					getDate(now) === getDate(start)
+				);
+			}
+			case 'yearly': {
+				return (
+					differenceInCalendarYears(now, start) % repeatEvery === 0 &&
+					getMonth(now) === getMonth(start) &&
+					getDate(now) === getDate(start)
+				);
+			}
+			default:
+				return false;
+		}
+	}
+
+	private resolveToBeTakenAt(startDate: Date): Date {
+		const now = new Date();
+		const toBeTakenAt = set(now, {
+			hours: getHours(startDate),
+			minutes: getMinutes(startDate),
+			seconds: getSeconds(startDate),
+			milliseconds: getMilliseconds(startDate),
+		});
+		if (
+			getHours(toBeTakenAt) === 0 &&
+			getMinutes(toBeTakenAt) === 0 &&
+			getSeconds(toBeTakenAt) === 0
+		) {
+			return set(toBeTakenAt, {
+				hours: 8,
+				minutes: 0,
+				seconds: 0,
+				milliseconds: 0,
+			});
+		}
+		return toBeTakenAt;
+	}
+
+	private getSection(date: Date): MedicationSection {
+		const hour = getHours(date);
+		if (hour >= 5 && hour < 12) return MedicationSection.MORNING;
+		if (hour >= 12 && hour < 17) return MedicationSection.AFTERNOON;
+		return MedicationSection.EVENING;
+	}
+
+	async confirmMedication(medicationId: string, userId: string) {
+		const medication = await this.medicationsService.findById(medicationId);
+
+		const toBeTakenAt = this.resolveToBeTakenAt(medication.startDate);
+
+		const todayStart = startOfDay(toBeTakenAt);
+		const todayEnd = endOfDay(toBeTakenAt);
+
+		const logId = await this.adherencesService.upsertAdherenceLog(
+			{
+				userId,
+				targetType: TargetType.MEDICATION,
+				targetName: medication.name,
+				takenAt: { $gte: todayStart, $lte: todayEnd },
+			},
+			{
+				userId,
+				patient: medication.patient?.toString() ?? medication.patient,
+				targetType: TargetType.MEDICATION,
+				targetName: medication.name,
+				taken: true,
+				takenAt: toBeTakenAt,
+				status: 'taken',
+			} as any,
+		);
+
+		return { id: logId };
+	}
+
+	async countTodaysMedications(userId: string) {
+		const medications = await this.medicationsService.findAllByUserId(userId);
+
+		const counts = {
+			[MedicationSection.MORNING]: 0,
+			[MedicationSection.AFTERNOON]: 0,
+			[MedicationSection.EVENING]: 0,
+		};
+
+		for (const med of medications) {
+			if (!med.frequency || !med.startDate) continue;
+			if (!this.shouldTakeToday(med.startDate, med.frequency)) continue;
+
+			const toBeTakenAt = this.resolveToBeTakenAt(med.startDate);
+			const section = this.getSection(toBeTakenAt);
+			counts[section]++;
+		}
+
+		return counts;
+	}
+
+	async fetchTodaysMedications(section: MedicationSection, userId: string) {
+		const medications = await this.medicationsService.findAllByUserId(userId);
+
+		const result: {
+			name: string;
+			dosage: string;
+			purpose: string;
+			toBeTakenAt: Date;
+			taken: boolean;
+		}[] = [];
+
+		for (const med of medications) {
+			if (!med.frequency || !med.startDate) continue;
+
+			if (!this.shouldTakeToday(med.startDate, med.frequency)) continue;
+
+			const toBeTakenAt = this.resolveToBeTakenAt(med.startDate);
+			if (this.getSection(toBeTakenAt) !== section) continue;
+
+			result.push({
+				name: med.name,
+				dosage: med.dosage,
+				purpose: med.purpose,
+				toBeTakenAt,
+				taken: false,
+			});
+		}
+
+		if (result.length === 0) return result;
+
+		const todayStart = startOfDay(new Date());
+		const todayEnd = endOfDay(new Date());
+
+		const medNames = result.map((m) => m.name);
+
+		const logs = await this.adherencesService.findAllAdherenceLogsByQuery({
+			query: {
+				userId,
+				targetType: TargetType.MEDICATION,
+				targetName: { $in: medNames },
+				takenAt: { $gte: todayStart, $lte: todayEnd },
+			},
+			projection: 'targetName taken',
+			limit: 50,
+		} as any);
+
+		const takenMap = new Map<string, boolean>();
+		for (const log of logs) {
+			if (log.taken) {
+				takenMap.set(log.targetName as string, true);
+			}
+		}
+
+		for (const item of result) {
+			if (takenMap.has(item.name)) {
+				item.taken = true;
+			}
+		}
+
+		return result;
+	}
+
+	async fetchMedicationAdherenceLogs(
+		medicationId: string,
+		userId: string,
+		date: Date,
+	) {
+		const medication = await this.medicationsService.findById(medicationId);
+
+		const logs = await this.adherencesService.findAdherenceLogsByTarget(
+			userId,
+			TargetType.MEDICATION,
+			medication.name,
+			31,
+			date,
+		);
+
+		const monthStart = startOfMonth(date);
+		const monthEnd = endOfMonth(date);
+		const allDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
+
+		const logMap = new Map<number, { taken: boolean; id: string }>();
+		for (const log of logs) {
+			logMap.set(getDate(log.takenAt), { taken: log.taken, id: log.id });
+		}
+
+		const normalizedLogs: {
+			takenAt: Date;
+			taken: boolean | null;
+			id: string;
+		}[] = [];
+
+		for (const dayDate of allDays) {
+			const day = getDate(dayDate);
+			const entry = logMap.get(day);
+
+			if (entry) {
+				normalizedLogs.push({
+					takenAt: dayDate,
+					taken: entry.taken,
+					id: entry.id,
+				});
+			} else {
+				const isPending = isFuture(dayDate) || isToday(dayDate);
+				normalizedLogs.push({
+					takenAt: dayDate,
+					taken: isPending ? null : false,
+					id: new Types.ObjectId().toString(),
+				});
+			}
+		}
+
+		const takenCount = normalizedLogs.filter((l) => l.taken === true).length;
+		const adherenceRate = Math.round((takenCount / allDays.length) * 100);
+
+		return {
+			medicationName: medication.name,
+			adherenceRate,
+			logs: normalizedLogs,
+		};
 	}
 
 	async logVitalHistory(dto: LoadVitalHistoryDto, userId: string) {
@@ -313,6 +578,14 @@ export class ClientService {
 	async fetchVitalHistory(userId: string) {
 		const response = await this.vitalHistoryService.fetchVitalHistory(userId);
 		return response;
+	}
+
+	async fetchVitalHistoryLogs(userId: string, page: number, pageSize: number) {
+		return this.vitalHistoryService.listVitalHistoryLogs(
+			userId,
+			page,
+			pageSize,
+		);
 	}
 
 	async fetchVitalTrend(userId: string, query: VitalHistoryTrendsQueryDto) {

@@ -25,12 +25,14 @@ export class ChronicCareConversationResponseDto {
 			_id: '69428d88795e426748689856',
 			text: 'Hi there pleasure to meet you',
 			createdAt: new Date(),
+			suggestions: [],
 		},
 	})
 	outResponse: {
 		_id: string;
 		text: string;
 		createdAt: Date;
+		suggestions: string[];
 	};
 
 	@ApiResponseProperty({

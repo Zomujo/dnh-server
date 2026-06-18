@@ -9,6 +9,7 @@ import {
 	Param,
 	ParseFilePipeBuilder,
 	Post,
+	Put,
 	Query,
 	Res,
 	UploadedFile,
@@ -32,7 +33,14 @@ import {
 import { GetAdherencePatternDto } from '@/features/adherences/dto';
 import { GetChronicConditionDto } from '@/features/chronic-conditions/dto';
 import { GetConcernDto } from '@/features/concerns/dto';
-import { GetMedicationDto } from '@/features/medications/dto';
+import {
+	AdherenceLogsQueryDto,
+	GetMedicationDto,
+	MedicationAdherenceLogsDto,
+	TodaysMedicationCountDto,
+	TodaysMedicationDto,
+	TodaysMedicationsQueryDto,
+} from '@/features/medications/dto';
 import { GetPatientDto } from '@/features/patients/dto';
 import {
 	BpTrendsQueryDto,
@@ -259,10 +267,102 @@ export class ClientController {
 		}
 	}
 
+	@CustomApiResponse(['success', 'authorize'], {
+		type: TodaysMedicationCountDto,
+		message: "Today's medication counts fetched successfully",
+	})
+	@Get('medications/today/count')
+	async countTodaysMedications(@GetUser('sub') userId: string) {
+		try {
+			const response = await this.clientService.countTodaysMedications(userId);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				"Today's medication counts fetched successfully",
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['success', 'authorize'], {
+		type: TodaysMedicationDto,
+		isArray: true,
+		message: "Today's medications fetched successfully",
+	})
+	@Get('medications/today')
+	async fetchTodaysMedications(
+		@Query() query: TodaysMedicationsQueryDto,
+		@GetUser('sub') userId: string,
+	) {
+		try {
+			const response = await this.clientService.fetchTodaysMedications(
+				query.section,
+				userId,
+			);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				"Today's medications fetched successfully",
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['updated', 'authorize'], {
+		message: 'Medication confirmed successfully',
+	})
+	@Put('medications/:medicationId/confirm')
+	async confirmMedication(
+		@Param('medicationId') medicationId: string,
+		@GetUser('sub') userId: string,
+	) {
+		try {
+			const response = await this.clientService.confirmMedication(
+				medicationId,
+				userId,
+			);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				'Medication confirmed successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['success', 'authorize'], {
+		type: MedicationAdherenceLogsDto,
+		message: 'Medication adherence logs fetched successfully',
+	})
+	@Get('medications/:medicationId/adherence')
+	async fetchMedicationAdherenceLogs(
+		@Param('medicationId') medicationId: string,
+		@Query() query: AdherenceLogsQueryDto,
+		@GetUser('sub') userId: string,
+	) {
+		try {
+			const response = await this.clientService.fetchMedicationAdherenceLogs(
+				medicationId,
+				userId,
+				new Date(query.date),
+			);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				'Medication adherence logs fetched successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
 	@CustomApiResponse(['created', 'authorize'], {
 		message: 'Vital history logged successfully',
 	})
-	@Post('vital-histories/log')
+	@Post('vital-histories/logs')
 	async logVitalHistory(
 		@Body() dto: LoadVitalHistoryDto,
 		@GetUser('sub') userId: string,
@@ -292,6 +392,37 @@ export class ClientController {
 				response.rows,
 				HttpStatus.OK,
 				'Vital histories fetched successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['paginated', 'authorize'], {
+		type: GetVitalHistoryDto,
+		message: 'Vital history logs fetched successfully',
+	})
+	@Get('vital-histories/logs')
+	async fetchVitalHistoryLogs(
+		@Query() query: ChronicCareQueryDto,
+		@GetUser('sub') userId: string,
+	) {
+		try {
+			const response = await this.clientService.fetchVitalHistoryLogs(
+				userId,
+				query.page,
+				query.pageSize,
+			);
+			const paginated = new PaginatedDataResponseDto(
+				response.rows,
+				query.page,
+				query.pageSize,
+				response.count,
+			);
+			return new ApiSuccessResponseDto(
+				paginated,
+				HttpStatus.OK,
+				'Vital history logs fetched successfully',
 			);
 		} catch (error) {
 			throwError(this.logger, error);
