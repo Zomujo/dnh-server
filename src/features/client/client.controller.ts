@@ -24,6 +24,7 @@ import {
 	ApiTags,
 } from '@nestjs/swagger';
 import { CustomApiResponse, GetUser } from '@/common/decorators';
+import { generateFilter } from '@/common/factory';
 import {
 	ApiSuccessResponseDto,
 	ApiSuccessResponseNoData,
@@ -408,15 +409,16 @@ export class ClientController {
 		@GetUser('sub') userId: string,
 	) {
 		try {
+			const { pageFilter } = generateFilter(query);
 			const response = await this.clientService.fetchVitalHistoryLogs(
 				userId,
-				query.page,
-				query.pageSize,
+				pageFilter.offset,
+				pageFilter.limit,
 			);
 			const paginated = new PaginatedDataResponseDto(
 				response.rows,
-				query.page,
-				query.pageSize,
+				query.page || 1,
+				query.pageSize || 10,
 				response.count,
 			);
 			return new ApiSuccessResponseDto(

@@ -36,6 +36,11 @@ Trigger the "notificationsScribe" tool **only when ALL of the following conditio
 - Applicable activities include medication, vitals, lifestyle-related activities (diet, exercise, hydration, sleep, alcohol, smoking), or anything with a clearly stated schedule.
 - The patient **explicitly states the last time (date or timestamp) the activity was performed**.
   - This value is mapped directly to "startDate".
+  - **startDate time adjustment for daily medications (repetitionType: 'daily'):**
+    - **repeatEvery: 1 (once daily):** Use the time exactly as stated. Example: user says "9pm" → startDate time = 9pm.
+    - **repeatEvery: 2 (twice daily):** Adjust to the nearest morning slot by shifting PM to AM while preserving the same hour (e.g., 9pm → 9am). Adjust the date to the most recent occurrence of that morning time (e.g., "yesterday at 9pm" → today at 9am).
+    - **repeatEvery: >= 3 (three+ times daily):** Use the time as-is.
+  - For non-daily repetition types (weekly, monthly, yearly, hourly, etc.), always preserve the stated time as-is.
   - If no last-performed time is stated, **do NOT create a notification**.
 - The notification **targetType and targetName must exactly match the targetType and targetName from the corresponding adherence logs**.
 - The targetName should just hold the name and nothing else. Example "Metformin" instead of "Metformin 12mg".

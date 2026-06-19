@@ -19,16 +19,19 @@ export class TodaysMedicationsQueryDto {
 
 export class TodaysMedicationCountDto {
 	@ApiResponseProperty({ example: 3 })
-	MORNING: number;
+	morning: number;
 
 	@ApiResponseProperty({ example: 2 })
-	AFTERNOON: number;
+	afternoon: number;
 
 	@ApiResponseProperty({ example: 1 })
-	EVENING: number;
+	evening: number;
 }
 
 export class TodaysMedicationDto {
+	@ApiResponseProperty({ example: '68e3ca3c2383b37fe4cb88a8' })
+	id: string;
+
 	@ApiResponseProperty({ example: 'Metformin' })
 	name: string;
 

@@ -69,6 +69,7 @@ export class ClientService {
 		private readonly extClientAiService: ExtClientAIService,
 		private readonly clientAiService: ClientAIService,
 		private readonly userCacheService: CacheService<UserPayload>,
+		private readonly chronicConditionsCacheService: CacheService<string[]>,
 		private readonly patientsService: PatientsService,
 		private readonly chronicConditionsService: ChronicConditionsService,
 		private readonly medicationsService: MedicationsService,
@@ -101,11 +102,14 @@ export class ClientService {
 
 		const patient = await this.retrievePatient(userId, language);
 
+		const cCond = await this.retrieveChronicConditions(userId);
+
 		const user = {
 			patientId: patient._id.toString(),
 			userId,
 			name: patient.name,
 			phoneNumber: patient.phoneNumber,
+			chronicConditions: cCond,
 		};
 
 		const response = await this.clientAiService.bulkCompletion({
@@ -239,6 +243,25 @@ export class ClientService {
 		return;
 	}
 
+	async retrieveChronicConditions(userId: string, limit: number = 5) {
+		const key = `chronic-conditions:${userId}`;
+
+		let chronicConds = await this.chronicConditionsCacheService.get(key);
+		if (!chronicConds) {
+			const chronicConditions =
+				await this.chronicConditionsService.findByUserId(userId, 0, limit);
+			chronicConds = chronicConditions.map((c) => c.conditionName);
+
+			const fiftyMinsTtl = 50 * 60000;
+			await this.chronicConditionsCacheService.set(
+				key,
+				chronicConds,
+				fiftyMinsTtl,
+			);
+		}
+		return chronicConds;
+	}
+
 	async retrievePatient(userId: string, language: SupportedLanguages) {
 		const qdrantId = uuidv7();
 		let patient = await this.patientsService.findPatientByUserId(
@@ -327,7 +350,9 @@ export class ClientService {
 		const repeatEvery = frequency.repeatEvery || 1;
 
 		switch (repType) {
-			case 'daily':
+			case 'daily': {
+				return true;
+			}
 			case 'hourly':
 			case 'everyMinute':
 			case 'everySecond': {
@@ -387,6 +412,55 @@ export class ClientService {
 		return MedicationSection.EVENING;
 	}
 
+	private getDailySections(
+		baseTime: Date,
+		repeatEvery: number,
+	): MedicationSection[] {
+		if (repeatEvery <= 1) {
+			return [this.getSection(baseTime)];
+		}
+		if (repeatEvery === 2) {
+			return [MedicationSection.MORNING, MedicationSection.EVENING];
+		}
+		return [
+			MedicationSection.MORNING,
+			MedicationSection.AFTERNOON,
+			MedicationSection.EVENING,
+		];
+	}
+
+	private adjustToSectionTime(
+		baseTime: Date,
+		section: MedicationSection,
+	): Date {
+		if (this.getSection(baseTime) === section) return baseTime;
+
+		if (section === MedicationSection.MORNING) {
+			const h = getHours(baseTime);
+			if (h >= 5 && h < 12) return baseTime;
+			return set(baseTime, {
+				hours: 8,
+				minutes: 0,
+				seconds: 0,
+				milliseconds: 0,
+			});
+		}
+		if (section === MedicationSection.AFTERNOON) {
+			return set(baseTime, {
+				hours: 12,
+				minutes: 0,
+				seconds: 0,
+				milliseconds: 0,
+			});
+		}
+		return set(baseTime, {
+			hours: 20,
+			minutes: 0,
+			seconds: 0,
+			milliseconds: 0,
+		});
+	}
+
 	async confirmMedication(medicationId: string, userId: string) {
 		const medication = await this.medicationsService.findById(medicationId);
 
@@ -415,23 +489,28 @@ export class ClientService {
 
 		return { id: logId };
 	}
-
 	async countTodaysMedications(userId: string) {
 		const medications = await this.medicationsService.findAllByUserId(userId);
 
 		const counts = {
-			[MedicationSection.MORNING]: 0,
-			[MedicationSection.AFTERNOON]: 0,
-			[MedicationSection.EVENING]: 0,
+			morning: 0,
+			afternoon: 0,
+			evening: 0,
 		};
 
 		for (const med of medications) {
 			if (!med.frequency || !med.startDate) continue;
 			if (!this.shouldTakeToday(med.startDate, med.frequency)) continue;
 
-			const toBeTakenAt = this.resolveToBeTakenAt(med.startDate);
-			const section = this.getSection(toBeTakenAt);
-			counts[section]++;
+			const baseTime = this.resolveToBeTakenAt(med.startDate);
+			const repeatEvery = med.frequency?.repeatEvery || 1;
+			const sections = this.getDailySections(baseTime, repeatEvery);
+
+			for (const s of sections) {
+				if (s === MedicationSection.MORNING) counts.morning++;
+				else if (s === MedicationSection.AFTERNOON) counts.afternoon++;
+				else counts.evening++;
+			}
 		}
 
 		return counts;
@@ -441,6 +520,7 @@ export class ClientService {
 		const medications = await this.medicationsService.findAllByUserId(userId);
 
 		const result: {
+			id: string;
 			name: string;
 			dosage: string;
 			purpose: string;
@@ -453,10 +533,15 @@ export class ClientService {
 
 			if (!this.shouldTakeToday(med.startDate, med.frequency)) continue;
 
-			const toBeTakenAt = this.resolveToBeTakenAt(med.startDate);
-			if (this.getSection(toBeTakenAt) !== section) continue;
+			const medicationBaseTime = this.resolveToBeTakenAt(med.startDate);
+			const repeatEvery = med.frequency?.repeatEvery || 1;
+			const sections = this.getDailySections(medicationBaseTime, repeatEvery);
+			if (!sections.includes(section)) continue;
+
+			const toBeTakenAt = this.adjustToSectionTime(medicationBaseTime, section);
 
 			result.push({
+				id: med._id.toString(),
 				name: med.name,
 				dosage: med.dosage,
 				purpose: med.purpose,
@@ -580,12 +665,8 @@ export class ClientService {
 		return response;
 	}
 
-	async fetchVitalHistoryLogs(userId: string, page: number, pageSize: number) {
-		return this.vitalHistoryService.listVitalHistoryLogs(
-			userId,
-			page,
-			pageSize,
-		);
+	async fetchVitalHistoryLogs(userId: string, offset: number, limit: number) {
+		return this.vitalHistoryService.listVitalHistoryLogs(userId, offset, limit);
 	}
 
 	async fetchVitalTrend(userId: string, query: VitalHistoryTrendsQueryDto) {
@@ -666,9 +747,9 @@ export class ClientService {
 		await this.concernsService.removeByUserId(userId);
 		await this.clientAIChatService.removeByUserId(userId);
 		await this.patientsService.removeSummariesByUserId(userId);
-		await this.firebaseService.deleteFolder(
-			'chronic_care_chat_audios/' + userId,
-		);
+		// await this.firebaseService.deleteFolder(
+		// 	'chronic_care_chat_audios/' + userId,
+		// );
 
 		if (patientId) {
 			await this.doctorNotificationsService.purgeNotifications(patientId);

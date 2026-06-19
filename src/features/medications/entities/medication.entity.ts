@@ -63,10 +63,12 @@ export class Medication extends BaseDH {
 	@Prop({ description: 'Route of administration (e.g., oral, injection)' })
 	route: string;
 
-	@Prop({ description: 'Start date of medication (YYYY-MM-DD)' })
+	@Prop({ description: 'Start date and time of medication (YYYY-MM-DD)' })
 	startDate: Date;
 
-	@Prop({ description: 'End date of medication (YYYY-MM-DD, optional)' })
+	@Prop({
+		description: 'End date and time of medication (YYYY-MM-DD, optional)',
+	})
 	endDate: Date;
 
 	@Prop({ description: 'Prescriber name (2–100 characters, e.g., Dr. Smith)' })

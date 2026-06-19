@@ -67,10 +67,10 @@ export const VitalHistoryUpsertSchema = z.object({
 			"Unit of measurement for the vital sign. Example: 'mmHg'. If weight, convert to kg. If blood sugar, convert to mmol/L unless already stated as such.",
 		),
 
-	severity: VitalSeverityEnum.optional().describe(
-		'AI-determined severity of the vital sign based on the value and vital type. ' +
-			'Do not take user input directly; infer severity automatically.',
-	),
+	// severity: VitalSeverityEnum.optional().describe(
+	// 	'AI-determined severity of the vital sign based on the value and vital type. ' +
+	// 		'Do not take user input directly; infer severity automatically.',
+	// ),
 
 	reasoning: z
 		.string()

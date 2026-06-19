@@ -51,17 +51,19 @@ export const MedicationUpsertSchema = z.object({
 		.describe('Route of administration (e.g., oral, injection)')
 		.optional(),
 
-	startDate: z
-		.string()
-		.regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be in YYYY-MM-DD format')
-		.describe('Start date of medication (YYYY-MM-DD)')
-		.optional(),
+	startDate: z.iso
+		.datetime({ offset: true })
+		.optional()
+		.describe(
+			'Start Date and time of medication. Directly from patient statements. Mandatory',
+		),
 
-	endDate: z
-		.string()
-		.regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be in YYYY-MM-DD format')
-		.describe('End date of medication (YYYY-MM-DD, optional)')
-		.optional(),
+	endDate: z.iso
+		.datetime({ offset: true })
+		.optional()
+		.describe(
+			'End date and time of medication. Directly from patient statements. Optional',
+		),
 
 	prescribedBy: z
 		.string()
@@ -74,8 +76,9 @@ export const MedicationUpsertSchema = z.object({
 		.string()
 		.min(2)
 		.max(100)
-		.describe('Purpose of the medication (e.g., Blood pressure control)')
-		.optional(),
+		.describe(
+			'Short concise description of the purpose of the medication (e.g., Blood pressure control). Mandatory',
+		),
 
 	sideEffects: z
 		.array(z.string().min(1))

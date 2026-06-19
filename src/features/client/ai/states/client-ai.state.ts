@@ -23,6 +23,7 @@ export interface PatientState {
 	name: string;
 	phoneNumber: string;
 	language: string;
+	chronicConditions?: string[];
 }
 export type ClientAIContext = { user: PatientState };
 export interface ClientAICompletionInput {

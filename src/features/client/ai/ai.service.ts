@@ -132,6 +132,20 @@ export class ClientAIService {
 		);
 		const response = output.messages.at(-1)!;
 
+		const text = response.content as string;
+		let suggestions: string[] = [];
+
+		const suggestionsPrefix = '[SUGGESTIONS]: ';
+		const lastIndex = text.lastIndexOf(suggestionsPrefix);
+		if (lastIndex !== -1) {
+			const afterMarker = text.slice(lastIndex + suggestionsPrefix.length);
+			suggestions = afterMarker
+				.split(',')
+				.map((s) => s.trim())
+				.filter(Boolean);
+			response.content = text.slice(0, lastIndex).trim();
+		}
+
 		this.eventEmitter.emit('client-ai.state.persist', {
 			humanMessage: message,
 			response: response,
@@ -148,24 +162,10 @@ export class ClientAIService {
 			};
 		}
 
-		const text = response.content as string;
-		let suggestions: string[] = [];
-
-		const suggestionsPrefix = '[SUGGESTIONS]: ';
-		const lastIndex = text.lastIndexOf(suggestionsPrefix);
-		if (lastIndex !== -1) {
-			const afterMarker = text.slice(lastIndex + suggestionsPrefix.length);
-			suggestions = afterMarker
-				.split(',')
-				.map((s) => s.trim())
-				.filter(Boolean);
-			response.content = text.slice(0, lastIndex).trim();
-		}
-
 		return {
 			outResponse: {
 				_id: response.id,
-				text: response.content,
+				text: response.content as string,
 				createdAt: response.additional_kwargs.timestamp,
 				suggestions,
 			},

@@ -45,6 +45,7 @@ export class DisquisitionerService {
 		]);
 
 		let questions = [...state.questions];
+		const chronicConditions = state.user?.chronicConditions ?? [];
 
 		const prompt = await promptTemplate.invoke({
 			questions: questions.join(', '),
@@ -52,6 +53,7 @@ export class DisquisitionerService {
 				ConversationPrompts[state.nextConversationScope!].questions[0],
 			name: state.user?.name,
 			language: state.user?.language,
+			chronicConditions: chronicConditions.join(', '),
 			messages: state.messages,
 			toolMessages: state.toolMessages,
 			timezone: getUserTimezone(),

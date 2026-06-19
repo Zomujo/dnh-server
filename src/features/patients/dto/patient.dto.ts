@@ -3,6 +3,7 @@ export class PatientPayload {
 	patientId: string;
 	name: string;
 	phoneNumber: string;
+	chronicConditions?: string[];
 }
 
 import {

@@ -38,7 +38,7 @@ export class VitalHistoriesService {
 	) {}
 
 	async loadVitalHistory(dto: LoadVitalHistoryDto, userId: string) {
-		const severity = this.determineSeverity(dto.vitalType, dto.value);
+		// const severity = this.determineSeverity(dto.vitalType, dto.value);
 		const unit =
 			dto.vitalType === 'bloodPressure'
 				? 'mmHg'
@@ -53,7 +53,6 @@ export class VitalHistoriesService {
 			value: dto.value,
 			unit,
 			recordedAt: dto.recordedAt,
-			severity,
 		});
 
 		return vitalHistory._id;
@@ -570,8 +569,8 @@ export class VitalHistoriesService {
 		return { rows: vitalHistories, count: total };
 	}
 
-	async listVitalHistoryLogs(userId: string, page: number, pageSize: number) {
-		const skip = (page - 1) * pageSize;
+	async listVitalHistoryLogs(userId: string, offset: number, limit: number) {
+		const skip = offset;
 
 		const results = await this.vitalHistoryModel.aggregate<
 			Record<string, unknown>
@@ -583,7 +582,7 @@ export class VitalHistoriesService {
 			},
 			{ $sort: { createdAt: -1 } },
 			{ $skip: skip },
-			{ $limit: pageSize },
+			{ $limit: limit },
 			{
 				$addFields: {
 					vitalName: {
