@@ -32,6 +32,14 @@ import {
 	throwError,
 } from '@/common/utils/responses';
 import { GetAdherencePatternDto } from '@/features/adherences/dto';
+import {
+	CreateAppointmentRequestDto,
+	GetAppointmentRequestDto,
+} from '@/features/appointments/appointment-requests/dto';
+import {
+	GetAppointmentDto,
+	GetAppointmentsQueryDto,
+} from '@/features/appointments/dto';
 import { GetChronicConditionDto } from '@/features/chronic-conditions/dto';
 import { GetConcernDto } from '@/features/concerns/dto';
 import {
@@ -262,6 +270,108 @@ export class ClientController {
 				paginated,
 				HttpStatus.OK,
 				'Medications fetched successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['paginated', 'authorize'], {
+		type: GetAppointmentDto,
+		message: 'Appointments fetched successfully',
+	})
+	@Get('appointments')
+	async fetchAppointments(
+		@Query() query: GetAppointmentsQueryDto,
+		@GetUser('sub') userId: string,
+	) {
+		try {
+			const response = await this.clientService.fetchAppointments(
+				query,
+				userId,
+			);
+			const paginated = new PaginatedDataResponseDto(
+				response.rows,
+				query.page,
+				query.pageSize,
+				response.count,
+			);
+			return new ApiSuccessResponseDto(
+				paginated,
+				HttpStatus.OK,
+				'Appointments fetched successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['success', 'authorize'], {
+		type: GetAppointmentDto,
+		message: 'Nearest appointment fetched successfully',
+	})
+	@Get('appointments/nearest')
+	async fetchNearestAppointment(@GetUser('sub') userId: string) {
+		try {
+			const response = await this.clientService.fetchNearestAppointment(userId);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				'Nearest appointment fetched successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['success', 'authorize'], {
+		type: GetAppointmentRequestDto,
+		message: 'Appointment request created successfully',
+	})
+	@Post('appointment-requests')
+	async createAppointmentRequest(
+		@Body() dto: CreateAppointmentRequestDto,
+		@GetUser('sub') userId: string,
+	) {
+		try {
+			const response = await this.clientService.createAppointmentRequest(
+				dto,
+				userId,
+			);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.CREATED,
+				'Appointment request created successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['paginated', 'authorize'], {
+		type: GetAppointmentRequestDto,
+		message: 'Appointment requests fetched successfully',
+	})
+	@Get('appointment-requests')
+	async fetchAppointmentRequests(
+		@Query() query: ChronicCareQueryDto,
+		@GetUser('sub') userId: string,
+	) {
+		try {
+			const response = await this.clientService.fetchAppointmentRequests(
+				query,
+				userId,
+			);
+			const paginated = new PaginatedDataResponseDto(
+				response.rows,
+				query.page,
+				query.pageSize,
+				response.count,
+			);
+			return new ApiSuccessResponseDto(
+				paginated,
+				HttpStatus.OK,
+				'Appointment requests fetched successfully',
 			);
 		} catch (error) {
 			throwError(this.logger, error);

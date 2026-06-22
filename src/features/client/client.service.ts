@@ -34,6 +34,9 @@ import { CacheService } from '@/core/caching/caching.service';
 import { FirebaseService } from '@/core/firebase/firebase.service';
 import { AdherencesService } from '@/features/adherences/adherences.service';
 import { TargetType } from '@/features/adherences/dto/target-type.enum';
+import { AppointmentRequestsService } from '@/features/appointments/appointment-requests/appointment-requests.service';
+import type { CreateAppointmentRequestDto } from '@/features/appointments/appointment-requests/dto';
+import { AppointmentsService } from '@/features/appointments/appointments.service';
 import { ChronicConditionsService } from '@/features/chronic-conditions/chronic-conditions.service';
 import { ConcernsService } from '@/features/concerns/concerns.service';
 import { MedicationSection } from '@/features/medications/dto';
@@ -81,6 +84,8 @@ export class ClientService {
 		private readonly clientAIChatService: ClientAIChatService,
 		private readonly vitalHistoryService: VitalHistoriesService,
 		private readonly dhVectorsService: DhVectorsService,
+		private readonly appointmentsService: AppointmentsService,
+		private readonly appointmentRequestsService: AppointmentRequestsService,
 	) {
 		this.checkpointModel = this.connection.collection('checkpoints');
 		this.checkpointWritesModel =
@@ -339,6 +344,43 @@ export class ClientService {
 		const count = await this.medicationsService.countByUserId(userId);
 
 		return { medications: medications || [], count };
+	}
+
+	async fetchAppointments(query: ChronicCareQueryDto, userId: string) {
+		const response = await this.appointmentsService.findClientAppointments(
+			query,
+			userId,
+		);
+		return response;
+	}
+
+	async fetchNearestAppointment(userId: string) {
+		return this.appointmentsService.findNearestAppointment(userId);
+	}
+
+	async createAppointmentRequest(
+		dto: CreateAppointmentRequestDto,
+		userId: string,
+	) {
+		const patient = await this.patientsService.findPatientByUserId(
+			userId,
+			'_id',
+		);
+		return this.appointmentRequestsService.create({
+			...dto,
+			patient: patient!._id as any,
+		});
+	}
+
+	async fetchAppointmentRequests(query: ChronicCareQueryDto, userId: string) {
+		const patient = await this.patientsService.findPatientByUserId(
+			userId,
+			'_id',
+		);
+		return this.appointmentRequestsService.findAll(
+			query,
+			patient!._id.toString(),
+		);
 	}
 
 	private shouldTakeToday(startDate: Date, frequency: Frequency): boolean {

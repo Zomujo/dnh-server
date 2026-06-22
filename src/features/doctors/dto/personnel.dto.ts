@@ -1,6 +1,11 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+	ApiProperty,
+	ApiPropertyOptional,
+	ApiResponseProperty,
+} from '@nestjs/swagger';
 import { IsEmail, IsOptional, IsString } from 'class-validator';
 import { GenericResponseDto } from '@/common/dto';
+import { FacilityDto } from '@/features/facilities/dto';
 
 export class PersonnelDto extends GenericResponseDto {
 	@ApiProperty({
@@ -33,4 +38,9 @@ export class PersonnelDto extends GenericResponseDto {
 	@IsOptional()
 	@IsEmail()
 	email: string;
+
+	@ApiResponseProperty({
+		type: () => FacilityDto,
+	})
+	facility?: FacilityDto;
 }

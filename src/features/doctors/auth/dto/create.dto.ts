@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString } from 'class-validator';
+import { Expose } from 'class-transformer';
+import {
+	IsEmail,
+	IsEnum,
+	IsMongoId,
+	IsOptional,
+	IsString,
+} from 'class-validator';
 
 export enum PersonnelRoles {
 	CLINICIAN = 'clinician',
@@ -25,7 +32,13 @@ export class CreatePersonnelDto {
 	@IsString()
 	password: string;
 
-	role: PersonnelRoles;
+	@ApiPropertyOptional({
+		example: 'clinician',
+		description: 'Personnel Role',
+	})
+	@IsOptional()
+	@IsEnum(PersonnelRoles)
+	role?: PersonnelRoles;
 
 	provider?: PersonnelProviders;
 
@@ -38,4 +51,15 @@ export class CreatePersonnelDto {
 	@IsOptional()
 	@IsEmail()
 	email?: string;
+
+	@ApiPropertyOptional({
+		description: 'Facility ID (MongoDB ObjectId) this personnel belongs to',
+		example: '664b7f8e2c2a1e4b8f1d2c3a4',
+		name: 'facilityId',
+	})
+	@Expose({ name: 'facilityId' })
+	@IsOptional()
+	@IsString()
+	@IsMongoId()
+	facility?: string;
 }

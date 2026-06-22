@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AdherencesModule } from '../adherences/adherences.module';
+import { AppointmentsModule } from '../appointments/appointments.module';
 import { ChronicConditionsModule } from '../chronic-conditions/chronic-conditions.module';
 import { ConcernsModule } from '../concerns/concerns.module';
 import { DhVectorsModule } from '../dh-vectors/dh-vectors.module';
@@ -22,6 +23,7 @@ import { ClientService } from './client.service';
 		ConcernsModule,
 		AdherencesModule,
 		VitalHistoriesModule,
+		AppointmentsModule,
 	],
 })
 export class ClientModule {}

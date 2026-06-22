@@ -1,8 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
+import { ObjectId } from 'mongodb';
 import { BaseEntity } from '@/common/entities';
 import { generateCode } from '@/common/utils/helpers/code-generator.helper';
 import { deleteByPattern } from '@/core/caching/utils';
+import { Facility } from '@/features/facilities/entities/facility.entity';
 
 @Schema({
 	timestamps: true,
@@ -39,6 +41,13 @@ export class Personnel extends BaseEntity {
 		description: 'Unique referral code generated for this personnel',
 	})
 	referralCode: string;
+
+	@Prop({
+		type: ObjectId,
+		ref: 'Facility',
+		description: 'Reference to the facility this personnel belongs to',
+	})
+	facility: Facility;
 }
 
 export const PersonnelSchema = SchemaFactory.createForClass(Personnel);

@@ -26,7 +26,7 @@ export class ChronicCareAuthService {
 
 	async create(dto: CreatePersonnelDto) {
 		dto.role = dto.role ?? PersonnelRoles.PHARMACY;
-		const personnel = await this.personnelModel.create(dto);
+		const personnel = await this.personnelModel.create(dto as any);
 		return personnel._id;
 	}
 
