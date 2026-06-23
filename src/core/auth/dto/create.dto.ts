@@ -43,7 +43,7 @@ export class CreateAuthDto {
 export class OnboardDto {
 	@ApiProperty({ example: 'GHA-123456789-0' })
 	@IsString()
-	@IsNotEmpty()
+	@IsOptional()
 	ghanaCardNumber: string;
 
 	@ApiProperty({ example: 'John' })
