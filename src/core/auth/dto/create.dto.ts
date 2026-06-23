@@ -1,11 +1,11 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
 	IsArray,
+	IsDate,
 	IsEmail,
 	IsEnum,
 	IsNotEmpty,
-	IsNumber,
-	IsOptional,
 	IsString,
 	MinLength,
 } from 'class-validator';
@@ -41,10 +41,10 @@ export class CreateAuthDto {
 }
 
 export class OnboardDto {
-	@ApiPropertyOptional({ example: 'GHA-123456789-0' })
-	@IsString()
-	@IsOptional()
-	ghanaCardNumber: string;
+	// @ApiPropertyOptional({ example: 'GHA-123456789-0' })
+	// @IsString()
+	// @IsOptional()
+	// ghanaCardNumber: string;
 
 	@ApiProperty({ example: 'John' })
 	@IsString()
@@ -64,15 +64,24 @@ export class OnboardDto {
 	@IsEnum(GenderEnum)
 	gender: GenderEnum;
 
-	@ApiPropertyOptional({ example: 'NHIS-123456789' })
-	@IsString()
-	@IsOptional()
-	nhisNumber?: string;
+	// @ApiPropertyOptional({ example: 'NHIS-123456789' })
+	// @IsString()
+	// @IsOptional()
+	// nhisNumber?: string;
 
-	@ApiProperty({ example: 1990 })
-	@IsNumber()
+	@ApiProperty({
+		description: 'Date of birth of the patient in MM-DD-YYYY format',
+		example: new Date(),
+	})
 	@IsNotEmpty()
-	yearOfBirth: number;
+	@IsDate()
+	@Type(() => Date)
+	dateOfBirth: Date;
+
+	// @ApiProperty({ example: 1990 })
+	// @IsNumber()
+	// @IsNotEmpty()
+	// yearOfBirth: number;
 
 	@ApiProperty({ example: ['hypertension', 'diabetes'] })
 	@IsArray()

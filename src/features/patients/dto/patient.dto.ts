@@ -13,6 +13,7 @@ import {
 } from '@nestjs/swagger';
 import {
 	IsArray,
+	IsDateString,
 	IsEnum,
 	IsNotEmpty,
 	IsNumber,
@@ -77,6 +78,14 @@ export class PatientDto {
 	@IsNumber()
 	@Min(1900)
 	yearOfBirth: number;
+
+	@ApiProperty({
+		description: 'Date of birth of the patient in MM/DD/YYYY format',
+		example: '01/01/1963',
+	})
+	@IsDateString()
+	@IsNotEmpty()
+	dateOfBirth: Date;
 
 	@ApiResponseProperty({
 		example: 35,

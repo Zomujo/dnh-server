@@ -77,6 +77,9 @@ export class Patient extends BaseDH {
 	})
 	phoneNumber: string;
 
+	@Prop({ description: 'Date of birth of the patient in MM/DD/YYYY format' })
+	dateOfBirth: Date;
+
 	@Prop({ description: 'Year of birth of the patient in YYYY format' })
 	yearOfBirth: number;
 

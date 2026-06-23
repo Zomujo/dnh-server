@@ -50,12 +50,13 @@ export class AuthService {
 		const patientId = await this.patientsService.create({
 			userId: userId,
 			name: `${dto.firstname} ${dto.lastname}`,
-			yearOfBirth: dto.yearOfBirth,
 			gender: dto.gender,
-			ghanaCardNumber: dto.ghanaCardNumber,
-			nhisNumber: dto.nhisNumber,
+			dateOfBirth: dto.dateOfBirth,
 			chronicConditions: dto.chronicConditions,
 		});
+		// yearOfBirth: dto.yearOfBirth,
+		// ghanaCardNumber: dto.ghanaCardNumber,
+		// nhisNumber: dto.nhisNumber,
 
 		return patientId;
 	}
