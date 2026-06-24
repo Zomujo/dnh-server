@@ -6,10 +6,12 @@ import { subHours } from 'date-fns';
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { generateFilter } from '@/common/factory';
+import { IUserPayload } from '@/core/firebase/interface/user.interface';
 import { DhVectorsService } from '../dh-vectors/dh-vectors.service';
 import { DHDocumentType } from '../dh-vectors/dto';
 import {
 	CreateNotificationDto,
+	CreatePushDto,
 	FilterNotificationsDto,
 	Frequency,
 	NotificationFilterDto,
@@ -18,6 +20,7 @@ import {
 	UpsertNotificationDto,
 } from './dto';
 import { AugurNotification } from './entities/notification.entity';
+import { PushService } from './push/push.service';
 
 @Injectable()
 export class NotificationsService {
@@ -29,7 +32,16 @@ export class NotificationsService {
 		@InjectQueue(AugurNotification.name)
 		private readonly notificationQueue: Queue,
 		private readonly dhVectorsService: DhVectorsService,
+		private readonly pushService: PushService,
 	) {}
+
+	async addFcmToken(dto: CreatePushDto, user: IUserPayload) {
+		await this.pushService.addFcmToken(dto, user);
+	}
+
+	async removeFcmToken(dto: CreatePushDto, userId: string) {
+		await this.pushService.removeFcmToken(dto, userId);
+	}
 
 	async create(dto: CreateNotificationDto) {
 		const jobId = crypto.randomUUID();

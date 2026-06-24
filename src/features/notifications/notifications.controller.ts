@@ -3,6 +3,7 @@ import {
 	Controller,
 	Delete,
 	Get,
+	HttpCode,
 	HttpStatus,
 	Logger,
 	Param,
@@ -11,7 +12,7 @@ import {
 	Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { CustomApiResponse } from '@/common/decorators';
+import { CustomApiResponse, GetUser } from '@/common/decorators';
 import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import {
 	ApiSuccessResponseDto,
@@ -19,8 +20,10 @@ import {
 	PaginatedDataResponseDto,
 	throwError,
 } from '@/common/utils/responses';
+import { type IUserPayload } from '@/core/firebase/interface/user.interface';
 import {
 	CreateNotificationDto,
+	CreatePushDto,
 	FilterNotificationsDto,
 	GetNotificationDto,
 	GetNotificationsDto,
@@ -28,12 +31,48 @@ import {
 } from './dto';
 import { NotificationsService } from './notifications.service';
 
-@ApiTags('Chronic Care-Doctors-Notifications')
-@Controller('chronic-care/doctors/notifications')
+@ApiTags('Chronic Care Notifications')
+@Controller('chronic-care/notifications')
 export class NotificationsController {
 	private logger = new Logger(NotificationsController.name);
 
 	constructor(private readonly notificationsService: NotificationsService) {}
+
+	@CustomApiResponse(['successNull', 'authorize'], {
+		message: 'Client FCM token added succesffully',
+	})
+	@Post('fcm-tokens')
+	@HttpCode(HttpStatus.OK)
+	async addClientFcm(
+		@Body() createPushDto: CreatePushDto,
+		@GetUser() user: IUserPayload,
+	) {
+		try {
+			await this.notificationsService.addFcmToken(createPushDto, user);
+			return new ApiSuccessResponseNoData(
+				HttpStatus.OK,
+				'Client FCM token added succesffully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['successNull', 'authorize'], {
+		message: 'FCM token removed succesffully',
+	})
+	@Delete('fcm-tokens')
+	async removeFcm(@Body() dto: CreatePushDto, @GetUser('sub') userId: string) {
+		try {
+			await this.notificationsService.removeFcmToken(dto, userId);
+			return new ApiSuccessResponseNoData(
+				HttpStatus.OK,
+				'FCM token removed succesffully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
 
 	@CustomApiResponse(['created'], {
 		message: 'Notification created successfully',

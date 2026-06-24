@@ -178,9 +178,9 @@ export class PushService {
 		return message;
 	}
 
-	async removeFcmToken(dto: CreatePushDto) {
+	async removeFcmToken(dto: CreatePushDto, userId: string) {
 		const userToken = await this.userTokenModel.findOneAndDelete({
-			fcmToken: dto.fcmToken,
+			$or: [{ userId: userId }, { fcmToken: dto.fcmToken }],
 		});
 		if (!userToken) {
 			throw new NotFoundException('FCM token not found');
