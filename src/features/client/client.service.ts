@@ -22,6 +22,7 @@ import {
 	set,
 	startOfDay,
 	startOfMonth,
+	subHours,
 } from 'date-fns';
 import * as fs from 'fs/promises';
 import { toHeaderCase } from 'js-convert-case';
@@ -477,17 +478,30 @@ export class ClientService {
 	async confirmMedication(medicationId: string, userId: string) {
 		const medication = await this.medicationsService.findById(medicationId);
 
-		const toBeTakenAt = this.resolveToBeTakenAt(medication.startDate);
+		if (!medication.frequency || !medication.startDate) {
+			throw new NotFoundException('Medication has no frequency or start date');
+		}
 
-		const todayStart = startOfDay(toBeTakenAt);
-		const todayEnd = endOfDay(toBeTakenAt);
+		const baseTime = this.resolveToBeTakenAt(medication.startDate);
+		const repeatEvery = medication.frequency?.repeatEvery || 1;
+		const doses = this.getDailyDoseTimes(baseTime, repeatEvery);
+		const currentSection = this.getSection(new Date());
+
+		const dose = doses.find((d) => d.section === currentSection);
+		if (!dose) {
+			throw new NotFoundException('No dose scheduled for this time of day');
+		}
+
+		const doseTime = dose.time;
+		const windowStart = subHours(doseTime, 1);
+		const windowEnd = addHours(doseTime, 1);
 
 		const logId = await this.adherencesService.upsertAdherenceLog(
 			{
 				userId,
 				targetType: TargetType.MEDICATION,
 				targetName: medication.name,
-				takenAt: { $gte: todayStart, $lte: todayEnd },
+				takenAt: { $gte: windowStart, $lte: windowEnd },
 			},
 			{
 				userId,
@@ -495,7 +509,7 @@ export class ClientService {
 				targetType: TargetType.MEDICATION,
 				targetName: medication.name,
 				taken: true,
-				takenAt: toBeTakenAt,
+				takenAt: doseTime,
 				status: 'taken',
 			} as any,
 		);
