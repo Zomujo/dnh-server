@@ -2,6 +2,7 @@ import { OpenAIWhisperAudio } from '@langchain/community/document_loaders/fs/ope
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import {
+	addHours,
 	differenceInCalendarMonths,
 	differenceInCalendarYears,
 	differenceInDays,
@@ -450,57 +451,27 @@ export class ClientService {
 	private getSection(date: Date): MedicationSection {
 		const hour = getHours(date);
 		if (hour >= 5 && hour < 12) return MedicationSection.MORNING;
-		if (hour >= 12 && hour < 17) return MedicationSection.AFTERNOON;
+		if (hour >= 12 && hour < 18) return MedicationSection.AFTERNOON;
 		return MedicationSection.EVENING;
 	}
 
-	private getDailySections(
+	private getDailyDoseTimes(
 		baseTime: Date,
 		repeatEvery: number,
-	): MedicationSection[] {
+	): { time: Date; section: MedicationSection }[] {
 		if (repeatEvery <= 1) {
-			return [this.getSection(baseTime)];
+			return [{ time: baseTime, section: this.getSection(baseTime) }];
 		}
-		if (repeatEvery === 2) {
-			return [MedicationSection.MORNING, MedicationSection.EVENING];
-		}
-		return [
-			MedicationSection.MORNING,
-			MedicationSection.AFTERNOON,
-			MedicationSection.EVENING,
-		];
-	}
 
-	private adjustToSectionTime(
-		baseTime: Date,
-		section: MedicationSection,
-	): Date {
-		if (this.getSection(baseTime) === section) return baseTime;
+		const intervalHours = 24 / repeatEvery;
+		const doses: { time: Date; section: MedicationSection }[] = [];
 
-		if (section === MedicationSection.MORNING) {
-			const h = getHours(baseTime);
-			if (h >= 5 && h < 12) return baseTime;
-			return set(baseTime, {
-				hours: 8,
-				minutes: 0,
-				seconds: 0,
-				milliseconds: 0,
-			});
+		for (let i = 0; i < repeatEvery; i++) {
+			const doseTime = addHours(baseTime, i * intervalHours);
+			doses.push({ time: doseTime, section: this.getSection(doseTime) });
 		}
-		if (section === MedicationSection.AFTERNOON) {
-			return set(baseTime, {
-				hours: 12,
-				minutes: 0,
-				seconds: 0,
-				milliseconds: 0,
-			});
-		}
-		return set(baseTime, {
-			hours: 20,
-			minutes: 0,
-			seconds: 0,
-			milliseconds: 0,
-		});
+
+		return doses;
 	}
 
 	async confirmMedication(medicationId: string, userId: string) {
@@ -546,11 +517,12 @@ export class ClientService {
 
 			const baseTime = this.resolveToBeTakenAt(med.startDate);
 			const repeatEvery = med.frequency?.repeatEvery || 1;
-			const sections = this.getDailySections(baseTime, repeatEvery);
+			const doses = this.getDailyDoseTimes(baseTime, repeatEvery);
 
-			for (const s of sections) {
-				if (s === MedicationSection.MORNING) counts.morning++;
-				else if (s === MedicationSection.AFTERNOON) counts.afternoon++;
+			for (const dose of doses) {
+				if (dose.section === MedicationSection.MORNING) counts.morning++;
+				else if (dose.section === MedicationSection.AFTERNOON)
+					counts.afternoon++;
 				else counts.evening++;
 			}
 		}
@@ -572,22 +544,21 @@ export class ClientService {
 
 		for (const med of medications) {
 			if (!med.frequency || !med.startDate) continue;
-
 			if (!this.shouldTakeToday(med.startDate, med.frequency)) continue;
 
 			const medicationBaseTime = this.resolveToBeTakenAt(med.startDate);
 			const repeatEvery = med.frequency?.repeatEvery || 1;
-			const sections = this.getDailySections(medicationBaseTime, repeatEvery);
-			if (!sections.includes(section)) continue;
+			const doses = this.getDailyDoseTimes(medicationBaseTime, repeatEvery);
 
-			const toBeTakenAt = this.adjustToSectionTime(medicationBaseTime, section);
+			const dose = doses.find((d) => d.section === section);
+			if (!dose) continue;
 
 			result.push({
 				id: med._id.toString(),
 				name: med.name,
 				dosage: med.dosage,
 				purpose: med.purpose,
-				toBeTakenAt,
+				toBeTakenAt: dose.time,
 				taken: false,
 			});
 		}
@@ -606,14 +577,22 @@ export class ClientService {
 				targetName: { $in: medNames },
 				takenAt: { $gte: todayStart, $lte: todayEnd },
 			},
-			projection: 'targetName taken',
+			projection: 'targetName taken takenAt',
 			limit: 50,
 		} as any);
 
 		const takenMap = new Map<string, boolean>();
-		for (const log of logs) {
-			if (log.taken) {
-				takenMap.set(log.targetName as string, true);
+		for (const item of result) {
+			const matchingLog = logs.find(
+				(log) =>
+					log.targetName === item.name &&
+					log.taken &&
+					Math.abs(
+						new Date(log.takenAt).getHours() - item.toBeTakenAt.getHours(),
+					) <= 1,
+			);
+			if (matchingLog) {
+				takenMap.set(item.name, true);
 			}
 		}
 
