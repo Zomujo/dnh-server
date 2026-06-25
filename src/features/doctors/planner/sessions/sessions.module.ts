@@ -8,7 +8,7 @@ import {
 	PlannerSession,
 	PlannerSessionSchema,
 } from './entities/session.entity';
-import { SessionsController } from './sessions.controller';
+// import { SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
 
 @Module({
@@ -18,7 +18,7 @@ import { SessionsService } from './sessions.service';
 			{ name: PlannerChat.name, schema: PlannerChatSchema },
 		]),
 	],
-	controllers: [SessionsController],
+	// controllers: [SessionsController],
 	providers: [SessionsService],
 	exports: [SessionsService],
 })

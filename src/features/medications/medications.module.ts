@@ -3,7 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AdherencesModule } from '@/features/adherences/adherences.module';
 import { DhVectorsModule } from '../dh-vectors/dh-vectors.module';
 import { Medication, MedicationSchema } from './entities/medication.entity';
-import { MedicationsController } from './medications.controller';
+// import { MedicationsController } from './medications.controller';
 import { MedicationsService } from './medications.service';
 
 @Module({
@@ -14,7 +14,7 @@ import { MedicationsService } from './medications.service';
 		DhVectorsModule,
 		AdherencesModule,
 	],
-	controllers: [MedicationsController],
+	// controllers: [MedicationsController],
 	providers: [MedicationsService],
 	exports: [MedicationsService],
 })

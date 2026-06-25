@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { QdrantClient, QdrantClientParams } from '@qdrant/js-client-rest';
-import { DhVectorsController } from './dh-vectors.controller';
+// import { DhVectorsController } from './dh-vectors.controller';
 import { DhVectorsService } from './dh-vectors.service';
 
 @Module({
-	controllers: [DhVectorsController],
+	// controllers: [DhVectorsController],
 	providers: [
 		{
 			provide: 'QDRANT_CLIENT',
