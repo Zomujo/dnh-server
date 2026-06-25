@@ -747,9 +747,9 @@ export class VitalHistoriesService {
 			recordedAt: timestamp,
 		};
 
-		if (query.vitalType === 'bloodSugar') {
-			matchRecord.vitalSubType = 'fastingBloodSugar';
-		}
+		// if (query.vitalType === 'bloodSugar') {
+		// 	matchRecord.vitalSubType = 'fastingBloodSugar';
+		// }
 
 		const vitalTrend = await this.vitalHistoryModel.aggregate([
 			{
