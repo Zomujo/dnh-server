@@ -12,6 +12,10 @@ export class ClientAIChatService {
 		private readonly firebaseService: FirebaseService,
 	) {}
 
+	async countChatsForPatient(userId: string) {
+		return this.clientAIChatModel.countDocuments({ userId });
+	}
+
 	async findByLocalChatId(localChatId: string) {
 		return this.clientAIChatModel.findOne({ localChatId });
 	}

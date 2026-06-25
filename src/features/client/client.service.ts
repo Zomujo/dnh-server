@@ -100,10 +100,12 @@ export class ClientService {
 		language: SupportedLanguages,
 		chatType: ChatTypes = 'text',
 	) {
-		const patientExists =
-			await this.patientsService.countPatientsByUserId(userId);
+		const patientChatsExists =
+			await this.clientAIChatService.countChatsForPatient(userId);
+		// const patientExists =
+		// 	await this.patientsService.countPatientsByUserId(userId);
 
-		if (!dto.message && patientExists) {
+		if (!dto.message && patientChatsExists) {
 			return { outResponse: null };
 		}
 

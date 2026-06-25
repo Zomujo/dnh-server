@@ -6,7 +6,7 @@ import {
 	VitalHistory,
 	VitalHistorySchema,
 } from './entities/vital-history.entity';
-import { VitalHistoriesController } from './vital-histories.controller';
+// import { VitalHistoriesController } from './vital-histories.controller';
 import { VitalHistoriesService } from './vital-histories.service';
 
 @Module({
@@ -17,7 +17,7 @@ import { VitalHistoriesService } from './vital-histories.service';
 		DhVectorsModule,
 		PatientsModule,
 	],
-	controllers: [VitalHistoriesController],
+	// controllers: [VitalHistoriesController],
 	providers: [VitalHistoriesService],
 	exports: [VitalHistoriesService],
 })
