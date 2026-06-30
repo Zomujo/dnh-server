@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
+import { Patient } from '../../features/patients/entities/patient.entity';
 import { DhVectorsService } from '../dh-vectors/dh-vectors.service';
 import { DHDocumentType } from '../dh-vectors/dto';
 import {
@@ -17,6 +18,8 @@ export class ChronicConditionsService {
 	constructor(
 		@InjectModel(ChronicCondition.name)
 		private chronicConditionModel: Model<ChronicCondition>,
+		@InjectModel(Patient.name)
+		private patientModel: Model<Patient>,
 		private readonly dhVectorsService: DhVectorsService,
 	) {}
 
@@ -58,6 +61,13 @@ export class ChronicConditionsService {
 			},
 			{ returnDocument: 'after', upsert: true },
 		);
+
+		await this.patientModel.findByIdAndUpdate(filters.patient, {
+			$addToSet: {
+				chronicConditions: chronicCondition.conditionName.toLowerCase(),
+			},
+		});
+
 		const summary = this.generateChronicConditionSummary(chronicCondition);
 
 		await this.dhVectorsService.create({

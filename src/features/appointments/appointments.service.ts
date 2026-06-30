@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+	BadRequestException,
+	Injectable,
+	NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { generateFilter } from '@/common/factory';
@@ -6,8 +10,11 @@ import { PatientsService } from '@/features/patients/patients.service';
 import {
 	AppointmentFilter,
 	AppointmentStatus,
+	CancelAppointmentDto,
 	CreateAppointmentDto,
+	CreatePatientAppointmentDto,
 	GetAppointmentsQueryDto,
+	RescheduleAppointmentDto,
 	UpdateAppointmentDto,
 } from './dto';
 import { Appointment } from './entities/appointment.entity';
@@ -34,6 +41,25 @@ export class AppointmentsService {
 		return this.appointmentModel.create(payload);
 	}
 
+	async createPatientAppointment(
+		dto: CreatePatientAppointmentDto,
+		patientId: string,
+		personnelId: string,
+	) {
+		const patient = await this.patientsService.findPatientById(patientId);
+		if (!patient) throw new NotFoundException('Patient not found');
+
+		const appointment = await this.appointmentModel.create({
+			...dto,
+			status: AppointmentStatus.SCHEDULED,
+			hostPersonnel: new Types.ObjectId(personnelId),
+			userId: patient.userId,
+			patient: new Types.ObjectId(patientId),
+		});
+
+		return appointment._id;
+	}
+
 	private applyFilter(query: GetAppointmentsQueryDto, userId?: string) {
 		const now = new Date();
 		const filter: Record<string, any> = {};
@@ -43,6 +69,10 @@ export class AppointmentsService {
 			filter.appointmentDate = { $gte: now };
 		} else if (query.filter === AppointmentFilter.PAST) {
 			filter.appointmentDate = { $lt: now };
+		}
+
+		if (query.status) {
+			filter.status = query.status;
 		}
 
 		const sort: Record<string, 1 | -1> =
@@ -112,6 +142,87 @@ export class AppointmentsService {
 
 	update(id: number, dto: UpdateAppointmentDto) {
 		return `This action updates a #${id} appointment`;
+	}
+
+	async cancelAppointment(
+		id: string,
+		personnelId: string,
+		dto: CancelAppointmentDto,
+	) {
+		const appointment = await this.appointmentModel.findById(id);
+
+		if (!appointment) {
+			throw new NotFoundException('Appointment not found');
+		}
+
+		if (appointment.status === AppointmentStatus.COMPLETED) {
+			throw new BadRequestException('Cannot cancel a completed appointment');
+		}
+
+		if (appointment.status === AppointmentStatus.CANCELLED) {
+			throw new BadRequestException(
+				'Cannot cancel an already cancelled appointment',
+			);
+		}
+
+		appointment.status = AppointmentStatus.CANCELLED;
+		appointment.cancelledAt = new Date();
+		appointment.cancelledBy = new Types.ObjectId(personnelId) as any;
+		appointment.reason = dto.reason;
+
+		return appointment.save();
+	}
+
+	async rescheduleAppointment(
+		id: string,
+		personnelId: string,
+		dto: RescheduleAppointmentDto,
+	) {
+		const appointment = await this.appointmentModel.findById(id);
+
+		if (!appointment) {
+			throw new NotFoundException('Appointment not found');
+		}
+
+		if (
+			appointment.status !== AppointmentStatus.SCHEDULED &&
+			appointment.status !== AppointmentStatus.RESCHEDULED
+		) {
+			throw new BadRequestException(
+				'Only scheduled or rescheduled appointments can be rescheduled',
+			);
+		}
+
+		appointment.status = AppointmentStatus.RESCHEDULED;
+		appointment.rescheduledAt = new Date();
+		appointment.rescheduledBy = new Types.ObjectId(personnelId) as any;
+		appointment.reason = dto.reason;
+		appointment.rescheduledCount = (appointment.rescheduledCount ?? 0) + 1;
+
+		return appointment.save();
+	}
+
+	async completeAppointment(id: string, personnelId: string) {
+		const appointment = await this.appointmentModel.findById(id);
+
+		if (!appointment) {
+			throw new NotFoundException('Appointment not found');
+		}
+
+		if (
+			appointment.status !== AppointmentStatus.SCHEDULED &&
+			appointment.status !== AppointmentStatus.RESCHEDULED
+		) {
+			throw new BadRequestException(
+				'Only scheduled or rescheduled appointments can be completed',
+			);
+		}
+
+		appointment.status = AppointmentStatus.COMPLETED;
+		appointment.hostPersonnel = new Types.ObjectId(personnelId) as any;
+		appointment.completedAt = new Date();
+
+		return appointment.save();
 	}
 
 	remove(id: number) {

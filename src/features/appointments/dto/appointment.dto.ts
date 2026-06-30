@@ -110,4 +110,18 @@ export class AppointmentDto extends GenericResponseDto {
 		type: () => PersonnelDto,
 	})
 	cancelledBy?: PersonnelDto;
+
+	@ApiPropertyOptional({
+		description: 'Date and time when the appointment was completed',
+		example: '2026-06-22T10:30:00.000Z',
+	})
+	@IsDateString()
+	@IsOptional()
+	completedAt?: string;
+
+	@ApiPropertyOptional({
+		description: 'Number of times this appointment has been rescheduled',
+		example: 0,
+	})
+	rescheduledCount?: number;
 }

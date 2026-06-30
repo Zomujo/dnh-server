@@ -83,7 +83,7 @@ export class VitalHistory extends BaseDH {
 		type: String,
 		enum: VitalSeverityEnum,
 		description:
-			'AI-determined severity of the vital sign based on the value and vital type',
+			'Determined severity of the vital sign based on the value and vital type',
 	})
 	severity: VitalSeverityEnum;
 

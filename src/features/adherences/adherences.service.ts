@@ -10,6 +10,8 @@ import {
 import { Model } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
+import { AdherenceStatus } from '../../features/patients/dto';
+import { Patient } from '../../features/patients/entities/patient.entity';
 import {
 	AdherenceLogQueryFilter,
 	AdherencePatternQueryFilter,
@@ -26,6 +28,8 @@ export class AdherencesService {
 		private adherenceLogModel: Model<AdherenceLog>,
 		@InjectModel(AdherencePattern.name)
 		private adherencePatternModel: Model<AdherencePattern>,
+		@InjectModel(Patient.name)
+		private patientModel: Model<Patient>,
 	) {}
 
 	create(_createAdherenceDto: CreateAdherenceDto) {
@@ -56,7 +60,46 @@ export class AdherencesService {
 		// 	summary,
 		// });
 
+		const adherenceRate = await this.estimateAdherenceRate(filters.userId);
+		const adherenceStatus = this.determineAdherenceStatus(adherenceRate);
+
+		const patientId = (dto as any).patient;
+		if (patientId) {
+			await this.patientModel.findByIdAndUpdate(patientId, {
+				$set: { adherenceRate, adherenceStatus, lastCheckInDate: new Date() },
+			});
+		}
+
 		return adherenceLog._id;
+	}
+
+	private async estimateAdherenceRate(userId: string): Promise<number> {
+		const thirtyDaysAgo = subDays(new Date(), 30);
+
+		const [result] = await this.adherenceLogModel.aggregate([
+			{ $match: { userId, takenAt: { $gte: thirtyDaysAgo } } },
+			{
+				$group: {
+					_id: { $dateToString: { format: '%Y-%m-%d', date: '$takenAt' } },
+					taken: { $max: '$taken' },
+				},
+			},
+			{
+				$group: {
+					_id: null,
+					adherentDays: { $sum: { $cond: ['$taken', 1, 0] } },
+				},
+			},
+		]);
+
+		const adherentDays = result?.adherentDays ?? 0;
+		return parseFloat(((adherentDays / 30) * 100).toFixed(2));
+	}
+
+	private determineAdherenceStatus(rate: number): AdherenceStatus {
+		if (rate >= 85) return AdherenceStatus.STABLE;
+		if (rate >= 70) return AdherenceStatus.SILENT;
+		return AdherenceStatus.CRITICAL;
 	}
 
 	private generateAdherenceSummary(log: Partial<AdherenceLog>): string {

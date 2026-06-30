@@ -1,12 +1,6 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Expose } from 'class-transformer';
-import {
-	IsEmail,
-	IsEnum,
-	IsMongoId,
-	IsOptional,
-	IsString,
-} from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Expose, Transform } from 'class-transformer';
+import { IsMongoId, IsOptional, IsString } from 'class-validator';
 
 export enum PersonnelRoles {
 	CLINICIAN = 'clinician',
@@ -18,39 +12,44 @@ export enum PersonnelProviders {
 }
 
 export class CreatePersonnelDto {
-	@ApiProperty({
-		example: 'Kennedy Pharmacy',
-		description: 'Unique username for the pharmacy',
-	})
-	@IsString()
-	userName: string;
-
-	@ApiProperty({
-		example: 'StrongPassword123!',
-		description: 'Personnel password',
-	})
-	@IsString()
-	password: string;
-
-	@ApiPropertyOptional({
-		example: 'clinician',
-		description: 'Personnel Role',
-	})
-	@IsOptional()
-	@IsEnum(PersonnelRoles)
-	role?: PersonnelRoles;
-
+	email?: string;
 	provider?: PersonnelProviders;
 
 	providerUserId?: string;
 
 	@ApiPropertyOptional({
-		example: 'email@example.com',
-		description: 'Personnel email',
+		example: 'John',
+		description: 'Personnel first name',
 	})
 	@IsOptional()
-	@IsEmail()
-	email?: string;
+	@IsString()
+	@Transform(({ value }) => value?.trim())
+	firstname?: string;
+
+	@ApiPropertyOptional({
+		example: 'Doe',
+		description: 'Personnel last name',
+	})
+	@IsOptional()
+	@IsString()
+	@Transform(({ value }) => value?.trim())
+	lastname?: string;
+
+	@ApiPropertyOptional({
+		example: '+233501234567',
+		description: 'Personnel phone number',
+	})
+	@IsOptional()
+	@IsString()
+	phoneNumber?: string;
+
+	@ApiPropertyOptional({
+		example: 'PID-001234',
+		description: 'Personnel ID number',
+	})
+	@IsOptional()
+	@IsString()
+	personnelIdNumber?: string;
 
 	@ApiPropertyOptional({
 		description: 'Facility ID (MongoDB ObjectId) this personnel belongs to',

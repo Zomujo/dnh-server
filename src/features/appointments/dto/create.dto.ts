@@ -32,3 +32,9 @@ export class CreateAppointmentDto extends PickType(AppointmentDto, [
 	@Expose({ name: 'hostPersonnelId' })
 	hostPersonnel?: string;
 }
+
+export class CreatePatientAppointmentDto extends PickType(AppointmentDto, [
+	'title',
+	'description',
+	'appointmentDate',
+] as const) {}

@@ -82,6 +82,9 @@ export class VitalHistoryTrendsResponseDto {
 
 	@ApiResponseProperty({ example: 50 })
 	latestValue: number | null;
+
+	@ApiResponseProperty({ example: 'Patient reported mild headache' })
+	note: string | null;
 }
 
 export class BpTrendsResponseDto extends PickType(
@@ -100,6 +103,9 @@ export class BpTrendsResponseDto extends PickType(
 
 	@ApiResponseProperty({ example: '120/80' })
 	latestValue: string | null;
+
+	@ApiResponseProperty({ example: 'Patient reported mild headache' })
+	note: string | null;
 }
 
 export class FilterVitalHistoriesDto extends PickType(PaginationRequestDto, [

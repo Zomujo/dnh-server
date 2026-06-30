@@ -45,6 +45,7 @@ AppModule
 - **Path alias**: `@/` → `src/`. Import via barrel (`index.ts`) files.
 - **Module ownership**: Each feature module owns its Mongoose schemas. Import the module, not another module's model.
 - **Error handling**: Controllers use `throwError(this.logger, error)` from `@/common/utils/responses`.
+- **Controller pattern**: Controllers must inject exactly one service. Cross-module logic is delegated through the owning service, never by injecting multiple services into a controller.
 
 ## Testing
 

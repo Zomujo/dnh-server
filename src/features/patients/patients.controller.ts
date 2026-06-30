@@ -16,22 +16,25 @@ import {
 	PaginatedDataResponseDto,
 	throwError,
 } from '@/common/utils/responses';
+import { GetVitalHistoryDto } from '@/features/vital-histories/dto';
 import {
 	FilterPatientsDto,
 	FilterPatientsNoPaginateDto,
 	GetPatientDto,
 	GetPatientNoPaginateDto,
+	GetPersonnelPatientDto,
+	GetPersonnelPatientsDto,
 } from './dto';
 import { PatientsService } from './patients.service';
 
-@ApiTags('Chronic Care-Doctors-Patients')
-@Controller('chronic-care/doctors/patients')
+@ApiTags('Dnh Personnel-Patients')
+@Controller('personnel/patients')
 export class PatientsController {
 	private logger = new Logger(PatientsController.name);
 	constructor(private readonly patientsService: PatientsService) {}
 
 	@CustomApiResponse(['paginated'], {
-		type: GetPatientDto,
+		type: GetPersonnelPatientsDto,
 		message: 'Patients fetched successfully',
 	})
 	@Get()
@@ -102,7 +105,27 @@ export class PatientsController {
 	}
 
 	@CustomApiResponse(['success'], {
-		type: GetPatientDto,
+		type: GetVitalHistoryDto,
+		isArray: true,
+		message: 'Vital histories fetched successfully',
+	})
+	@Get(':patientId/vitals/latest')
+	async fetchLatestPatientVitals(@Param('patientId') patientId: string) {
+		try {
+			const response =
+				await this.patientsService.fetchLatestPatientVitals(patientId);
+			return new ApiSuccessResponseDto(
+				response.rows,
+				HttpStatus.OK,
+				'Vital histories fetched successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['success'], {
+		type: GetPersonnelPatientDto,
 		message: 'Patient fetched successfully',
 	})
 	@Get(':id')

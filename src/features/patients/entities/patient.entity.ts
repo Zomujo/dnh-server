@@ -1,8 +1,10 @@
 import { Prop, Schema, SchemaFactory, Virtual } from '@nestjs/mongoose';
+import { differenceInYears } from 'date-fns';
 import { ObjectId } from 'mongodb';
 import { BaseDH } from '@/common/entities/base-dh.entity';
 import { deleteByPattern } from '@/core/caching/utils';
 import { Personnel } from '@/features/doctors/entities/personnel.entity';
+import { AdherenceStatus } from '../dto';
 import { myEmitter } from '../utils/summary.event';
 import { Sections } from '../utils/summary.util';
 
@@ -140,6 +142,31 @@ export class Patient extends BaseDH {
 	doctorsVisited: Personnel[];
 
 	@Prop({
+		type: [String],
+		default: [],
+		description:
+			'Set of chronic condition names the patient has been diagnosed with',
+	})
+	chronicConditions: string[];
+
+	@Prop({
+		description: 'Adherence rate percentage (0-100)',
+	})
+	adherenceRate: number;
+
+	@Prop({
+		type: String,
+		enum: AdherenceStatus,
+		description: 'Adherence status: critical, silent, or stable',
+	})
+	adherenceStatus: AdherenceStatus;
+
+	@Prop({
+		description: 'Date of the last adherence check-in',
+	})
+	lastCheckInDate: Date;
+
+	@Prop({
 		type: String,
 		enum: PregnancyStatusEnum,
 		description: 'Pregnancy status: pregnant, not_pregnant, unknown',
@@ -159,7 +186,7 @@ export class Patient extends BaseDH {
 
 	@Virtual({
 		get: function (this: Patient) {
-			const age = new Date().getFullYear() - this.yearOfBirth;
+			const age = differenceInYears(new Date(), this.dateOfBirth);
 			return age;
 		},
 	})

@@ -20,9 +20,11 @@ import { flattenMeta } from '@/common/entities';
 import { generateFilter } from '@/common/factory';
 import { generateCode } from '@/common/utils/helpers';
 import { CacheService } from '@/core/caching/caching.service';
+import { VitalHistory } from '@/features/vital-histories/entities/vital-history.entity';
 import { ChronicConditionsService } from '../chronic-conditions/chronic-conditions.service';
 import {
 	CreatePatientDto,
+	FilterBy,
 	FilterPatientsDto,
 	FilterPatientsNoPaginateDto,
 	PatientQueryFilter,
@@ -45,9 +47,88 @@ export class PatientsService {
 		return this.patientModel.findByIdAndUpdate(objectId, update);
 	}
 
+	async fetchLatestPatientVitals(patientId: string) {
+		const patient = await this.findPatientById(patientId);
+
+		const vitalHistories = await this.vitalHistoryModel.aggregate([
+			{
+				$match: {
+					$or: [{ userId: patient!.userId }, { patient: patient!.userId }],
+				},
+			},
+			{ $sort: { createdAt: -1 } },
+			{
+				$group: {
+					_id: '$vitalType',
+					doc: { $first: '$$ROOT' },
+				},
+			},
+			{ $replaceRoot: { newRoot: '$doc' } },
+			{
+				$addFields: {
+					vitalName: {
+						$switch: {
+							branches: [
+								{
+									case: { $eq: ['$vitalType', 'bloodPressure'] },
+									then: 'Blood Pressure',
+								},
+								{
+									case: { $eq: ['$vitalType', 'heartRate'] },
+									then: 'Heart Rate',
+								},
+								{
+									case: { $eq: ['$vitalType', 'temperature'] },
+									then: 'Temperature',
+								},
+								{
+									case: { $eq: ['$vitalType', 'respirationRate'] },
+									then: 'Respiration Rate',
+								},
+								{
+									case: { $eq: ['$vitalType', 'oxygenSaturation'] },
+									then: 'Oxygen Saturation',
+								},
+								{ case: { $eq: ['$vitalType', 'weight'] }, then: 'Weight' },
+								{
+									case: { $eq: ['$vitalType', 'bloodSugar'] },
+									then: 'Blood Sugar',
+								},
+							],
+							default: '$vitalType',
+						},
+					},
+				},
+			},
+			{
+				$project: {
+					id: '$_id',
+					_id: 0,
+					vitalType: 1,
+					vitalName: 1,
+					value: 1,
+					unit: 1,
+					severity: 1,
+				},
+			},
+		]);
+
+		const [totalResult] = await this.vitalHistoryModel.aggregate([
+			{ $match: { userId: patient!.userId } },
+			{ $group: { _id: '$vitalType' } },
+			{ $count: 'total' },
+		]);
+
+		const count: number = totalResult?.total || 0;
+
+		return { rows: vitalHistories, count };
+	}
+
 	constructor(
 		@InjectModel(Patient.name) private patientModel: Model<Patient>,
 		@InjectModel(Summary.name) private summaryModel: Model<Summary>,
+		@InjectModel(VitalHistory.name)
+		private vitalHistoryModel: Model<VitalHistory>,
 		private readonly chronicConditionsService: ChronicConditionsService,
 		private readonly summaryCacheService: CacheService<string>,
 	) {
@@ -60,7 +141,7 @@ export class PatientsService {
 
 	async create(dto: CreatePatientDto) {
 		dto.patientCode = generateCode();
-		const patient = await this.patientModel.create({ ...dto });
+		const patient = await this.patientModel.create({ ...dto } as any);
 
 		await Promise.all(
 			dto.chronicConditions.map((conditionName) =>
@@ -199,14 +280,42 @@ export class PatientsService {
 			findFilter.pharmaciesVisited = query.personnelId;
 		}
 
+		if (query.filterBy) {
+			switch (query.filterBy) {
+				case FilterBy.HYPERTENSION:
+					findFilter.chronicConditions = { $in: [/hypertension/i] };
+					break;
+				case FilterBy.DIABETES:
+					findFilter.chronicConditions = { $in: [/diabetes/i] };
+					break;
+				case FilterBy.BOTH:
+					findFilter.chronicConditions = {
+						$all: [/hypertension/i, /diabetes/i],
+					};
+					break;
+				case FilterBy.CRITICAL:
+					findFilter.adherenceStatus = 'critical';
+					break;
+				case FilterBy.SILENT:
+					findFilter.adherenceStatus = 'silent';
+					break;
+				case FilterBy.STABLE:
+					findFilter.adherenceStatus = 'stable';
+					break;
+			}
+		}
+
 		searchFilter = { ...searchFilter, ...findFilter };
+		console.log;
 
 		const patients = await this.patientModel
 			.find({ ...searchFilter })
 			.skip(pageFilter.offset)
 			.limit(pageFilter.limit)
 			.sort(pageFilter.orderBy)
-			.select('-pharmaciesVisited -doctorsVisited -qdrantId');
+			.select(
+				'name dateOfBirth chronicConditions lastCheckInDate adherenceRate adherenceStatus',
+			);
 
 		const count = await this.patientModel.countDocuments({ ...searchFilter });
 

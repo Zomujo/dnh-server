@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { DhVectorsModule } from '../dh-vectors/dh-vectors.module';
+import { Patient, PatientSchema } from '../patients/entities/patient.entity';
 // import { AdherencesController } from './adherences.controller';
 import { AdherencesService } from './adherences.service';
 import {
@@ -17,6 +18,7 @@ import {
 		MongooseModule.forFeature([
 			{ name: AdherenceLog.name, schema: AdherenceLogSchema },
 			{ name: AdherencePattern.name, schema: AdherencePatternSchema },
+			{ name: Patient.name, schema: PatientSchema },
 		]),
 		DhVectorsModule,
 	],

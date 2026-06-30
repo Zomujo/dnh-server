@@ -14,23 +14,42 @@ import { ApiSuccessResponseDto, throwError } from '@/common/utils/responses';
 import { ChronicCareAuthService } from './chronic-care-auth.service';
 import { CreatePersonnelDto, GetPersonnelDto, LoginPersonnelDto } from './dto';
 
-@ApiTags('Chronic Care Personnels')
-@Controller('chronic-care/personnel/auth')
+@ApiTags('Dnh Personnels')
+@Controller('personnel/auth')
 export class ChronicCareAuthController {
 	private logger = new Logger(ChronicCareAuthController.name);
 	constructor(private readonly authService: ChronicCareAuthService) {}
 
-	@CustomApiResponse(['created'], {
-		message: 'Personnel created successfully',
+	@CustomApiResponse(['updated'], {
+		message: 'Personnel signed up successfully',
 	})
+	@HttpCode(HttpStatus.OK)
 	@Post('signup')
-	async create(@Body() dto: CreatePersonnelDto) {
+	async create(@Body() dto: LoginPersonnelDto) {
 		try {
 			const response = await this.authService.create(dto);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.CREATED,
-				'Personnel created successfully',
+				'Personnel signed up successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['updated'], {
+		message: 'Personnel onboarded successfully',
+	})
+	@HttpCode(HttpStatus.OK)
+	@Post('onboard')
+	async onboard(@Body() dto: CreatePersonnelDto) {
+		try {
+			const response = await this.authService.onboard(dto);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.CREATED,
+				'Personnel onboarded successfully',
 			);
 		} catch (error) {
 			throwError(this.logger, error);
@@ -56,17 +75,17 @@ export class ChronicCareAuthController {
 	}
 
 	@CustomApiResponse(['updated'], {
-		message: 'Doctor logged in successfully',
+		message: 'Google log in successful',
 	})
 	@HttpCode(HttpStatus.OK)
-	@Post('login/doctors')
+	@Post('login/google')
 	async doctorLogin(@Headers('idtoken') idToken: string) {
 		try {
 			const response = await this.authService.googleAuth({ idToken });
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,
-				'Doctor logged in successfully',
+				'Google log in successful',
 			);
 		} catch (error) {
 			throwError(this.logger, error);

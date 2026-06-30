@@ -18,7 +18,7 @@ export {
 	VitalHistoryTrendsQueryDto,
 	VitalHistoryTrendsResponseDto,
 } from './get.dto';
-export { UpdateVitalHistoryDto } from './update.dto';
+export { UpdateVitalHistoryDto, UpdateVitalLogDto } from './update.dto';
 export {
 	type VitalHistoryBody,
 	VitalHistoryDto,

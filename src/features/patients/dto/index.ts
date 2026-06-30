@@ -1,11 +1,14 @@
 export { CreatePatientDto } from './create.dto';
 export {
+	FilterBy,
 	FilterPatientsDto,
 	FilterPatientsNoPaginateDto,
 	GetPatientDto,
 	GetPatientNoPaginateDto,
+	GetPersonnelPatientDto,
+	GetPersonnelPatientsDto,
 } from './get.dto';
-export { PatientDto, PatientPayload } from './patient.dto';
+export { AdherenceStatus, PatientDto, PatientPayload } from './patient.dto';
 export {
 	type AlcoholUseEnum,
 	type GenderEnum,

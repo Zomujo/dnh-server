@@ -25,6 +25,12 @@ import {
 } from 'class-validator';
 import { GenderEnum } from '../entities/patient.entity';
 
+export enum AdherenceStatus {
+	CRITICAL = 'critical',
+	SILENT = 'silent',
+	STABLE = 'stable',
+}
+
 export class PatientDto {
 	@ApiResponseProperty({
 		example: 'ZC-JJ86234',
@@ -193,4 +199,37 @@ export class PatientDto {
 	@IsString()
 	@IsOptional()
 	timezone?: string;
+
+	@ApiPropertyOptional({
+		description: 'Chronic condition names the patient has been diagnosed with',
+		example: ['hypertension'],
+	})
+	@IsOptional()
+	@IsArray()
+	@IsString({ each: true })
+	chronicConditions?: string[];
+
+	@ApiPropertyOptional({
+		description: 'Date of the last adherence check-in',
+		example: new Date(),
+	})
+	@IsOptional()
+	lastCheckInDate?: Date;
+
+	@ApiPropertyOptional({
+		description: 'Overall adherence rate (0-100)',
+		example: 85.5,
+	})
+	@IsOptional()
+	@IsNumber()
+	adherenceRate?: number;
+
+	@ApiPropertyOptional({
+		description: 'Adherence status',
+		enum: AdherenceStatus,
+		example: 'stable',
+	})
+	@IsOptional()
+	@IsEnum(AdherenceStatus)
+	adherenceStatus?: AdherenceStatus;
 }

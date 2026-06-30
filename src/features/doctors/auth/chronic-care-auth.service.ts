@@ -24,14 +24,28 @@ export class ChronicCareAuthService {
 		private authService: AuthService,
 	) {}
 
-	async create(dto: CreatePersonnelDto) {
-		dto.role = dto.role ?? PersonnelRoles.PHARMACY;
-		const personnel = await this.personnelModel.create(dto as any);
+	async create(dto: LoginPersonnelDto) {
+		const personnel = await this.personnelModel.create({
+			email: dto.email,
+			password: dto.password,
+			role: PersonnelRoles.CLINICIAN,
+		});
+
+		return personnel._id;
+	}
+
+	async onboard(dto: CreatePersonnelDto) {
+		const personnel = await this.personnelModel.create({
+			userName: `${dto.firstname ?? ''} ${dto.lastname ?? ''}`.trim(),
+			phoneNumber: dto.phoneNumber,
+			personnelIdNumber: dto.personnelIdNumber,
+			facility: dto.facility,
+		} as any);
 		return personnel._id;
 	}
 
 	async login(dto: LoginPersonnelDto) {
-		const orQuery: object[] = [{ userName: dto.userName }];
+		const orQuery: object[] = [{ email: dto.email }];
 
 		if (dto.providerUserId) {
 			orQuery.push({ providerUserId: dto.providerUserId });
@@ -61,11 +75,11 @@ export class ChronicCareAuthService {
 
 	async googleAuth(dto: GoogleLoginDto) {
 		const payload = await this.authService.googleLogin(dto.idToken);
-		const { email, sub: googleId, name } = payload;
+		const { email, sub: googleId } = payload;
 
 		try {
 			let personnelToken = await this.login({
-				userName: name!,
+				email: email!,
 				providerUserId: googleId,
 				password: email || googleId,
 			});
@@ -76,11 +90,10 @@ export class ChronicCareAuthService {
 				error instanceof NotFoundException
 			) {
 				const personnelId = await this.create({
-					email,
+					email: email!,
 					provider: PersonnelProviders.GOOGLE,
 					role: PersonnelRoles.CLINICIAN,
 					providerUserId: googleId,
-					userName: name ?? email ?? googleId,
 					password: email || googleId,
 				});
 				const token = await this.authService.signToken(
@@ -100,10 +113,13 @@ export class ChronicCareAuthService {
 	async findAuthenticated(id: string) {
 		const personnel = await this.personnelModel
 			.findById(id)
-			.select('-password');
+			.select('-password')
+			.populate({ path: 'facility', select: 'name' });
 		if (!personnel) {
 			throw new NotFoundException('Personnel not found');
 		}
-		return personnel;
+		const json = personnel.toJSON() as any;
+		json.assignedPatientsCount = 0;
+		return json;
 	}
 }

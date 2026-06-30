@@ -80,11 +80,22 @@ export class Appointment extends BaseEntity {
 	cancelledAt: Date;
 
 	@Prop({
+		description: 'Date and time when the appointment was completed',
+	})
+	completedAt: Date;
+
+	@Prop({
 		type: ObjectId,
 		ref: 'Personnel',
 		description: 'Reference to the personnel who cancelled the appointment',
 	})
 	cancelledBy: Personnel;
+
+	@Prop({
+		default: 0,
+		description: 'Number of times this appointment has been rescheduled',
+	})
+	rescheduledCount: number;
 }
 
 export const AppointmentSchema = SchemaFactory.createForClass(Appointment);

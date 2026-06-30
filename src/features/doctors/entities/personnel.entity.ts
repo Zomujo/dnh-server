@@ -18,7 +18,7 @@ import { Facility } from '@/features/facilities/entities/facility.entity';
 	},
 })
 export class Personnel extends BaseEntity {
-	@Prop({ unique: true, description: 'The name of the user or pharmacy' })
+	@Prop({ description: 'The name of the personnel' })
 	userName: string;
 
 	@Prop({ description: 'The SSO authentication provider' })
@@ -29,6 +29,12 @@ export class Personnel extends BaseEntity {
 
 	@Prop({ description: "The user's email address" })
 	email: string;
+
+	@Prop({ description: "The user's phone number" })
+	phoneNumber: string;
+
+	@Prop({ description: "The personnel's identification number" })
+	personnelIdNumber: string;
 
 	@Prop({ description: 'The role of the personnel (e.g., doctor, pharmacist)' })
 	role: string;

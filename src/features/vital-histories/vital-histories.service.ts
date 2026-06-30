@@ -18,6 +18,7 @@ import {
 	LoadVitalHistoryDto,
 	shortenedDay,
 	UpdateVitalHistoryDto,
+	UpdateVitalLogDto,
 	VitalHistoryQueryFilter,
 	VitalHistoryTrendsQueryDto,
 	VitalHistoryTrendsResponseDto,
@@ -639,6 +640,90 @@ export class VitalHistoriesService {
 		return { rows: results, count };
 	}
 
+	async findVitalLogById(userId: string, id: string) {
+		const results = await this.vitalHistoryModel.aggregate<
+			Record<string, unknown>
+		>([
+			{
+				$match: {
+					_id: new Types.ObjectId(id),
+					$or: [{ userId }, { patient: userId }],
+				},
+			},
+			{
+				$addFields: {
+					vitalName: {
+						$switch: {
+							branches: [
+								{
+									case: { $eq: ['$vitalType', 'bloodPressure'] },
+									then: 'Blood Pressure',
+								},
+								{
+									case: { $eq: ['$vitalType', 'heartRate'] },
+									then: 'Heart Rate',
+								},
+								{
+									case: { $eq: ['$vitalType', 'temperature'] },
+									then: 'Temperature',
+								},
+								{
+									case: { $eq: ['$vitalType', 'respirationRate'] },
+									then: 'Respiration Rate',
+								},
+								{
+									case: { $eq: ['$vitalType', 'oxygenSaturation'] },
+									then: 'Oxygen Saturation',
+								},
+								{ case: { $eq: ['$vitalType', 'weight'] }, then: 'Weight' },
+								{
+									case: { $eq: ['$vitalType', 'bloodSugar'] },
+									then: 'Blood Sugar',
+								},
+							],
+							default: '$vitalType',
+						},
+					},
+				},
+			},
+			{
+				$project: {
+					id: '$_id',
+					_id: 0,
+					vitalType: 1,
+					vitalName: 1,
+					value: 1,
+					unit: 1,
+					severity: 1,
+				},
+			},
+		]);
+
+		if (!results.length) {
+			throw new NotFoundException('Vital history log not found');
+		}
+
+		return results[0];
+	}
+
+	async updateVitalLog(userId: string, id: string, dto: UpdateVitalLogDto) {
+		const $set: Record<string, unknown> = {};
+		if (dto.severity !== undefined) $set.severity = dto.severity;
+		if (dto.notes !== undefined) $set.notes = dto.notes;
+
+		const result = await this.vitalHistoryModel.findOneAndUpdate(
+			{ _id: new Types.ObjectId(id), $or: [{ userId }, { patient: userId }] },
+			{ $set },
+			{ new: true },
+		);
+
+		if (!result) {
+			throw new NotFoundException('Vital history log not found');
+		}
+
+		return result;
+	}
+
 	async fetchBPTrend(userId: string, query: BpTrendsQueryDto) {
 		const { dateRange } = query;
 		const { timestamp } = getDateRangeFilter(dateRange)!;
@@ -679,18 +764,25 @@ export class VitalHistoriesService {
 		const latest = await this.vitalHistoryModel
 			.findOne(match)
 			.sort({ recordedAt: -1 })
-			.select('value')
+			.select('value notes')
 			.lean();
 
 		let formattedVitalTrend = vitalTrend[0];
 
 		if (!formattedVitalTrend) {
-			return { labels: [], systolic: [], diastolic: [], latestValue: null };
+			return {
+				labels: [],
+				systolic: [],
+				diastolic: [],
+				latestValue: null,
+				note: null,
+			};
 		}
 
 		return {
 			...formattedVitalTrend,
 			latestValue: latest?.value ?? null,
+			note: latest?.notes ?? null,
 		};
 	}
 
@@ -776,7 +868,7 @@ export class VitalHistoriesService {
 				...matchRecord,
 			})
 			.sort({ recordedAt: -1 })
-			.select('value')
+			.select('value notes')
 			.lean();
 
 		let formattedVitalTrend = vitalTrend[0];
@@ -786,12 +878,14 @@ export class VitalHistoriesService {
 				labels: [],
 				values: [],
 				latestValue: null,
+				note: null,
 			};
 		}
 
 		return {
 			...formattedVitalTrend,
 			latestValue: latest ? Number(latest.value) : null,
+			note: latest?.notes ?? null,
 		};
 	}
 
@@ -889,5 +983,12 @@ export class VitalHistoriesService {
 
 	async removeByUserId(userId: string) {
 		return this.vitalHistoryModel.deleteMany({ userId });
+	}
+
+	async countVitalsBySeverity(
+		userId: string,
+		severity: VitalSeverityEnum,
+	): Promise<number> {
+		return this.vitalHistoryModel.countDocuments({ userId, severity });
 	}
 }
