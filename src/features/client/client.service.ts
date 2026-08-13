@@ -409,7 +409,7 @@ export class ClientService {
 						body: 'A patient has submitted an appointment request at your facility.',
 					},
 					data: {
-						notification_type: 'appointment_request',
+						notification_type: 'notification',
 						click_action: 'FLUTTER_NOTIFICATION_CLICK',
 					},
 				}),

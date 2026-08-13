@@ -65,7 +65,7 @@ export class VitalHistoriesService {
 						body: personnelBody,
 					},
 					data: {
-						notification_type: 'critical_vital',
+						notification_type: 'notification',
 						click_action: 'FLUTTER_NOTIFICATION_CLICK',
 					},
 				}),

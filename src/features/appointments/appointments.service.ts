@@ -8,6 +8,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Queue } from 'bullmq';
 import { Model, Types } from 'mongoose';
 import { generateFilter } from '@/common/factory';
+import { PushService } from '@/features/notifications/push/push.service';
 import { PatientsService } from '@/features/patients/patients.service';
 import { APPOINTMENT_REMINDER_QUEUE } from './appointments.constants';
 import {
@@ -28,6 +29,7 @@ export class AppointmentsService {
 		@InjectModel(Appointment.name)
 		private readonly appointmentModel: Model<Appointment>,
 		private readonly patientsService: PatientsService,
+		private readonly pushService: PushService,
 		@InjectQueue(APPOINTMENT_REMINDER_QUEUE)
 		private readonly reminderQueue: Queue,
 	) {}
@@ -207,6 +209,23 @@ export class AppointmentsService {
 		await this.cancelReminder(id);
 
 		await appointment.save();
+
+		if (appointment.userId) {
+			this.pushService.sendNotification(
+				() => ({
+					notification: {
+						title: 'Appointment Cancelled',
+						body: `Your appointment "${appointment.title}" has been cancelled.`,
+					},
+					data: {
+						notification_type: 'notification',
+						click_action: 'FLUTTER_NOTIFICATION_CLICK',
+					},
+				}),
+				appointment.userId,
+			);
+		}
+
 		return appointment._id;
 	}
 

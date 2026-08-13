@@ -240,6 +240,7 @@ export class PushService {
 				case UserType.DEV:
 				case UserType.DH_CLIENTS:
 				case UserType.CHRONIC_CARE:
+				case UserType.DNH:
 					messagingProject = this.firebaseService.messaging;
 					break;
 				default:
@@ -247,6 +248,21 @@ export class PushService {
 			}
 
 			const message = getMessage();
+			message.android = {
+				priority: 'high',
+				notification: {
+					channelId: 'high_importance_channel',
+				},
+			};
+			message.apns = {
+				payload: {
+					aps: {
+						sound: 'default',
+						badge: 1,
+						contentAvailable: true,
+					},
+				},
+			};
 
 			const createdAt = Date.now();
 			if (notificationType) {
@@ -269,6 +285,22 @@ export class PushService {
 	) {
 		try {
 			const message = getMessage();
+
+			message.android = {
+				priority: 'high',
+				notification: {
+					channelId: 'high_importance_channel',
+				},
+			};
+			message.apns = {
+				payload: {
+					aps: {
+						sound: 'default',
+						badge: 1,
+						contentAvailable: true,
+					},
+				},
+			};
 			const messaging = this.firebaseService.messaging;
 			await this.pushNotificationToTopic(topic, message, messaging);
 		} catch (error) {

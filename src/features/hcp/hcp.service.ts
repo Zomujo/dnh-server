@@ -121,7 +121,7 @@ export class HcpService {
 					body: `You have a new appointment: ${dto.title}.`,
 				},
 				data: {
-					notification_type: 'appointment_scheduled',
+					notification_type: 'notification',
 					click_action: 'FLUTTER_NOTIFICATION_CLICK',
 				},
 			}),
@@ -286,7 +286,7 @@ export class HcpService {
 						: 'Your appointment request has been rejected.',
 				},
 				data: {
-					notification_type: 'appointment_request_status',
+					notification_type: 'notification',
 					status: dto.status,
 					click_action: 'FLUTTER_NOTIFICATION_CLICK',
 				},

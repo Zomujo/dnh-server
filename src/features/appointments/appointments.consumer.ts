@@ -44,7 +44,7 @@ export class AppointmentsConsumer extends WorkerHost {
 				body: `Your appointment "${appointment.title}" is starting now.`,
 			},
 			data: {
-				notification_type: 'appointment_reminder',
+				notification_type: 'notification',
 				click_action: 'FLUTTER_NOTIFICATION_CLICK',
 			},
 		});
