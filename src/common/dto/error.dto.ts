@@ -52,5 +52,5 @@ export function throwError(logger: Logger, error: any): void {
 		`An error occurred: ${error.name} :: ${error.message}`,
 		error.stack,
 	);
-	throw new InternalServerErrorException(error.message, error);
+	throw new InternalServerErrorException('An unexpected error occured');
 }

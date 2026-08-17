@@ -286,6 +286,7 @@ export class ChronicCareAuthService {
 		}
 		await this.personnelAccountModel.deleteMany({ personnel: personnelId });
 		await this.personnelModel.findByIdAndDelete(personnelId);
+		await this.authService.revokePersonnelTokens(personnelId);
 	}
 
 	async findAuthenticated(id: string) {

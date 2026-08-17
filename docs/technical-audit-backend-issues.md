@@ -20,9 +20,9 @@ if you use the last one).
 | 2.5 | Unauthenticated, DB-backed endpoints: full patient list (paginated + unpaginated), any patient's latest vitals, any patient record, clinical summary SSE, full notification CRUD, med catalogue, debug auth scaffolding | `patients.controller.ts:36-41,93,112,127-132,145`; `notifications.controller.ts:77-176`; `seeded-meds.controller.ts:54`; `main.ts:26` | Critical | **Partially resolved** — see notes below |
 | 2.6 | IDOR: patient can rewrite any other patient's medication dosage/times; chat delete filters loosely; bulk "receive-choice" endpoint can falsify any patient's adherence records | `medications.service.ts:253,354`, `client.service.ts:257-269`, `medications.service.ts:239-251` | High | **Resolved** — see notes below |
 | 2.7 | `searchFields`/`orderBy` bypass the global validation whitelist → unescaped `RegExp` from client input. ReDoS pre-auth on 4 endpoints; character-by-character oracle can extract Ghana Card/NHIS numbers via the unauthenticated patient list. `pageSize`/`page` unbounded | `pagination-filter.factory.ts:42-50`; `patients.service.ts:277,329`; `notifications.service.ts:76`; `seeded-meds.service.ts:23` | High | **Resolved** — see notes below |
-| 2.8 | AI memory-scribe tools accept `{filters, data}` straight from LLM output with `upsert:true`, never compared against the authenticated caller — prompt injection becomes a cross-tenant write | `memory-scribe.service.ts:141-235` | Critical | Open |
-| 2.9 | Plaintext passwords logged; JWT payload logged on every signing; generic error handler leaks raw internal error text to clients | `auth.service.ts:75-80,159`; `common/dto/error.dto.ts:52` | High | Open |
-| 2.10 | JWT audience/issuer signed but never verified; `JWT_TOKEN_ISSUER` missing from `.envrc.example`; no revocation path for 24h tokens | `auth.service.ts:148-169`; `auth.module.ts:13-21`; `ws-auth.verifier.ts:49` | Low/Medium | Open |
+| 2.8 | AI memory-scribe tools accept `{filters, data}` straight from LLM output with `upsert:true`, never compared against the authenticated caller — prompt injection becomes a cross-tenant write | `memory-scribe.service.ts:141-235` | Critical | **Resolved** — see notes below |
+| 2.9 | Plaintext passwords logged; JWT payload logged on every signing; generic error handler leaks raw internal error text to clients | `auth.service.ts:75-80,159`; `common/dto/error.dto.ts:52` | High | **Resolved** — see notes below |
+| 2.10 | JWT audience/issuer signed but never verified; `JWT_TOKEN_ISSUER` missing from `.envrc.example`; no revocation path for 24h tokens | `auth.service.ts:148-169`; `auth.module.ts:13-21`; `ws-auth.verifier.ts:49` | Low/Medium | **Resolved** — see notes below |
 
 ### Notes — 2.2 / 2.2b / 2.4 (`chronic-care-auth.service.ts`)
 
@@ -167,6 +167,86 @@ sort key. Left as-is — the audit itself calls this "a lesser concern" (orderin
 inference and slow unindexed scans, not an injection vector, since the sort direction is
 always a hardcoded ±1), and unlike `searchFields` there's no PII-oracle shape to it.
 
+### Notes — 2.8 (AI cross-tenant write)
+
+All 7 memory-scribe tools (adherence log/pattern, chronic condition, concern,
+medication, patient, vital history) plus the notification upsert path share the same
+shape: every `filters.userId`/`filters.patient` value is chosen by the model from the
+patient's free-text chat message, then flows untouched into `findOneAndUpdate(filters,
+..., {upsert: true})`. A prompt injection in that chat message was a straight line to
+writing into another patient's medications, vitals, chronic conditions, or notification
+schedules.
+
+Fixed at the single choke point where the real identity is available and trustworthy:
+`MemoryScribeService.memorize()` already has `state.user.userId`/`state.user.patientId`
+(the authenticated caller, established earlier in the same conversation graph). After
+the model responds with its proposed tool calls but *before* `toolNode.invoke()` ever
+executes them, every tool call's `args.filters.userId`/`.patient` is unconditionally
+overwritten with the trusted values — regardless of whatever the model put there. This
+covers all 7 tools uniformly without touching each tool's `func`, each `@OnEvent`
+handler, or each `upsertX` service method individually (8+ files), and it structurally
+can't be bypassed by a cleverer prompt, since the model's values are never consulted at
+all for these two fields.
+
+**Related, not fixed here:** while reading this file, confirmed 6.6 is still live in the
+same 8 `@OnEvent` handlers — `return this.xService.upsertX(...)` inside a `try` block
+doesn't let the `catch` observe a rejection (the bare `return` hands back the promise
+before the block's execution window ends; only `return await` would let `catch` see it).
+Separate issue from 2.8 (this is about swallowed persistence errors going unlogged, not
+authorization), left for its own pass.
+
+### Notes — 2.9 (credential/JWT logging, generic error leak)
+
+`AuthService.login()`/`findAll()` — the pair that concatenated `${email} ${password}`
+into a fake "token" and logged it — turned out to be dead code: no controller route
+calls either one (real personnel login goes through `ChronicCareAuthService.login()`;
+real patient auth goes through Firebase). Deleted both outright rather than patch
+unreachable code. `signToken()`'s `console.log('payload', payload)` was live, though —
+it fired on every real personnel login/signup and logged `{role, email, facility}` to
+stdout unguarded (not even behind a `NODE_ENV` check). Removed.
+
+`throwError()`'s fallback branch (`common/dto/error.dto.ts`) sent `error.message`
+straight into the client-facing `InternalServerErrorException` for any error that
+wasn't a recognized Mongo/Mongoose/Http error — a raw `TypeError`, DB connection error,
+or third-party SDK error text would land in the 500 response body. The full detail was
+already captured server-side via the preceding `logger.error(...)` call, so the
+client-facing message is now a fixed `'An unexpected error occured'`, with server-side
+logging untouched.
+
+**Bucketed under 2.5 instead of fixed here (per product decision):** two unauthenticated
+debug routes on `AuthController` — `GET /auth/test` (writes to a hardcoded Firestore
+doc) and `POST /auth` (`testNotification`, sends an arbitrary FCM push to any token
+supplied in the body). Left alongside 2.5's other still-open debug-scaffolding items.
+
+### Notes — 2.10 (JWT audience/issuer, revocation)
+
+`verifyChronicCareToken()` called `jwtService.verifyAsync(token)` with no options —
+`signToken()` puts `audience`/`issuer` claims into every chronic-care JWT, but nothing
+downstream ever checked them, so they were purely decorative. Now verifies both,
+using the same `UserType.CHRONIC_CARE` audience and `JWT_TOKEN_ISSUER` config value
+used at sign time.
+
+The audit's claim that `JWT_TOKEN_ISSUER` is missing from `.envrc.example` is stale —
+it's present. It *is* missing from the actual local `.envrc` in this environment, which
+means locally-issued tokens currently sign with `issuer: undefined`; `jsonwebtoken`
+skips the issuer check entirely when the verify option is unset, so this doesn't break
+local login, it just means the issuer check isn't doing real work here yet. That's a
+personal `.envrc` addition, not a code change — flagging for the next `direnv` touch,
+not fixed in this repo.
+
+No revocation path was the bigger gap: `deletePersonnel()` removed the DB records but
+never invalidated the personnel's existing tokens, which stayed valid for up to their
+full 24h lifetime after deletion since `verifyChronicCareToken` never re-checked the DB.
+Closed with a Redis-backed denylist via the existing `CacheService`: `AuthService` now
+exposes `revokePersonnelTokens(personnelId)`, which writes
+`chronic-care-token-revoked:{personnelId} = Date.now()` with a 24h TTL (matching the
+JwtModule's `signOptions.expiresIn`). `verifyChronicCareToken` checks this key against
+the token's `iat` claim and rejects any token issued before the recorded revocation —
+covering every outstanding token/device for that personnel in one write, not just a
+single token/session. `deletePersonnel()` now calls it after the delete completes. The
+denylist entry self-expires via Redis TTL once every token it could have covered has
+naturally expired, so there's no manual cleanup path needed.
+
 ## Data integrity (§6)
 
 | # | Issue | Location | Severity | Status |
@@ -243,8 +323,8 @@ always a hardcoded ±1), and unlike `searchFields` there's no PII-oracle shape t
 **Immediate**
 1. ~~Remove or authorize `DELETE /client/clean/:userId` (2.1)~~ — done
 2. Bound `repeatEvery` at schema/validator/data-layer; remove/gate sub-minute types (5.1, 5.3)
-3. Require invitation/facility approval for signup; remove email-as-password Google path (2.2, 2.4)
-4. Remove password/payload logging (2.9)
+3. ~~Require invitation/facility approval for signup; remove email-as-password Google path (2.2, 2.4)~~ — done
+4. ~~Remove password/payload logging (2.9)~~ — done
 5. Add nested validation to `CreateVitalHistoryDto.vitals`, move spread order (6.3)
 
 **Within one week**
@@ -259,4 +339,5 @@ always a hardcoded ±1), and unlike `searchFields` there's no PII-oracle shape t
 10. Single server-side severity scheme, hypertensive-crisis tier, hypotension detection (3.1–3.3)
 11. Re-base adherence on scheduled doses, keyed by medication ID, late-confirmation window, unique index (§4)
 12. Fix `formatFrequency` (5.7)
-13. Enforce authenticated user identifier server-side on every AI persistence tool; await the 8 event handlers (2.8, 6.6)
+13. ~~Enforce authenticated user identifier server-side on every AI persistence tool~~ — done (2.8); await the 8 event handlers still open (6.6)
+14. ~~Verify JWT audience/issuer on chronic-care tokens; add a Redis-backed revocation path~~ — done (2.10, not in the audit's original sequence — added because it surfaced while closing 2.9)

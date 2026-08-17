@@ -9,6 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { differenceInYears } from 'date-fns';
 import { Message } from 'firebase-admin/messaging';
 import { OAuth2Client } from 'google-auth-library';
+import { CacheService } from '@/core/caching/caching.service';
 import { PatientsService } from '@/features/patients/patients.service';
 import { FirebaseService } from '../firebase/firebase.service';
 import {
@@ -17,6 +18,14 @@ import {
 	OnboardDto,
 	TestNotificationDto,
 } from './dto';
+import { UserType } from './enums';
+
+// Chronic-care tokens are signed with a 1d lifetime (see JwtModule config in
+// auth.module.ts). A revocation entry only needs to outlive the longest-lived
+// token that could have existed before it was written, so this TTL mirrors
+// that expiry — once it lapses, every token issued before the revocation has
+// already expired on its own.
+const CHRONIC_CARE_TOKEN_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -29,6 +38,7 @@ export class AuthService {
 		private jwtService: JwtService,
 		private configService: ConfigService,
 		private readonly patientsService: PatientsService,
+		private readonly tokenDenylistCache: CacheService<number>,
 	) {
 		this.googleClientId = this.configService.get('GOOGLE_CLIENT_ID')!;
 		this.googleClient = new OAuth2Client(this.googleClientId);
@@ -70,17 +80,6 @@ export class AuthService {
 		// nhisNumber: dto.nhisNumber,
 
 		return patientId;
-	}
-
-	async login(dto: CreateAuthDto) {
-		const { email, password } = dto;
-		const idToken = `${email} ${password}`;
-		this.logger.log('ID Token:', idToken);
-		return { token: idToken };
-	}
-
-	findAll() {
-		return `This action returns all auth`;
 	}
 
 	async testNotification(dto: TestNotificationDto) {
@@ -147,9 +146,40 @@ export class AuthService {
 	}
 
 	async verifyChronicCareToken(token: string) {
-		const payload =
-			await this.jwtService.verifyAsync<LocalAuthUserPayload>(token);
+		const payload = await this.jwtService.verifyAsync<LocalAuthUserPayload>(
+			token,
+			{
+				audience: UserType.CHRONIC_CARE.toString(),
+				issuer: this.configService.get<string>('JWT_TOKEN_ISSUER'),
+			},
+		);
+
+		const revokedAt = await this.tokenDenylistCache.get(
+			this.denylistKey(payload.sub),
+		);
+		if (revokedAt && payload.iat && payload.iat * 1000 < revokedAt) {
+			throw new UnauthorizedException('Token revoked');
+		}
+
 		return payload;
+	}
+
+	/**
+	 * Invalidates every chronic-care token already issued to this personnel
+	 * (e.g. on account deletion) by recording the current time as their
+	 * revocation cutoff — verifyChronicCareToken rejects any token whose
+	 * `iat` predates it, regardless of how many tokens/devices are active.
+	 */
+	async revokePersonnelTokens(personnelId: string) {
+		await this.tokenDenylistCache.set(
+			this.denylistKey(personnelId),
+			Date.now(),
+			CHRONIC_CARE_TOKEN_LIFETIME_MS,
+		);
+	}
+
+	private denylistKey(personnelId: string) {
+		return `chronic-care-token-revoked:${personnelId}`;
 	}
 
 	async signToken<T>(
@@ -157,7 +187,6 @@ export class AuthService {
 		extras: { audience: string },
 		payload?: T,
 	) {
-		console.log('payload', payload);
 		return await this.jwtService.signAsync(
 			{
 				sub: userId,

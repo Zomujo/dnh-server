@@ -5,4 +5,5 @@ export interface LocalAuthUserPayload {
 	iss: string;
 	aud: string;
 	facility?: string;
+	iat?: number;
 }
