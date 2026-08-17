@@ -45,7 +45,7 @@ export enum PregnancyStatusEnum {
 	},
 })
 export class Patient extends BaseDH {
-	@Prop({ description: 'Unique patient code for identification' })
+	@Prop({ unique: true, description: 'Unique patient code for identification' })
 	patientCode: string;
 
 	@Prop({

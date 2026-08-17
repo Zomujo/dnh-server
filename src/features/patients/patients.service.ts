@@ -148,8 +148,21 @@ export class PatientsService {
 		});
 	}
 
+	private async generateUniquePatientCode(): Promise<string> {
+		const MAX_ATTEMPTS = 5;
+		for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+			const candidate = generateCode();
+			if (!(await this.patientModel.exists({ patientCode: candidate }))) {
+				return candidate;
+			}
+		}
+		throw new Error(
+			`Could not generate a unique patient code after ${MAX_ATTEMPTS} attempts`,
+		);
+	}
+
 	async create(dto: CreatePatientDto) {
-		dto.patientCode = generateCode();
+		dto.patientCode = await this.generateUniquePatientCode();
 		const patient = await this.patientModel.create({ ...dto } as any);
 
 		await Promise.all(
@@ -197,7 +210,7 @@ export class PatientsService {
 		const patient = await this.patientModel.create({
 			...rest,
 			userId: `hcp-${uuidv7()}`,
-			patientCode: generateCode(),
+			patientCode: await this.generateUniquePatientCode(),
 			name,
 			dateOfBirth,
 			age: computedAge,
@@ -438,7 +451,10 @@ export class PatientsService {
 	}
 
 	async createPatient(data: Partial<Patient>): Promise<Patient> {
-		return this.patientModel.create(data);
+		return this.patientModel.create({
+			...data,
+			patientCode: data.patientCode ?? (await this.generateUniquePatientCode()),
+		});
 	}
 
 	async removePatientsByUserId(userId: string) {

@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
+import type { Model } from 'mongoose';
 import { BaseEntity } from '@/common/entities';
 import { generateCode } from '@/common/utils/helpers/code-generator.helper';
 import { deleteByPattern } from '@/core/caching/utils';
@@ -55,7 +56,18 @@ export const PersonnelSchema = SchemaFactory.createForClass(Personnel);
 
 PersonnelSchema.pre<Personnel>('save', async function () {
 	if (this.isNew) {
-		this.referralCode = generateCode('CCREF', this.userName);
+		const PersonnelModel = this.constructor as Model<Personnel>;
+		const MAX_ATTEMPTS = 5;
+		for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+			const candidate = generateCode();
+			if (!(await PersonnelModel.exists({ referralCode: candidate }))) {
+				this.referralCode = candidate;
+				return;
+			}
+		}
+		throw new Error(
+			`Could not generate a unique referral code after ${MAX_ATTEMPTS} attempts`,
+		);
 	}
 });
 

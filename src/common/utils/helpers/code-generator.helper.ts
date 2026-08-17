@@ -1,4 +1,4 @@
-export function generateCode(_prefix?: string, _name?: string) {
+export function generateCode() {
 	const uuid = crypto.randomUUID();
 	const slicedString = uuid.slice(0, 8);
 	return slicedString.toUpperCase();

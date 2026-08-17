@@ -7,7 +7,8 @@ import { NodeEnvs } from './common/enums';
 import { DomainLogger } from './core/logging/logging.service';
 
 async function bootstrap() {
-	const PORT = parseInt(process.env.PORT as string) ?? 4815;
+	const parsedPort = parseInt(process.env.PORT as string);
+	const PORT = Number.isNaN(parsedPort) ? 4815 : parsedPort;
 	const environment = process.env.NODE_ENV as NodeEnvs;
 
 	const app = await NestFactory.create(AppModule, {

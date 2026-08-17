@@ -58,6 +58,11 @@ export class PersonnelAccount extends BaseEntity {
 export const PersonnelAccountSchema =
 	SchemaFactory.createForClass(PersonnelAccount);
 
+// One account per (email, provider) pair — a person may hold a separate
+// EMAIL-password account and GOOGLE account under the same email, but never
+// two accounts of the same provider for the same email.
+PersonnelAccountSchema.index({ email: 1, provider: 1 }, { unique: true });
+
 PersonnelAccountSchema.pre<PersonnelAccount>('save', async function () {
 	if (this.isModified('password') && this.password) {
 		this.password = await bcrypt.hash(this.password, 10);

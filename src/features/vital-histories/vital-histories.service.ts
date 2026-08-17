@@ -519,36 +519,44 @@ export class VitalHistoriesService {
 
 		const { vitals, ...others } = dto;
 
-		try {
-			if (vitals) {
-				await this.vitalHistoryModel.deleteMany({ clusterId: id });
+		if (vitals) {
+			const vHistory = clusterVitalHistory[0];
+			const recordedAt = dto.recordedAt ?? vHistory.recordedAt;
+			const notes = dto.notes ?? vHistory.notes;
 
-				const vitalsInput = vitals.map((vital) => {
-					const vHistory = clusterVitalHistory[0];
+			// Upsert each vital by its natural key (clusterId + vitalType) instead
+			// of deleting the whole cluster and reinserting it. This repo's
+			// staging/prod MongoDB runs standalone (no replica set), so
+			// multi-document transactions aren't available — a delete-then-insert
+			// here would leave a window with zero documents for the cluster if
+			// the process died in between. A single-document upsert is atomic on
+			// its own without needing a transaction, so this never has that gap.
+			await Promise.all(
+				vitals.map((vital) =>
+					this.vitalHistoryModel.updateOne(
+						{ clusterId: id, vitalType: vital.vitalType },
+						{
+							$set: { ...vital, recordedAt, notes },
+							$setOnInsert: {
+								userId: vHistory.userId,
+								patient: vHistory.patient,
+								clusterId: id,
+								createdBy: vHistory.createdBy,
+							},
+						},
+						{ upsert: true },
+					),
+				),
+			);
 
-					const replacement = {
-						userId: vHistory.userId,
-						patient: vHistory.patient,
-						clusterId: id,
-						recordedAt: dto.recordedAt ?? vHistory.recordedAt,
-						notes: dto.notes ?? vHistory.notes,
-						createdBy: vHistory.createdBy,
-						createdAt: vHistory.createdAt,
-						...vital,
-					};
-					return replacement;
-				});
-				const input = vitalsInput.filter((vital) => vital);
-
-				await this.vitalHistoryModel.insertMany(input);
-			} else {
-				await this.vitalHistoryModel.updateMany(
-					{ clusterId: id },
-					{ ...others },
-				);
-			}
-		} catch {
-			await this.vitalHistoryModel.insertMany(clusterVitalHistory);
+			// Drop any reading whose vitalType is no longer present in the new set.
+			const keptTypes = vitals.map((vital) => vital.vitalType);
+			await this.vitalHistoryModel.deleteMany({
+				clusterId: id,
+				vitalType: { $nin: keptTypes },
+			});
+		} else {
+			await this.vitalHistoryModel.updateMany({ clusterId: id }, { ...others });
 		}
 
 		return id;
@@ -578,7 +586,7 @@ export class VitalHistoriesService {
 				// 1. Match only this patient's vitals
 				{
 					$match: {
-						$or: [{ userId: userId }, { patient: userId }],
+						userId,
 					},
 				},
 
@@ -673,7 +681,7 @@ export class VitalHistoriesService {
 		>([
 			{
 				$match: {
-					$or: [{ userId }, { patient: userId }],
+					userId,
 				},
 			},
 			{ $sort: { createdAt: -1 } },
@@ -729,7 +737,7 @@ export class VitalHistoriesService {
 		]);
 
 		const count = await this.vitalHistoryModel.countDocuments({
-			$or: [{ userId }, { patient: userId }],
+			userId,
 		});
 
 		return { rows: results, count };
@@ -742,7 +750,7 @@ export class VitalHistoriesService {
 			{
 				$match: {
 					_id: new Types.ObjectId(id),
-					$or: [{ userId }, { patient: userId }],
+					userId,
 				},
 			},
 			{
@@ -814,7 +822,7 @@ export class VitalHistoriesService {
 		const result = await this.vitalHistoryModel.findOneAndUpdate(
 			{
 				_id: new Types.ObjectId(id),
-				$or: [{ userId }, { patient: userId }],
+				userId,
 				// Only the personnel who recorded this reading may edit it.
 				createdBy: new Types.ObjectId(personnelId),
 			},
@@ -834,7 +842,7 @@ export class VitalHistoriesService {
 		const { timestamp } = getDateRangeFilter(dateRange)!;
 
 		const match = {
-			$or: [{ userId }, { patient: userId }],
+			userId,
 			vitalType: VitalTypes.BLOOD_PRESSURE,
 			recordedAt: timestamp,
 		};
@@ -907,7 +915,7 @@ export class VitalHistoriesService {
 		const vitalTrend = await this.vitalHistoryModel.aggregate([
 			{
 				$match: {
-					$or: [{ userId }, { patient: userId }],
+					userId,
 					...matchRecord,
 				},
 			},
@@ -925,7 +933,7 @@ export class VitalHistoriesService {
 
 		const latest = await this.vitalHistoryModel
 			.findOne({
-				$or: [{ userId }, { patient: userId }],
+				userId,
 				...matchRecord,
 			})
 			.sort({ recordedAt: -1 })

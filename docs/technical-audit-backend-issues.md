@@ -272,13 +272,156 @@ naturally expired, so there's no manual cleanup path needed.
 
 | # | Issue | Location | Severity | Status |
 |---|---|---|---|---|
-| 6.3 | Mass assignment: `CreateVitalHistoryDto.vitals` array has no `@ValidateNested()`/`@Type()` — nested keys bypass whitelist entirely | `create.dto.ts:76-78`; `vital-histories.service.ts:132-141` | Critical | Open |
-| 6.1 | Non-atomic `deleteMany`+`insertMany` with no session/transaction; malformed cluster still returns 200 success | `vital-histories.service.ts:426-465` | High | Open |
-| 6.2 | `deleteMany` result object always truthy — deleting a nonexistent cluster returns success | `vital-histories.service.ts:467-476` | Medium | Open |
-| 6.4 | `$or:[{userId},{patient:userId}]` compares ObjectId path against Firebase string ID — silently never matches in aggregations, throws unhandled `CastError`→500 in query methods | `:486,581,650,732,849,636-638,765,866-869,714-716` | High | Open |
-| 6.5 | Unanchored, unescaped `new RegExp(filters.name)` in medication upsert; vital-history identity filter has no `recordedAt` component | `medications.service.ts:125`; `vital-history.schema.ts:122-131` | High | **Partially resolved** — the injection/ReDoS half is fixed (see 2.7 notes); still unanchored ("Met" matches "Metformin") and the `recordedAt` gap is untouched |
-| 6.6 | 8 AI event handlers `return` before awaiting persistence — errors unobservable; tool generates its own disconnected ObjectId | `memory-scribe.service.ts:241-341` | Medium | Open |
-| 6.7 | Medication count query crashes 500 for zero-medication patients; `PORT` `??` doesn't catch `NaN`; `email` has no unique index; `referralCode` generator ignores its args and has no collision retry | `medications.service.ts:405-406`; `main.ts:10`; `personnel.entity.ts:30-31,45-48`; `code-generator.helper.ts:1-5` | Medium/High | Open |
+| 6.3 | Mass assignment: `CreateVitalHistoryDto.vitals` array has no `@ValidateNested()`/`@Type()` — nested keys bypass whitelist entirely | `create.dto.ts:76-78`; `vital-histories.service.ts:132-141` | Critical | **Resolved** — see notes below |
+| 6.1 | Non-atomic `deleteMany`+`insertMany` with no session/transaction; malformed cluster still returns 200 success | `vital-histories.service.ts:426-465` | High | **Resolved** — see notes below |
+| 6.2 | `deleteMany` result object always truthy — deleting a nonexistent cluster returns success | `vital-histories.service.ts:467-476` | Medium | **Resolved (already superseded)** — see notes below |
+| 6.4 | `$or:[{userId},{patient:userId}]` compares ObjectId path against Firebase string ID — silently never matches in aggregations, throws unhandled `CastError`→500 in query methods | `:486,581,650,732,849,636-638,765,866-869,714-716` | High | **Resolved** — see notes below |
+| 6.5 | Unanchored, unescaped `new RegExp(filters.name)` in medication upsert; vital-history identity filter has no `recordedAt` component | `medications.service.ts:125`; `vital-history.schema.ts:122-131` | High | **Resolved** — see notes below |
+| 6.6 | 8 AI event handlers `return` before awaiting persistence — errors unobservable; tool generates its own disconnected ObjectId | `memory-scribe.service.ts:241-341` | Medium | **Resolved** — see notes below |
+| 6.7 | Medication count query crashes 500 for zero-medication patients; `PORT` `??` doesn't catch `NaN`; `email` has no unique index; `referralCode` generator ignores its args and has no collision retry | `medications.service.ts:405-406`; `main.ts:10`; `personnel.entity.ts:30-31,45-48`; `code-generator.helper.ts:1-5` | Medium/High | **Resolved** — see notes below |
+
+### Notes — 6.3 (mass assignment in vitals)
+
+`CreateVitalHistoryDto.vitals` had only `@IsArray()`/`@IsNotEmpty()` — without
+`@ValidateNested({each:true})` + `@Type(() => VitalHistoryInputDto)`, class-transformer
+never instantiated each array element, so the global `ValidationPipe`'s `whitelist:
+true` never inspected them and every key a client put in a `vitals[i]` object survived
+untouched. That mattered concretely in `vital-histories.service.ts`'s `create()`/
+`update()`: both spread `...vital` *last* into an object that had already set
+`createdBy`, `patient`, `userId`, `clusterId`, `_id` from trusted server-side values —
+an unvalidated `vital.createdBy` would silently overwrite the real one, letting a
+personnel spoof another personnel as the record's author and defeat the 2.3 ownership
+checks entirely. Fixed by adding both decorators; `whitelist: true` now correctly
+restricts each element to `{vitalType, value, unit, severity}`, none of which collide
+with the protected field names, so this alone closes both the `create()` and `update()`
+paths (the latter reuses the same DTO via `PartialType(OmitType(...))`).
+
+### Notes — 6.1 (non-atomic delete+insert) and 6.2 (stale, superseded)
+
+**6.2 was already resolved as a side effect of the 2.3 ownership-check work earlier in
+this pass.** The audit's complaint — `remove()` calling `deleteMany` without checking
+whether anything existed first — no longer applies: `remove()` now does `findOne` and
+throws `NotFoundException` before ever calling `deleteMany`, so a nonexistent cluster
+already 404s. No further change made.
+
+**6.1 required a different fix than a straight port of "add a transaction."** Staging
+and production both run standalone (non-replica-set) MongoDB, which rejects
+multi-document transactions outright — `session.startTransaction()` would simply fail
+in those environments. Instead, `update()`'s `vitals` branch was redesigned around
+per-vitalType upserts: each incoming vital is `updateOne`'d by its natural key
+`(clusterId, vitalType)` with `upsert: true`, which MongoDB guarantees atomic on a
+single document without needing a transaction. An existing vitalType updates in place
+(keeping its `_id`/`createdAt`); a new one gets inserted. Only after all upserts
+complete does a `deleteMany({clusterId, vitalType: {$nin: keptTypes}})` clean up any
+vitalType no longer present in the new set. This means there's never a window where the
+cluster has zero documents (the actual data-loss risk in the old delete-then-insert
+code), and the worst-case failure mode is a stale leftover vitalType — recoverable, not
+data loss. Also removed the old bare `catch { insertMany(clusterVitalHistory) }` "rollback"
+that silently swallowed errors and still returned success (the literal "malformed
+cluster still returns 200" bug) — failures now propagate to `throwError()` for a real
+error response.
+
+### Notes — 6.4 (ObjectId/string comparison)
+
+Traced every caller of the 8 affected methods (`client.service.ts`, `hcp.service.ts`) —
+in every call path, the `userId` argument passed in is the patient's Firebase string
+UID, never the `Patient` document's Mongo `_id`. Since the schema's `patient` field is
+an `ObjectId` foreign key while `userId` is a plain `String`, `{patient: userId}` can
+never legitimately match in any call path — confirmed by exhaustive caller analysis, not
+just in theory. In aggregation pipelines this silently contributed zero matches (Mongoose
+doesn't auto-cast `$match` filter values); in regular query-builder calls
+(`updateVitalLog`'s `findOneAndUpdate`) it threw a `CastError` since Mongoose does cast
+there. Removed the dead `{patient: userId}` disjunct from all 8 occurrences, leaving
+just `{userId}` — no loss of matching behavior since that branch never matched anything.
+
+### Notes — 6.5 (unanchored regex, missing recordedAt)
+
+**Medication upsert regex**: even after the 2.7 escaping fix, `new RegExp(escapeRegExp(filters.name), 'i')`
+was still a substring match. It only runs as a fallback when the vector-search lookup
+finds nothing, feeding straight into `findOneAndUpdate(..., {upsert: true})` — a partial
+AI-extracted name like `"Met"` could match and silently overwrite an existing
+`"Metformin"` record with unrelated dosage data. Anchored it:
+`` new RegExp(`^${escapeRegExp(filters.name)}$`, 'i') `` — appropriate since this is a
+last-resort exact-match path beneath the real semantic search, not a partial-match search.
+
+**Vital-history AI identity filter**: `VitalHistoryIdentitySchema` was
+`{userId, patient, vitalType, value}` — no time component, so two identical readings
+(e.g. a recurring "120/80" blood pressure) logged on different days would collide and
+silently overwrite each other via `upsertVitalHistory`'s `findOneAndUpdate(..., {upsert:
+true})`. Per product decision, replaced `value` with `recordedAt` in the identity
+schema rather than just adding `recordedAt` alongside `value` — the latter would still
+collide on same-day identical readings, and matching identity *on* the value you might
+be trying to correct doesn't support the presumed use case (the AI correcting a
+just-logged reading's value within the same conversation). Identity is now pinned to
+the specific recorded event by exact timestamp; `value` is purely mutable data.
+
+### Notes — 6.6 (swallowed AI persistence errors, fabricated ObjectId)
+
+Both bugs identified in the 2.8 pass were fixed here. **Swallowed errors**: all 8
+`@OnEvent` handlers did `return this.xService.upsertX(filters, data)` inside a `try`
+block — a bare `return <promise>`, not `return await <promise>`, which means a later
+rejection is never seen by the local `catch` (the `try` block has already exited by the
+time the promise settles). Since `EventEmitter2.emit()` is fire-and-forget (not
+`emitAsync()`), nothing else was awaiting that promise either — persistence failures
+became silent, unlogged unhandled rejections. Changed all 8 to `await`, so the existing
+`logger.error(...)` calls in each `catch` actually fire now. **Fabricated ObjectId**:
+each tool's `func` generated its own `new Types.ObjectId()` and returned it as the
+"created" ID — completely disconnected from whatever the DB actually assigns via the
+fire-and-forget event handler. Traced where that returned value goes: `memorize()`
+passes `toolNode.invoke()`'s result only to a `console.log`, nothing downstream (no
+further LLM turn, no other tool call) ever consumes it. Since it's provably dead output,
+replaced it with a plain `'queued'` acknowledgment string across all 8 tools rather than
+returning a misleading fake ID.
+
+### Notes — 6.7 (count crash, PORT NaN, email uniqueness, code generation)
+
+**Medication count crash**: `countBySchedules()` called `delete result[0]._id` before
+checking whether `result[0]` existed. Mongo's `$group` emits nothing at all when zero
+documents match the preceding `$match`, so a patient with no medications yet got
+`result = []`, `result[0] === undefined`, and the `delete` threw. Reordered the guard
+before the `delete`.
+
+**`PORT` NaN**: `parseInt(process.env.PORT as string) ?? 4815` — `??` only falls back on
+`null`/`undefined`, not `NaN`, so a missing/non-numeric `PORT` left `PORT` as `NaN`.
+Replaced with an explicit `Number.isNaN` check.
+
+**Email uniqueness**: `Personnel` no longer even has an `email` field (moved to
+`PersonnelAccount` earlier in this pass) — the audit's file reference is stale, but the
+underlying gap was real: `PersonnelAccount.email` had no index at all, and
+`ChronicCareAuthService.create()` unconditionally creates a new `PersonnelAccount` row
+every call regardless of whether one already exists for that email+provider, so nothing
+stopped duplicate account rows from being created (e.g. under concurrent signups), which
+would make `login()`'s `findOne({provider, email})` resolve arbitrarily. Per product
+decision, added a compound unique index on `{email, provider}` (not email alone) — a
+person may hold a separate EMAIL-password account and GOOGLE account under the same
+email, but never two accounts of the same provider for the same email.
+
+**Code generation**: `generateCode(_prefix?, _name?)` silently discarded both arguments
+it was called with (`personnel.entity.ts` passed `'CCREF'`/the personnel's name;
+`client.service.ts` passed `'ZC'`/the patient's name), returning an unrelated random
+8-char hex string instead. Per product decision, rather than making the function
+actually use those arguments, its now-unused parameters were removed entirely
+(`generateCode()`, no args) and the 2 call sites that were passing arguments were
+updated to call it bare — its implementation (a random 8-char slice of a UUID) is
+unchanged. Separately, no caller ever checked for collisions: `Personnel.referralCode`
+already had `unique: true` at the schema level, so a collision would fail the entire
+signup with a confusing "forbidden: referralCode" 400 rather than corrupting data — bad
+UX for an internal random-generation fluke, but not silent. `Patient.patientCode` had no
+uniqueness constraint at all, so a collision there would have silently created two
+patients sharing the same code. Fixed both: added `unique: true` to `Patient.patientCode`,
+added a bounded (5-attempt) collision-check-then-generate retry loop directly in
+`PersonnelSchema`'s pre-save hook (checking `this.constructor.exists({referralCode})`
+before accepting a candidate), and added an equivalent `generateUniquePatientCode()`
+helper in `PatientsService`, now used by all three patient-creation paths (`create()`,
+`createByPersonnel()`, `createPatient()` — the last of which `client.service.ts` used to
+pre-generate a code for and pass in; that generation was removed from `client.service.ts`
+in favor of letting `createPatient()` generate it internally, so there's one source of
+truth for patient-code collision-avoidance instead of three).
+
+`generateAnotherCode()` (a second, unused function in the same file that already did
+prefix+initials+random-digit formatting correctly) was left untouched — out of scope
+once `generateCode()`'s fix path changed to "drop the arguments" rather than "port this
+logic in."
 
 ## Notification & reminder engine (§5)
 
@@ -346,7 +489,7 @@ naturally expired, so there's no manual cleanup path needed.
 2. Bound `repeatEvery` at schema/validator/data-layer; remove/gate sub-minute types (5.1, 5.3)
 3. ~~Require invitation/facility approval for signup; remove email-as-password Google path (2.2, 2.4)~~ — done
 4. ~~Remove password/payload logging (2.9)~~ — done
-5. Add nested validation to `CreateVitalHistoryDto.vitals`, move spread order (6.3)
+5. ~~Add nested validation to `CreateVitalHistoryDto.vitals`, move spread order (6.3)~~ — done (nested validation alone was sufficient; the allowed vitals keys don't collide with the protected ones, so no spread-order change was needed)
 
 **Within one week**
 6. Invert the global auth guard to deny-by-default
@@ -354,11 +497,13 @@ naturally expired, so there's no manual cleanup path needed.
    originally recommended — see notes above (personnel-identity checks on mutations,
    not facility scoping on reads, per product decision)
 8. ~~Remove/allowlist `searchFields`/`orderBy`; escape search expression; cap `pageSize` (2.7)~~ — done (allowlist derived from `.select()`, not `orderBy` — see notes)
-9. Fix medication count crash and cast-error query paths (6.4, 6.7)
+9. ~~Fix medication count crash and cast-error query paths (6.4, 6.7)~~ — done
 
 **Subsequent**
 10. Single server-side severity scheme, hypertensive-crisis tier, hypotension detection (3.1–3.3)
 11. Re-base adherence on scheduled doses, keyed by medication ID, late-confirmation window, unique index (§4)
 12. Fix `formatFrequency` (5.7)
-13. ~~Enforce authenticated user identifier server-side on every AI persistence tool~~ — done (2.8); await the 8 event handlers still open (6.6)
+13. ~~Enforce authenticated user identifier server-side on every AI persistence tool~~ — done (2.8); the 8 event handlers are also done now (6.6)
 14. ~~Verify JWT audience/issuer on chronic-care tokens; add a Redis-backed revocation path~~ — done (2.10, not in the audit's original sequence — added because it surfaced while closing 2.9)
+15. ~~Replace `deleteMany`+`insertMany` with per-vitalType upserts; drop the dead `patient:userId` filter disjunct; anchor the medication upsert regex; pin vital-history AI identity to `recordedAt`~~ — done (6.1, 6.2, 6.4, 6.5)
+16. ~~Fix `PORT` NaN fallback; add email and patient-code uniqueness with collision-retry; drop `generateCode`'s unused params~~ — done (6.7)

@@ -121,7 +121,12 @@ export class MedicationsService {
 
 		const whereConditions: Record<string, any> = {};
 		if (!searchMedication.length) {
-			whereConditions.name = new RegExp(escapeRegExp(filters.name), 'i');
+			// Anchored: this is a last-resort exact-name fallback beneath the
+			// semantic vector search above, not a partial-match search. An
+			// unanchored regex here would let a short/partial AI-extracted name
+			// (e.g. "Met") match an unrelated existing medication ("Metformin")
+			// and silently overwrite it via the upsert below.
+			whereConditions.name = new RegExp(`^${escapeRegExp(filters.name)}$`, 'i');
 			whereConditions.patient = filters.patient;
 		} else {
 			whereConditions._id = new Types.ObjectId(
@@ -419,8 +424,11 @@ export class MedicationsService {
 				},
 			},
 		]);
+		if (!result[0]) {
+			return { morning: 0, afternoon: 0, evening: 0 };
+		}
 		delete result[0]._id;
-		return result[0] ?? { morning: 0, afternoon: 0, evening: 0 };
+		return result[0];
 	}
 
 	async countByUserId(userId: string): Promise<number> {

@@ -119,11 +119,17 @@ export const VitalHistoryIdentitySchema = z.object({
 		"Type of vital sign being recorded. Example: 'bloodPressure'",
 	),
 
-	value: z
-		.string()
-		.min(1, 'Value must not be empty')
-		.max(50, 'Value cannot exceed 50 characters')
-		.describe("Measured value of the vital sign. Example: '120/80'"),
+	// Identity is pinned to the specific recorded event (not the value) so
+	// this filter can locate — and correct — a reading already logged
+	// earlier in the same conversation without colliding with a different,
+	// unrelated reading that happens to share the same value (e.g. a
+	// recurring "120/80" blood pressure logged on different days).
+	recordedAt: z.iso
+		.datetime({ offset: true })
+		.pipe(z.coerce.date())
+		.describe(
+			"ISO date-time of the specific reading being referenced. Example: '2024-06-01T10:30:00.000Z'",
+		),
 });
 
 export const VitalHistoryAISchema = z.object({

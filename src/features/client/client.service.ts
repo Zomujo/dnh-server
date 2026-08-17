@@ -36,7 +36,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { v7 as uuidv7 } from 'uuid';
 import { generateFilter } from '@/common/factory';
-import { escapeRegExp, generateCode } from '@/common/utils/helpers';
+import { escapeRegExp } from '@/common/utils/helpers';
 import { CacheService } from '@/core/caching/caching.service';
 import { FirebaseService } from '@/core/firebase/firebase.service';
 import { AdherencesService } from '@/features/adherences/adherences.service';
@@ -310,10 +310,8 @@ export class ClientService {
 					phoneNumber: `+${fuser.doc.phone_number.dial_code}${fuser.doc.phone_number.number}`,
 				};
 			}
-			const patientCode = this.generatePatientCode(user.name);
 			patient = await this.patientsService.createPatient({
 				qdrantId,
-				patientCode,
 				userId,
 				name: user.name,
 				language: language.toString(),
@@ -322,10 +320,6 @@ export class ClientService {
 		}
 
 		return patient;
-	}
-
-	private generatePatientCode(name: string) {
-		return generateCode('ZC', name);
 	}
 
 	async fetchPatientData(userId: string) {

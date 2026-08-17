@@ -1,5 +1,6 @@
 import { ApiProperty, PickType } from '@nestjs/swagger';
-import { IsArray, IsNotEmpty } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsNotEmpty, ValidateNested } from 'class-validator';
 import {
 	endOfDay,
 	endOfMonth,
@@ -75,6 +76,8 @@ export class CreateVitalHistoryDto extends PickType(VitalHistoryDto, [
 	})
 	@IsNotEmpty()
 	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => VitalHistoryInputDto)
 	vitals: VitalHistoryInputDto[];
 }
 

@@ -8,7 +8,6 @@ import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
-import { Types } from 'mongoose';
 import { AdherencesService } from '@/features/adherences/adherences.service';
 import {
 	AdherenceLogAISchema,
@@ -164,9 +163,8 @@ export class MemoryScribeService {
 			'Tool for creating or updating an adherence log. Accepts filters (past values) and data (present values).',
 		schema: AdherenceLogAISchema,
 		func: async (params) => {
-			const id = new Types.ObjectId();
 			this.eventEmitter.emit('adherenceLog.persist', params);
-			return id.toString();
+			return 'queued';
 		},
 	});
 
@@ -176,9 +174,8 @@ export class MemoryScribeService {
 			'Tool for creating or updating an adherence pattern. Accepts filters (past values) and data (present values).',
 		schema: AdherencePatternAISchema,
 		func: async ({ filters, data }) => {
-			const id = new Types.ObjectId();
 			this.eventEmitter.emit('adherencePattern.persist', { filters, data });
-			return id.toString();
+			return 'queued';
 		},
 	});
 
@@ -188,9 +185,8 @@ export class MemoryScribeService {
 			'Tool for creating or updating a chronic condition. Accepts filters (past values) and data (present values).',
 		schema: ChronicConditionAISchema,
 		func: async ({ filters, data }) => {
-			const id = new Types.ObjectId();
 			this.eventEmitter.emit('chronicCondition.persist', { filters, data });
-			return id.toString();
+			return 'queued';
 		},
 	});
 
@@ -200,9 +196,8 @@ export class MemoryScribeService {
 			'Tool for creating or updating a patient concern. Accepts filters (past values) and data (present values).',
 		schema: ConcernAISchema,
 		func: async ({ filters, data }) => {
-			const id = new Types.ObjectId();
 			this.eventEmitter.emit('concern.persist', { filters, data });
-			return id.toString();
+			return 'queued';
 		},
 	});
 
@@ -212,9 +207,8 @@ export class MemoryScribeService {
 			'Tool for creating or updating a medication record. Accepts filters (past values) and data (present values).',
 		schema: MedicationAISchema,
 		func: async ({ filters, data }) => {
-			const id = new Types.ObjectId();
 			this.eventEmitter.emit('medication.persist', { filters, data });
-			return id.toString();
+			return 'queued';
 		},
 	});
 
@@ -224,9 +218,8 @@ export class MemoryScribeService {
 			'Tool for creating or updating a patient record. Accepts filters (identity) and data (present values).',
 		schema: PatientAISchema,
 		func: async ({ filters, data }) => {
-			const id = new Types.ObjectId();
 			this.eventEmitter.emit('patient.persist', { filters, data });
-			return id.toString();
+			return 'queued';
 		},
 	});
 
@@ -236,9 +229,8 @@ export class MemoryScribeService {
 			'Tool for creating or updating a vital history record. Accepts filters (identity) and data (upsert).',
 		schema: VitalHistoryAISchema,
 		func: async ({ filters, data }) => {
-			const id = new Types.ObjectId();
 			this.eventEmitter.emit('vitalHistory.persist', { filters, data });
-			return id.toString();
+			return 'queued';
 		},
 	});
 
@@ -248,9 +240,8 @@ export class MemoryScribeService {
 			'Tool for creating or updating a notification. Accepts filters (past values) and data (present values).',
 		schema: NotificationUpsertRequestSchema,
 		func: async ({ filters, data }) => {
-			const id = new Types.ObjectId();
 			this.eventEmitter.emit('notification.persist', { filters, data });
-			return id.toString();
+			return 'queued';
 		},
 	});
 
@@ -261,7 +252,7 @@ export class MemoryScribeService {
 	}) {
 		try {
 			const { filters, data } = payload;
-			return this.adherencesService.upsertAdherenceLog(filters, data);
+			await this.adherencesService.upsertAdherenceLog(filters, data);
 		} catch (error) {
 			this.logger.error('Error persisting adherence log', { payload, error });
 		}
@@ -274,7 +265,7 @@ export class MemoryScribeService {
 	}) {
 		try {
 			const { filters, data } = payload;
-			return this.adherencesService.upsertAdherencePattern(filters, data);
+			await this.adherencesService.upsertAdherencePattern(filters, data);
 		} catch (error) {
 			this.logger.error('Error persisting adherence pattern', {
 				payload,
@@ -290,10 +281,7 @@ export class MemoryScribeService {
 	}) {
 		try {
 			const { filters, data } = payload;
-			return this.chronicConditionsService.upsertChronicCondition(
-				filters,
-				data,
-			);
+			await this.chronicConditionsService.upsertChronicCondition(filters, data);
 		} catch (error) {
 			this.logger.error('Error persisting chronic condition', {
 				payload,
@@ -309,7 +297,7 @@ export class MemoryScribeService {
 	}) {
 		try {
 			const { filters, data } = payload;
-			return this.concernsService.upsertConcern(filters, data);
+			await this.concernsService.upsertConcern(filters, data);
 		} catch (error) {
 			this.logger.error('Error persisting concern', { payload, error });
 		}
@@ -322,7 +310,7 @@ export class MemoryScribeService {
 	}) {
 		try {
 			const { filters, data } = payload;
-			return this.medicationsService.upsertMedication(filters, data);
+			await this.medicationsService.upsertMedication(filters, data);
 		} catch (error) {
 			this.logger.error('Error persisting medication', { payload, error });
 		}
@@ -335,7 +323,7 @@ export class MemoryScribeService {
 	}) {
 		try {
 			const { filters, data } = payload;
-			return this.patientsService.upsertPatient(filters, data);
+			await this.patientsService.upsertPatient(filters, data);
 		} catch (error) {
 			this.logger.error('Error persisting patient', { payload, error });
 		}
@@ -348,7 +336,7 @@ export class MemoryScribeService {
 	}) {
 		try {
 			const { filters, data } = payload;
-			return this.vitalHistoriesService.upsertVitalHistory(filters, data);
+			await this.vitalHistoriesService.upsertVitalHistory(filters, data);
 		} catch (error) {
 			this.logger.error('Error persisting vital history', { payload, error });
 		}
@@ -361,7 +349,7 @@ export class MemoryScribeService {
 	}) {
 		try {
 			const { filters, data } = payload;
-			return this.notificationsService.upsertNotification(filters, data);
+			await this.notificationsService.upsertNotification(filters, data);
 		} catch (error) {
 			this.logger.error('Error persisting notification', { payload, error });
 		}
