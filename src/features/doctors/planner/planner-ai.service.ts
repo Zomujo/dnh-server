@@ -4,7 +4,6 @@ import {
 	AIMessageChunk,
 	HumanMessage,
 	ToolMessage,
-	trimMessages,
 } from '@langchain/core/messages';
 import {
 	ChatPromptTemplate,
@@ -28,7 +27,6 @@ import { MongoDBSaver } from '@langchain/langgraph-checkpoint-mongodb';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { MongoClient } from 'mongodb';
 import { Connection, Model, Types } from 'mongoose';
 import { getUserTimezone } from '@/features/client/ai/states';
 import {
@@ -47,17 +45,15 @@ import { PlannerStateSchema } from './state/schema.state';
 
 @Injectable()
 export class PlannerAiService {
-	private checkpointer = new MongoDBSaver({
-		client: new MongoClient(process.env.DB_CONNECTION_STRING!) as any,
-		dbName: process.env.DB_NAME,
-	});
+	// Reuses Mongoose's already-connected, already-lifecycle-managed MongoClient
+	// (see 7.1/7.2 fix notes) instead of opening a dedicated connection pool.
+	private checkpointer: MongoDBSaver;
 	// private memory = new MemorySaver();
 	private model: Runnable<
 		BaseLanguageModelInput,
 		AIMessageChunk,
 		GoogleGenerativeAIChatCallOptions
 	>;
-	private counter: ChatGoogleGenerativeAI;
 	private toolsByName: Record<string, any>;
 
 	constructor(
@@ -66,6 +62,11 @@ export class PlannerAiService {
 		@InjectConnection() private connection: Connection,
 		private readonly plansService: PlansService,
 	) {
+		this.checkpointer = new MongoDBSaver({
+			client: this.connection.getClient() as any,
+			dbName: process.env.DB_NAME,
+		});
+
 		const toolsByName = {
 			[this.querySchema.name]: this.querySchema,
 			[this.queryData.name]: this.queryData,
@@ -79,18 +80,6 @@ export class PlannerAiService {
 
 		this.toolsByName = toolsByName;
 		this.model = model.bindTools(tools);
-		this.counter = model;
-	}
-
-	private get trimmer() {
-		return trimMessages({
-			maxTokens: 80000,
-			strategy: 'last',
-			tokenCounter: this.counter,
-			includeSystem: true,
-			allowPartial: false,
-			startOn: 'human',
-		});
 	}
 
 	private get agent() {
@@ -174,7 +163,6 @@ export class PlannerAiService {
 			threadId = config.configurable.thread_id;
 		}
 
-		// const messages = await this.trimmer.invoke(state.messages);
 		const messages = state.messages;
 		const prompt = await promptTemplate.invoke({
 			patientId: state.patient.id,

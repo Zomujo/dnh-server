@@ -672,7 +672,7 @@ a correctness bug.
 | # | Issue | Location | Severity | Status |
 |---|---|---|---|---|
 | 7.1 | Cache-invalidation utility hits Redis on every write across 15 entities, but the only consumer interceptor is never registered — 100% overhead, re-raises on transient faults and fails the originating write | `delete-prefix.util.ts:4-38`; `caching.module.ts:34-37`; `caching.interceptor.ts:52` | High | **Resolved** — see notes below |
-| 7.2 | AI service creates 3 unmanaged DB connection pools with no `onModuleDestroy`/`close()`; quadratic re-encoding per model call | `ai.service.ts:52-55,96-108`; `ai-ext.service.ts:24-25`; `planner-ai.service.ts:50-51` | Medium | Open |
+| 7.2 | AI service creates 3 unmanaged DB connection pools with no `onModuleDestroy`/`close()`; quadratic re-encoding per model call | `ai.service.ts:52-55,96-108`; `ai-ext.service.ts:24-25`; `planner-ai.service.ts:50-51` | Medium | **Resolved (connection pools)** — see notes below |
 | 7.4 | Vital-history count pipeline has no `$match` stage — full collection scan, reports global count as per-patient | `vital-histories.service.ts:562-570` | Medium | Open |
 | 7.5 | Unwrapped integer/double coercion on a free-text BP value — unhandled 500 on trends endpoint | `:747-748,853`; `vital-history.dto.ts:76-79` | Medium | Open |
 
@@ -715,6 +715,50 @@ use**, not deleted. Concretely:
   7.1 but is otherwise inert right now (zero callers) — fixed proactively so that if/when
   this utility is re-wired back into entity hooks, cache-invalidation failures can never
   again fail the write they're meant to invalidate on behalf of.
+
+### Notes — 7.2 (unmanaged connection pools; quadratic re-tokenization)
+
+Two distinct problems bundled into one finding, resolved separately per product decision.
+
+**Connection pools (fixed):** `ClientAIService`, `ExtClientAIService`, and `PlannerAiService`
+each independently did `new MongoClient(process.env.DB_CONNECTION_STRING!)` as a class field
+to back their LangGraph `MongoDBSaver` checkpointer — three separate, never-closed connection
+pools to the exact same MongoDB cluster the app is already connected to via Mongoose
+(`DatabaseModule`). `PlannerAiService` already injected `@InjectConnection()` for unrelated
+reasons (`connection.modelNames()`/`.model()`) and still opened its own separate client
+anyway. `MongoDBSaver` only needs a `client: MongoClient`, and Mongoose's
+`Connection.getClient()` returns exactly that — the same instance Nest already opens once and
+closes on shutdown. All 3 services now inject `Connection` via `@InjectConnection()` and pass
+`connection.getClient()` instead of constructing a new client, eliminating all 3 extra pools
+and the missing-cleanup problem in one move (no new `onModuleDestroy` needed — cleanup is
+inherited from Mongoose's own lifecycle). The checkpointer field initialization had to move
+from a class-field initializer into the constructor body in all 3 files, since it now depends
+on the injected `connection` parameter being assigned first. `client: connection.getClient()`
+needed the same `as any` cast the original `new MongoClient(...)` call already had — the repo
+has two different `mongodb` package versions in its dependency tree (Mongoose's internal
+`mongodb@6.21.0` vs. the top-level `mongodb@7.2.0` that `MongoDBSaver`'s types are written
+against), so their `MongoClient` types are structurally near-identical but not nominally
+assignable; this is a pre-existing dependency quirk, not something introduced here.
+
+Also found and removed while in this file: `PlannerAiService` had the exact same `trimmer`
+getter/`ChatGoogleGenerativeAI` token-counter setup as `ClientAIService` below, but its one
+call site (`llmCall`) had the `trimmer.invoke(...)` line commented out — fully dead code, not
+just unused-but-reachable. Removed the getter, the unused `counter` field, and the stale
+commented-out call site.
+
+**Quadratic re-tokenization (deliberately left as-is):** `ClientAIService`'s `trimmer` getter
+rebuilds a `trimMessages(...)` Runnable and re-tokenizes the *entire* accumulated message list
+on every `llmCall` node execution, which re-runs on every loop-back from `toolNode` within a
+single tool-calling turn — so total tokenization work grows roughly with the square of the
+number of tool calls in a turn. Verified this is local CPU work (`@langchain/core`'s base
+`getNumTokens` uses a locally-cached `tiktoken` encoder, not a network call to Google), and
+that re-trimming the full list before every individual model call is structurally necessary
+here — a tool result appended mid-loop could push a single call over the token budget on its
+own, so trimming can't just happen once at the start of a turn. Per product decision, left
+as-is: the cost is bounded, local, and the "fix" (memoizing per-message token counts across
+loop iterations) would add a meaningful amount of caching-correctness complexity for a cost
+that isn't currently a network or user-facing latency problem. Revisit if conversations
+start regularly running many tool-calling turns per message.
 
 ## Backend clinical-logic gaps (§3, server portions)
 
@@ -928,3 +972,4 @@ for 30 days (long enough to debug a failure pattern without accumulating indefin
 17. ~~Fix DAILY dose-count math; fix hardcoded/UTC-only cron timezone handling; fix multi-device push token clobbering; fix notification queue scheduler-lookup performance~~ — done (5.2, 5.4, 5.6, 7.3; 5.5 turned out to already be resolved by 5.2, verified empirically)
 18. ~~Wire up the VigilSentinel safety-alert pipeline (delete the never-invoked Archonen router, implement VigilSentinel as a facility push alert); add an explicit emergency-care directive to the main patient-facing prompt~~ — done (3.6, not in the audit's original sequence — grouped with 3.1/3.3 as the rest of the clinical-logic gaps); also fixed a second cross-tenant-write path found while investigating this (see 2.8's notes)
 19. ~~Remove the pointless per-write Redis cache-invalidation scans across 15 entities (dead since the consumer interceptor was never registered) and stop `deleteByPattern` from failing the originating write on a transient Redis error~~ — done (7.1, not in the audit's original sequence — the remaining §7 items (7.2, 7.4, 7.5) are still open); `CustomCacheInterceptor` and `deleteByPattern` were deliberately kept, dormant and documented, rather than deleted, per product decision to preserve the option to enable response caching later
+20. ~~Stop `ClientAIService`/`ExtClientAIService`/`PlannerAiService` from each opening their own unmanaged MongoDB connection pool; reuse Mongoose's already-connected, already-lifecycle-managed client instead~~ — done (7.2's connection-pool half, not in the audit's original sequence — grouped with the other §7 items); the quadratic re-tokenization half of 7.2 was deliberately left as-is per product decision — see notes above; 7.4 and 7.5 remain open

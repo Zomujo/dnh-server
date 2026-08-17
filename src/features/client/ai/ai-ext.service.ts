@@ -5,10 +5,9 @@ import { MongoDBSaver } from '@langchain/langgraph-checkpoint-mongodb';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import * as fs from 'fs/promises';
-import { MongoClient } from 'mongodb';
-import { Model, Types } from 'mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import * as os from 'os';
 import * as path from 'path';
 import { FirebaseService } from '@/core/firebase/firebase.service';
@@ -21,18 +20,24 @@ import { ClientAIState } from './states';
 export class ExtClientAIService {
 	private logger = new Logger(ExtClientAIService.name);
 
-	private checkpointer = new MongoDBSaver({
-		client: new MongoClient(process.env.DB_CONNECTION_STRING!) as any,
-		dbName: process.env.DB_NAME,
-	});
+	// Reuses Mongoose's already-connected, already-lifecycle-managed MongoClient
+	// (see 7.1/7.2 fix notes) instead of opening a dedicated connection pool.
+	private checkpointer: MongoDBSaver;
 
 	constructor(
 		@InjectModel(ClientAIChat.name)
 		private clientAIChatModel: Model<ClientAIChat>,
+		@InjectConnection()
+		private connection: Connection,
 		private eventEmitter: EventEmitter2,
 		private firebaseService: FirebaseService,
 		private configService: ConfigService,
-	) {}
+	) {
+		this.checkpointer = new MongoDBSaver({
+			client: this.connection.getClient() as any,
+			dbName: process.env.DB_NAME,
+		});
+	}
 
 	private statePersister = async (state: typeof ClientAIState.State) => {
 		this.eventEmitter.emit('state.persist', {

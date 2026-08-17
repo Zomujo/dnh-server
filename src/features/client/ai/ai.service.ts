@@ -29,9 +29,8 @@ import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { MongoDBSaver } from '@langchain/langgraph-checkpoint-mongodb';
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
-import { InjectModel } from '@nestjs/mongoose';
-import { MongoClient } from 'mongodb';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import { z } from 'zod';
 import {
 	ConversationPrompts,
@@ -49,10 +48,9 @@ import {
 
 @Injectable()
 export class ClientAIService {
-	private checkpointer = new MongoDBSaver({
-		client: new MongoClient(process.env.DB_CONNECTION_STRING!) as any,
-		dbName: process.env.DB_NAME,
-	});
+	// Reuses Mongoose's already-connected, already-lifecycle-managed MongoClient
+	// (see 7.1/7.2 fix notes) instead of opening a dedicated connection pool.
+	private checkpointer: MongoDBSaver;
 	// private memory = new MemorySaver();
 	private model: Runnable<
 		BaseLanguageModelInput,
@@ -65,9 +63,16 @@ export class ClientAIService {
 	constructor(
 		@InjectModel(ClientAIChat.name)
 		private readonly clientAIChatModel: Model<ClientAIChat>,
+		@InjectConnection()
+		private readonly connection: Connection,
 		private readonly memoryScribeService: MemoryScribeService,
 		private readonly eventEmitter: EventEmitter2,
 	) {
+		this.checkpointer = new MongoDBSaver({
+			client: this.connection.getClient() as any,
+			dbName: process.env.DB_NAME,
+		});
+
 		const toolsByName = this.memoryScribeService.memoryTools;
 		toolsByName[this.changeConversationScope.name] =
 			this.changeConversationScope;
