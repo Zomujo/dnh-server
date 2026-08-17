@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb';
 import { deleteByPattern } from '@/core/caching/utils';
 import { BaseDH } from '../../../common/entities/base-dh.entity';
 import { Personnel } from '../../doctors/entities/personnel.entity';
+import { Facility } from '../../facilities/entities/facility.entity';
 import { Patient } from '../../patients/entities/patient.entity';
 import { myEmitter } from '../../patients/utils/summary.event';
 import { Sections } from '../../patients/utils/summary.util';
@@ -118,6 +119,14 @@ export class VitalHistory extends BaseDH {
 		description: 'ID of the personnel who created this vital history record',
 	})
 	createdBy: Personnel;
+
+	@Prop({
+		type: ObjectId,
+		ref: 'Facility',
+		description:
+			'Facility the recording personnel belonged to at creation time',
+	})
+	facility: Facility;
 }
 
 export const VitalHistorySchema = SchemaFactory.createForClass(VitalHistory);

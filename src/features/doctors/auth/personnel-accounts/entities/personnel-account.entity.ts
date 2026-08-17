@@ -4,6 +4,17 @@ import { ObjectId } from 'mongodb';
 import { BaseEntity } from '@/common/entities';
 import { Personnel } from '@/features/doctors/entities/personnel.entity';
 
+export enum PersonnelAccountVerificationStatus {
+	// No proof of identity yet; blocked at login.
+	UNVERIFIED = 'unverified',
+	// Identity proven — OTP completed, or the provider (e.g. Google) already vouched for the email.
+	VERIFIED = 'verified',
+	// Allowed to log in without verification because the assigned role doesn't require it yet
+	// (see OTP_REQUIRED_ROLES). Kept distinct from VERIFIED so these accounts can be found and
+	// pushed through real verification once that role's flow ships.
+	EXEMPT = 'exempt',
+}
+
 @Schema({
 	timestamps: true,
 	toJSON: {
@@ -26,7 +37,15 @@ export class PersonnelAccount extends BaseEntity {
 	email: string;
 
 	@Prop({ description: 'The hashed password for authentication' })
-	password: string;
+	password?: string;
+
+	@Prop({
+		type: String,
+		enum: PersonnelAccountVerificationStatus,
+		default: PersonnelAccountVerificationStatus.UNVERIFIED,
+		description: 'Identity verification status for this specific account',
+	})
+	verificationStatus: PersonnelAccountVerificationStatus;
 
 	@Prop({
 		type: ObjectId,
@@ -40,7 +59,7 @@ export const PersonnelAccountSchema =
 	SchemaFactory.createForClass(PersonnelAccount);
 
 PersonnelAccountSchema.pre<PersonnelAccount>('save', async function () {
-	if (this.isModified('password')) {
+	if (this.isModified('password') && this.password) {
 		this.password = await bcrypt.hash(this.password, 10);
 	}
 });

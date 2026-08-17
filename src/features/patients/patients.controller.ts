@@ -11,13 +11,19 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { catchError, map, Observable, of } from 'rxjs';
-import { CustomApiResponse } from '@/common/decorators';
+import {
+	Authorize,
+	CustomApiResponse,
+	GetUser,
+	Roles,
+} from '@/common/decorators';
 import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import {
 	ApiSuccessResponseDto,
 	PaginatedDataResponseDto,
 	throwError,
 } from '@/common/utils/responses';
+import { PersonnelRoles, UserType } from '@/core/auth/enums';
 import { GetVitalHistoryDto } from '@/features/vital-histories/dto';
 import {
 	CreatePharmacyPatientDto,
@@ -62,10 +68,19 @@ export class PatientsController {
 	@CustomApiResponse(['created', 'authorizeChronicCare'], {
 		message: 'Patient created successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Post()
-	async createPatient(@Body() dto: CreatePharmacyPatientDto) {
+	async createPatient(
+		@Body() dto: CreatePharmacyPatientDto,
+		@GetUser('sub') personnelId: string,
+		@GetUser('facility') facilityId: string,
+	) {
 		try {
-			const response = await this.patientsService.createByPersonnel(dto);
+			const response = await this.patientsService.createByPersonnel(
+				dto,
+				personnelId,
+				facilityId,
+			);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.CREATED,
@@ -80,6 +95,7 @@ export class PatientsController {
 		type: GetPatientDto,
 		message: 'Patients fetched successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Get()
 	async findAllForPharmacy(@Query() query: FilterPatientsDto) {
 		try {
@@ -100,11 +116,12 @@ export class PatientsController {
 		}
 	}
 
-	@CustomApiResponse(['success'], {
+	@CustomApiResponse(['success', 'authorizeChronicCare'], {
 		type: GetPatientNoPaginateDto,
 		isArray: true,
 		message: 'Patients fetched successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Get('no-paginate')
 	async findAllNoPaginate(@Query() query: FilterPatientsNoPaginateDto) {
 		try {
@@ -119,11 +136,12 @@ export class PatientsController {
 		}
 	}
 
-	@CustomApiResponse(['success'], {
+	@CustomApiResponse(['success', 'authorizeChronicCare'], {
 		type: GetVitalHistoryDto,
 		isArray: true,
 		message: 'Vital histories fetched successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Get(':patientId/vitals/latest')
 	async fetchLatestPatientVitals(@Param('patientId') patientId: string) {
 		try {
@@ -139,10 +157,11 @@ export class PatientsController {
 		}
 	}
 
-	@CustomApiResponse(['success'], {
+	@CustomApiResponse(['success', 'authorizeChronicCare'], {
 		type: GetPersonnelPatientDto,
 		message: 'Patient fetched successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Get(':id')
 	async findOne(@Param('id') id: string) {
 		try {
@@ -157,6 +176,8 @@ export class PatientsController {
 		}
 	}
 
+	@Authorize(UserType.CHRONIC_CARE)
+	@Roles(PersonnelRoles.PHARMACY)
 	@Sse('summary/:patientId')
 	async handleSummary(
 		@Param('patientId', ParseMongoIdPipe) patientId: string,

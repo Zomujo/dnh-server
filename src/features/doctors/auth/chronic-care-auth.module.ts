@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { FacilitiesModule } from '@/features/facilities/facilities.module';
 import { Personnel, PersonnelSchema } from '../entities/personnel.entity';
 import { ChronicCareAuthController } from './chronic-care-auth.controller';
 import { ChronicCareAuthService } from './chronic-care-auth.service';
@@ -16,6 +17,7 @@ import { PersonnelAccountsModule } from './personnel-accounts/personnel-accounts
 			{ name: PersonnelAccount.name, schema: PersonnelAccountSchema },
 		]),
 		PersonnelAccountsModule,
+		FacilitiesModule,
 	],
 	controllers: [ChronicCareAuthController],
 	providers: [ChronicCareAuthService],

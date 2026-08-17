@@ -89,7 +89,7 @@ export class PersonnelAccountsService {
 				.skip(pageFilter.offset)
 				.limit(pageFilter.limit)
 				.sort(pageFilter.orderBy)
-				.populate({ path: 'personnel', select: 'userName role isVerified' }),
+				.populate({ path: 'personnel', select: 'userName role' }),
 			this.personnelAccountModel.countDocuments(filter),
 		]);
 
@@ -99,7 +99,7 @@ export class PersonnelAccountsService {
 	async findOne(id: string) {
 		const account = await this.personnelAccountModel
 			.findById(id)
-			.populate({ path: 'personnel', select: 'userName role isVerified' });
+			.populate({ path: 'personnel', select: 'userName role' });
 
 		if (!account) throw new NotFoundException('Personnel account not found');
 		return account;

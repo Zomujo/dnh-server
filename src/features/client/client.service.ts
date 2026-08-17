@@ -826,7 +826,13 @@ export class ClientService {
 		return { concerns, count };
 	}
 
-	async purgePatient(userId: string, patientId: string) {
+	async purgePatient(userId: string) {
+		const patient = await this.patientsService.findPatientByUserId(
+			userId,
+			'_id',
+		);
+		const patientId = patient?._id?.toString();
+
 		await this.checkpointModel.deleteMany({
 			thread_id: userId,
 		});

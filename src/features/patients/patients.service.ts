@@ -172,8 +172,22 @@ export class PatientsService {
 		return patient._id;
 	}
 
-	async createByPersonnel(dto: UpdatePatientDto) {
-		const { firstname, lastname, facility, age, dateOfBirth, ...rest } = dto;
+	async createByPersonnel(
+		dto: UpdatePatientDto,
+		personnelId: string,
+		facilityId?: string,
+	) {
+		// facility is derived from the creating personnel's own token, not the
+		// request body — it's provenance ("who registered this patient"), not an
+		// access boundary, so it isn't something a client should get to set directly.
+		const {
+			firstname,
+			lastname,
+			facility: _facility,
+			age,
+			dateOfBirth,
+			...rest
+		} = dto;
 
 		const name = [firstname, lastname].filter(Boolean).join(' ') || undefined;
 		const computedAge =
@@ -187,7 +201,8 @@ export class PatientsService {
 			name,
 			dateOfBirth,
 			age: computedAge,
-			...(facility && { facility: new Types.ObjectId(facility) }),
+			createdBy: new Types.ObjectId(personnelId),
+			...(facilityId && { facility: new Types.ObjectId(facilityId) }),
 		} as any);
 
 		if (dto.chronicConditions?.length) {

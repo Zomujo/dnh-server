@@ -635,17 +635,13 @@ export class ClientController {
 		}
 	}
 
-	@CustomApiResponse(['successNull'], {
+	@CustomApiResponse(['successNull', 'authorize'], {
 		message: 'Patient data cleaned successfully',
 	})
-	@ApiQuery({ name: 'patientId', required: false })
-	@Delete('clean/:userId')
-	async purgePatient(
-		@Param('userId') userId: string,
-		@Query('patientId') patientId: string,
-	) {
+	@Delete('clean')
+	async purgePatient(@GetUser('sub') userId: string) {
 		try {
-			await this.clientService.purgePatient(userId, patientId);
+			await this.clientService.purgePatient(userId);
 
 			return new ApiSuccessResponseNoData(
 				HttpStatus.OK,

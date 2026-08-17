@@ -82,11 +82,13 @@ export class HcpController {
 	async createVitalHistory(
 		@Body() dto: CreateVitalHistoryDto,
 		@GetUser('sub') personnelId: string,
+		@GetUser('facility') facilityId: string,
 	) {
 		try {
 			const response = await this.hcpService.createVitalHistory(
 				dto,
 				personnelId,
+				facilityId,
 			);
 			return new ApiSuccessResponseDto(
 				response,
@@ -150,9 +152,14 @@ export class HcpController {
 	async updateVitalHistory(
 		@Param('id', ParseMongoIdPipe) id: string,
 		@Body() dto: UpdateVitalHistoryDto,
+		@GetUser('sub') personnelId: string,
 	) {
 		try {
-			const response = await this.hcpService.updateVitalHistory(id, dto);
+			const response = await this.hcpService.updateVitalHistory(
+				id,
+				dto,
+				personnelId,
+			);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,
@@ -168,9 +175,12 @@ export class HcpController {
 	})
 	@Roles(PersonnelRoles.CLINICIAN)
 	@Delete('vital-histories/:id')
-	async deleteVitalHistory(@Param('id', ParseMongoIdPipe) id: string) {
+	async deleteVitalHistory(
+		@Param('id', ParseMongoIdPipe) id: string,
+		@GetUser('sub') personnelId: string,
+	) {
 		try {
-			await this.hcpService.deleteVitalHistory(id);
+			await this.hcpService.deleteVitalHistory(id, personnelId);
 			return new ApiSuccessResponseNoData(
 				HttpStatus.OK,
 				'Vital history deleted successfully',
@@ -298,9 +308,17 @@ export class HcpController {
 	})
 	@Roles(PersonnelRoles.CLINICIAN)
 	@Post('patients')
-	async createPatient(@Body() dto: UpdatePatientDto) {
+	async createPatient(
+		@Body() dto: UpdatePatientDto,
+		@GetUser('sub') personnelId: string,
+		@GetUser('facility') facilityId: string,
+	) {
 		try {
-			const response = await this.hcpService.createPatient(dto);
+			const response = await this.hcpService.createPatient(
+				dto,
+				personnelId,
+				facilityId,
+			);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.CREATED,
@@ -505,12 +523,14 @@ export class HcpController {
 		@Param('patientId') patientId: string,
 		@Param('id') id: string,
 		@Body() dto: UpdateVitalLogDto,
+		@GetUser('sub') personnelId: string,
 	) {
 		try {
 			const response = await this.hcpService.updateVitalHistoryLog(
 				patientId,
 				id,
 				dto,
+				personnelId,
 			);
 			return new ApiSuccessResponseDto(
 				response,

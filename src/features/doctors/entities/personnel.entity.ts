@@ -21,9 +21,6 @@ export class Personnel extends BaseEntity {
 	@Prop({ unique: false, description: 'The name of the personnel' })
 	userName: string;
 
-	@Prop({ description: 'The personnel is verified' })
-	isVerified: boolean;
-
 	@Prop({ description: "The user's phone number" })
 	phoneNumber: string;
 
@@ -58,7 +55,6 @@ export const PersonnelSchema = SchemaFactory.createForClass(Personnel);
 
 PersonnelSchema.pre<Personnel>('save', async function () {
 	if (this.isNew) {
-		this.isVerified = false;
 		this.referralCode = generateCode('CCREF', this.userName);
 	}
 });

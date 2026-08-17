@@ -63,8 +63,12 @@ export class HcpService {
 		private readonly pushService: PushService,
 	) {}
 
-	async createVitalHistory(dto: CreateVitalHistoryDto, personnelId: string) {
-		return this.vitalHistoriesService.create(dto, personnelId);
+	async createVitalHistory(
+		dto: CreateVitalHistoryDto,
+		personnelId: string,
+		facilityId?: string,
+	) {
+		return this.vitalHistoriesService.create(dto, personnelId, facilityId);
 	}
 
 	async findAllVitalHistories(query: FilterVitalHistoriesDto) {
@@ -75,12 +79,16 @@ export class HcpService {
 		return this.vitalHistoriesService.findOne(id);
 	}
 
-	async updateVitalHistory(id: string, dto: UpdateVitalHistoryDto) {
-		return this.vitalHistoriesService.update(id, dto);
+	async updateVitalHistory(
+		id: string,
+		dto: UpdateVitalHistoryDto,
+		personnelId: string,
+	) {
+		return this.vitalHistoriesService.update(id, dto, personnelId);
 	}
 
-	async deleteVitalHistory(id: string) {
-		return this.vitalHistoriesService.remove(id);
+	async deleteVitalHistory(id: string, personnelId: string) {
+		return this.vitalHistoriesService.remove(id, personnelId);
 	}
 
 	async findAllPatients(query: FilterPatientsDto) {
@@ -432,6 +440,7 @@ export class HcpService {
 		patientId: string,
 		id: string,
 		dto: UpdateVitalLogDto,
+		personnelId: string,
 	) {
 		const patient = await this.patientsService.findPatientById(
 			patientId,
@@ -446,6 +455,7 @@ export class HcpService {
 			patient.userId,
 			id,
 			dto,
+			personnelId,
 		);
 		return log._id;
 	}
@@ -576,8 +586,12 @@ export class HcpService {
 		return this.patientsService.fetchLatestPatientVitals(patientId);
 	}
 
-	async createPatient(dto: UpdatePatientDto) {
-		return this.patientsService.createByPersonnel(dto);
+	async createPatient(
+		dto: UpdatePatientDto,
+		personnelId: string,
+		facilityId?: string,
+	) {
+		return this.patientsService.createByPersonnel(dto, personnelId, facilityId);
 	}
 
 	async updatePatient(id: string, dto: UpdatePatientDto) {

@@ -1,6 +1,7 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import {
 	BadRequestException,
+	ForbiddenException,
 	Injectable,
 	NotFoundException,
 } from '@nestjs/common';
@@ -191,6 +192,12 @@ export class AppointmentsService {
 			throw new NotFoundException('Appointment not found');
 		}
 
+		if (appointment.hostPersonnel?.toString() !== personnelId) {
+			throw new ForbiddenException(
+				'Only the personnel who owns this appointment can cancel it',
+			);
+		}
+
 		if (appointment.status === AppointmentStatus.COMPLETED) {
 			throw new BadRequestException('Cannot cancel a completed appointment');
 		}
@@ -240,6 +247,12 @@ export class AppointmentsService {
 			throw new NotFoundException('Appointment not found');
 		}
 
+		if (appointment.hostPersonnel?.toString() !== personnelId) {
+			throw new ForbiddenException(
+				'Only the personnel who owns this appointment can reschedule it',
+			);
+		}
+
 		if (
 			appointment.status !== AppointmentStatus.SCHEDULED &&
 			appointment.status !== AppointmentStatus.RESCHEDULED
@@ -270,6 +283,12 @@ export class AppointmentsService {
 			throw new NotFoundException('Appointment not found');
 		}
 
+		if (appointment.hostPersonnel?.toString() !== personnelId) {
+			throw new ForbiddenException(
+				'Only the personnel who owns this appointment can complete it',
+			);
+		}
+
 		if (
 			appointment.status !== AppointmentStatus.SCHEDULED &&
 			appointment.status !== AppointmentStatus.RESCHEDULED
@@ -280,7 +299,6 @@ export class AppointmentsService {
 		}
 
 		appointment.status = AppointmentStatus.COMPLETED;
-		appointment.hostPersonnel = new Types.ObjectId(personnelId) as any;
 		appointment.completedAt = new Date();
 
 		await this.cancelReminder(id);

@@ -187,9 +187,18 @@ export class Patient extends BaseDH {
 	@Prop({
 		type: ObjectId,
 		ref: 'Facility',
-		description: 'Facility associated with the patient',
+		description:
+			'Facility that registered this patient. Not an access boundary — a ' +
+			'patient may legitimately be seen at multiple facilities; kept for provenance.',
 	})
 	facility: Facility;
+
+	@Prop({
+		type: ObjectId,
+		ref: 'Personnel',
+		description: 'Personnel who created this patient record',
+	})
+	createdBy: Personnel;
 
 	@Prop({ description: 'Age of the patient in years' })
 	age: number;

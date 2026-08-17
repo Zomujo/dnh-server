@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+	ForbiddenException,
+	Injectable,
+	NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
@@ -179,7 +183,11 @@ export class VitalHistoriesService {
 		}
 	}
 
-	async create(dto: CreateVitalHistoryDto, personnelId: string) {
+	async create(
+		dto: CreateVitalHistoryDto,
+		personnelId: string,
+		facilityId?: string,
+	) {
 		const clusterId = new Types.ObjectId();
 		const patient = await this.patientsService.findPatientById(
 			dto.patient,
@@ -208,6 +216,7 @@ export class VitalHistoriesService {
 					recordedAt: dto.recordedAt,
 					notes: dto.notes,
 					createdBy: personnelId,
+					...(facilityId && { facility: facilityId }),
 					...vital,
 				};
 
@@ -493,10 +502,20 @@ export class VitalHistoriesService {
 		return vitalHistoryByCluster[0];
 	}
 
-	async update(id: string, dto: UpdateVitalHistoryDto) {
+	async update(id: string, dto: UpdateVitalHistoryDto, personnelId: string) {
 		const clusterVitalHistory = await this.vitalHistoryModel
 			.find({ clusterId: id })
 			.lean();
+
+		if (!clusterVitalHistory.length) {
+			throw new NotFoundException('Vital history not found');
+		}
+
+		if (clusterVitalHistory[0].createdBy?.toString() !== personnelId) {
+			throw new ForbiddenException(
+				'Only the personnel who recorded this vital history can update it',
+			);
+		}
 
 		const { vitals, ...others } = dto;
 
@@ -535,15 +554,20 @@ export class VitalHistoriesService {
 		return id;
 	}
 
-	async remove(id: string) {
-		const vitalHistory = await this.vitalHistoryModel.deleteMany({
-			clusterId: id,
-		});
-		if (!vitalHistory) {
+	async remove(id: string, personnelId: string) {
+		const existing = await this.vitalHistoryModel.findOne({ clusterId: id });
+
+		if (!existing) {
 			throw new NotFoundException('Vital history not found');
 		}
 
-		return;
+		if (existing.createdBy?.toString() !== personnelId) {
+			throw new ForbiddenException(
+				'Only the personnel who recorded this vital history can delete it',
+			);
+		}
+
+		await this.vitalHistoryModel.deleteMany({ clusterId: id });
 	}
 
 	async fetchVitalHistory(userId: string) {
@@ -777,13 +801,23 @@ export class VitalHistoriesService {
 		return results[0];
 	}
 
-	async updateVitalLog(userId: string, id: string, dto: UpdateVitalLogDto) {
+	async updateVitalLog(
+		userId: string,
+		id: string,
+		dto: UpdateVitalLogDto,
+		personnelId: string,
+	) {
 		const $set: Record<string, unknown> = {};
 		if (dto.severity !== undefined) $set.severity = dto.severity;
 		if (dto.notes !== undefined) $set.notes = dto.notes;
 
 		const result = await this.vitalHistoryModel.findOneAndUpdate(
-			{ _id: new Types.ObjectId(id), $or: [{ userId }, { patient: userId }] },
+			{
+				_id: new Types.ObjectId(id),
+				$or: [{ userId }, { patient: userId }],
+				// Only the personnel who recorded this reading may edit it.
+				createdBy: new Types.ObjectId(personnelId),
+			},
 			{ $set },
 			{ new: true },
 		);

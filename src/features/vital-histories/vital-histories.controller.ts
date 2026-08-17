@@ -11,7 +11,7 @@ import {
 	Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { CustomApiResponse, GetUser } from '@/common/decorators';
+import { CustomApiResponse, GetUser, Roles } from '@/common/decorators';
 import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import {
 	ApiSuccessResponseDto,
@@ -19,6 +19,7 @@ import {
 	PaginatedDataResponseDto,
 	throwError,
 } from '@/common/utils/responses';
+import { PersonnelRoles } from '@/core/auth/enums';
 import {
 	BpTrendsQueryDto,
 	BpTrendsResponseDto,
@@ -41,15 +42,18 @@ export class VitalHistoriesController {
 	@CustomApiResponse(['created', 'authorizeChronicCare'], {
 		message: 'Vitals stored successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Post()
 	async createVitalHistory(
 		@Body() dto: CreateVitalHistoryDto,
 		@GetUser('sub') personnelId: string,
+		@GetUser('facility') facilityId: string,
 	) {
 		try {
 			const response = await this.vitalHistoriesService.create(
 				dto,
 				personnelId,
+				facilityId,
 			);
 
 			return new ApiSuccessResponseDto(
@@ -63,10 +67,11 @@ export class VitalHistoriesController {
 	}
 
 	// @CacheTTL(0.0000001)
-	@CustomApiResponse(['paginated'], {
+	@CustomApiResponse(['paginated', 'authorizeChronicCare'], {
 		type: GetVitalHistoriesPersonnelDto,
 		message: 'Vital histories fetched successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Get()
 	async fetchVitalHistories(@Query() query: FilterVitalHistoriesDto) {
 		try {
@@ -87,10 +92,11 @@ export class VitalHistoriesController {
 		}
 	}
 
-	@CustomApiResponse(['success', 'notfound'], {
+	@CustomApiResponse(['success', 'notfound', 'authorizeChronicCare'], {
 		type: GetVitalHistoryPersonnelDto,
 		message: 'Vital history fetched successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Get(':id')
 	async fetchVitalHistory(@Param('id', ParseMongoIdPipe) id: string) {
 		try {
@@ -105,10 +111,11 @@ export class VitalHistoriesController {
 		}
 	}
 
-	@CustomApiResponse(['success', 'notfound'], {
+	@CustomApiResponse(['success', 'notfound', 'authorizeChronicCare'], {
 		type: BpTrendsResponseDto,
 		message: 'BP trends fetched successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Get(':patient_id/trends/bp')
 	async fetchBpTrends(
 		@Query() query: BpTrendsQueryDto,
@@ -130,10 +137,11 @@ export class VitalHistoriesController {
 		}
 	}
 
-	@CustomApiResponse(['success', 'notfound'], {
+	@CustomApiResponse(['success', 'notfound', 'authorizeChronicCare'], {
 		type: VitalHistoryTrendsResponseDto,
 		message: 'Vital history trends fetched successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Get(':patient_id/trends')
 	async fetchVitalHistoryTrends(
 		@Query() query: VitalHistoryTrendsQueryDto,
@@ -158,13 +166,19 @@ export class VitalHistoriesController {
 	@CustomApiResponse(['updated', 'notfound', 'authorizeChronicCare'], {
 		message: 'Vital history updated successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Patch(':id')
 	async updateVitalHistory(
 		@Param('id', ParseMongoIdPipe) id: string,
 		@Body() dto: UpdateVitalHistoryDto,
+		@GetUser('sub') personnelId: string,
 	) {
 		try {
-			const response = await this.vitalHistoriesService.update(id, dto);
+			const response = await this.vitalHistoriesService.update(
+				id,
+				dto,
+				personnelId,
+			);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,
@@ -178,10 +192,14 @@ export class VitalHistoriesController {
 	@CustomApiResponse(['successNull', 'notfound', 'authorizeChronicCare'], {
 		message: 'Vital history deleted successfully',
 	})
+	@Roles(PersonnelRoles.PHARMACY)
 	@Delete(':id')
-	async deleteVitalHistory(@Param('id', ParseMongoIdPipe) id: string) {
+	async deleteVitalHistory(
+		@Param('id', ParseMongoIdPipe) id: string,
+		@GetUser('sub') personnelId: string,
+	) {
 		try {
-			await this.vitalHistoriesService.remove(id);
+			await this.vitalHistoriesService.remove(id, personnelId);
 			return new ApiSuccessResponseNoData(
 				HttpStatus.OK,
 				'Vital history deleted successfully',

@@ -7,21 +7,41 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model } from 'mongoose';
 import { AuthService } from '@/core/auth/auth.service';
 import { GoogleLoginDto } from '@/core/auth/dto';
 import { UserType } from '@/core/auth/enums';
 import { CommunicationsService } from '@/core/communications/communications.service';
 import { GenerateOtpDto, VerifyOtpDto } from '@/core/security/otp/dto';
 import { OtpService } from '@/core/security/otp/otp.service';
+import { FacilitiesService } from '@/features/facilities/facilities.service';
 import { Personnel } from '../entities/personnel.entity';
+import { CreatePersonnelDto, PersonnelProviders, PersonnelRoles } from './dto';
 import {
-	CreatePersonnelDto,
-	LoginPersonnelDto,
-	PersonnelProviders,
-	PersonnelRoles,
-} from './dto';
-import { PersonnelAccount } from './personnel-accounts/entities/personnel-account.entity';
+	PersonnelAccount,
+	PersonnelAccountVerificationStatus,
+} from './personnel-accounts/entities/personnel-account.entity';
+
+// Roles that must prove ownership of their email via OTP before they can log in.
+// PHARMACY is intentionally excluded for now — product hasn't shipped an OTP entry
+// screen on that side yet. Those accounts land in the EXEMPT verification state
+// instead of VERIFIED, so they stay findable and can be pushed through real
+// verification later just by adding PersonnelRoles.PHARMACY here.
+const OTP_REQUIRED_ROLES: PersonnelRoles[] = [PersonnelRoles.CLINICIAN];
+
+type CreatePersonnelAccountInput = {
+	email: string;
+	password?: string;
+	provider?: PersonnelProviders;
+	providerUserId?: string;
+	role?: PersonnelRoles;
+};
+
+type LoginInput = {
+	email: string;
+	password?: string;
+	providerUserId?: string;
+};
 
 @Injectable()
 export class ChronicCareAuthService {
@@ -32,9 +52,10 @@ export class ChronicCareAuthService {
 		private authService: AuthService,
 		private readonly otpService: OtpService,
 		private readonly communicationsService: CommunicationsService,
+		private readonly facilitiesService: FacilitiesService,
 	) {}
 
-	async create(dto: LoginPersonnelDto) {
+	async create(dto: CreatePersonnelAccountInput) {
 		const existingAccount = await this.personnelAccountModel.findOne({
 			email: dto.email,
 		});
@@ -59,12 +80,20 @@ export class ChronicCareAuthService {
 			personnelId = personnel._id;
 		}
 
+		const provider = dto.provider || PersonnelProviders.EMAIL;
+
 		const personnelAccount = await this.personnelAccountModel.create({
-			provider: dto.provider || PersonnelProviders.EMAIL,
+			provider,
 			providerUserId: dto.providerUserId,
 			email: dto.email,
-			password: dto.password,
+			...(dto.password && { password: dto.password }),
 			personnel: personnelId,
+			// Google already vouches for the email via its own OAuth verification
+			// (checked before this is ever called) — no OTP round trip needed.
+			verificationStatus:
+				provider === PersonnelProviders.GOOGLE
+					? PersonnelAccountVerificationStatus.VERIFIED
+					: PersonnelAccountVerificationStatus.UNVERIFIED,
 		});
 
 		await this.personnelModel.findByIdAndUpdate(personnelId, {
@@ -75,6 +104,25 @@ export class ChronicCareAuthService {
 	}
 
 	async onboard(dto: CreatePersonnelDto) {
+		// findByIdAndUpdate/exists/countDocuments all silently collapse an
+		// undefined/malformed _id filter to {} and match an arbitrary document —
+		// verified against this project's mongoose version. Guard before any query.
+		if (!dto.personnelId || !isValidObjectId(dto.personnelId)) {
+			throw new NotFoundException('Personnel not found');
+		}
+
+		const personnelExists = await this.personnelModel.exists({
+			_id: dto.personnelId,
+		});
+		if (!personnelExists) {
+			throw new NotFoundException('Personnel not found');
+		}
+
+		if (dto.facility) {
+			// Throws NotFoundException for a nonexistent/fabricated facility id.
+			await this.facilitiesService.findOne(dto.facility);
+		}
+
 		const personnel = await this.personnelModel
 			.findByIdAndUpdate(
 				dto.personnelId,
@@ -89,75 +137,89 @@ export class ChronicCareAuthService {
 				},
 				{ new: true },
 			)
-			.populate({
-				path: 'personnelAccounts',
-				select: 'email',
-			});
+			.populate({ path: 'personnelAccounts' });
 
 		if (!personnel) {
 			throw new NotFoundException('Personnel not found');
 		}
 
-		const email = (personnel.personnelAccounts as any)?.[0]?.email;
+		const account = (personnel.personnelAccounts as any)?.[0] as
+			| PersonnelAccount
+			| undefined;
 
-		if (personnel.role === PersonnelRoles.CLINICIAN) {
-			const code = await this.otpService.generate({
-				identifier: `${email}`,
-			});
+		if (
+			account &&
+			account.verificationStatus !== PersonnelAccountVerificationStatus.VERIFIED
+		) {
+			if (OTP_REQUIRED_ROLES.includes(personnel.role as PersonnelRoles)) {
+				const code = await this.otpService.generate({
+					identifier: `${account.email}`,
+				});
 
-			this.sendVerificationCodeMail({
-				mail: email,
-				fullName: personnel.userName,
-				code: code,
-				phoneNumber: personnel.phoneNumber,
-			});
-		} else {
-			personnel.isVerified = true;
-			await personnel.save();
+				this.sendVerificationCodeMail({
+					mail: account.email,
+					fullName: personnel.userName,
+					code: code,
+					phoneNumber: personnel.phoneNumber,
+				});
+			} else {
+				account.verificationStatus = PersonnelAccountVerificationStatus.EXEMPT;
+				await (account as any).save();
+			}
 		}
+
 		return personnel?._id;
 	}
 
-	async login(dto: LoginPersonnelDto) {
-		const orQuery: object[] = [{ email: dto.email }];
-
-		if (dto.providerUserId) {
-			orQuery.push({ providerUserId: dto.providerUserId });
-		}
+	async login(dto: LoginInput) {
+		// Google and email/password are separate credentials on separate
+		// PersonnelAccount rows, even when they share an email — never
+		// disambiguate by email alone (see 2.4 in the audit).
+		const isGoogleLogin = !!dto.providerUserId;
 
 		const personnelAccount = await this.personnelAccountModel
-			.findOne({
-				$and: orQuery,
-			})
+			.findOne(
+				isGoogleLogin
+					? {
+							provider: PersonnelProviders.GOOGLE,
+							providerUserId: dto.providerUserId,
+						}
+					: { provider: PersonnelProviders.EMAIL, email: dto.email },
+			)
 			.populate({
 				path: 'personnel',
-				select: 'isVerified role facility',
+				select: 'role facility',
 			});
 
 		if (!personnelAccount) {
-			const existingAccount = await this.personnelAccountModel.findOne({
-				email: dto.email,
-				provider: PersonnelProviders.EMAIL,
-			});
-			if (existingAccount) {
-				throw new ConflictException('Account with this email already exists');
+			if (isGoogleLogin) {
+				// Signals "no Google account yet" to googleAuth(), which decides
+				// separately whether to create one.
+				throw new NotFoundException('Personnel not found');
 			}
 			throw new UnauthorizedException('Invalid credentials');
 		}
 
-		const personnel = personnelAccount.personnel as any;
-
-		if (!personnel?.isVerified) {
+		if (
+			personnelAccount.verificationStatus ===
+			PersonnelAccountVerificationStatus.UNVERIFIED
+		) {
 			throw new UnauthorizedException('Personnel not verified');
 		}
 
-		const passwordMatch = await bcrypt.compare(
-			dto.password,
-			personnelAccount.password,
-		);
-		if (!passwordMatch) {
-			throw new UnauthorizedException('Invalid credentials');
+		if (!isGoogleLogin) {
+			// The Google ID token (already verified via authService.googleLogin)
+			// is the credential on that path — no password was ever set for it.
+			const passwordMatch = await bcrypt.compare(
+				dto.password ?? '',
+				personnelAccount.password ?? '',
+			);
+			if (!passwordMatch) {
+				throw new UnauthorizedException('Invalid credentials');
+			}
 		}
+
+		const personnel = personnelAccount.personnel as any;
 		const token = await this.authService.signToken(
 			personnel._id.toString(),
 			{
@@ -175,27 +237,30 @@ export class ChronicCareAuthService {
 
 	async googleAuth(dto: GoogleLoginDto) {
 		const payload = await this.authService.googleLogin(dto.idToken);
-		const { email, sub: googleId, email_verified: isVerified } = payload;
-		if (!isVerified) {
+		const { email, sub: googleId, email_verified: emailVerified } = payload;
+		if (!emailVerified) {
 			throw new ConflictException('Email not verified');
 		}
 		try {
 			return await this.login({
 				email: email!,
 				providerUserId: googleId,
-				password: email || googleId,
 			});
 		} catch (error) {
-			if (
-				error instanceof UnauthorizedException ||
-				error instanceof NotFoundException
-			) {
+			if (error instanceof NotFoundException) {
+				const existingEmailAccount = await this.personnelAccountModel.findOne({
+					email,
+					provider: PersonnelProviders.EMAIL,
+				});
+				if (existingEmailAccount) {
+					throw new ConflictException('Account with this email already exists');
+				}
+
 				const personnelId = await this.create({
 					email: email!,
 					provider: PersonnelProviders.GOOGLE,
 					role: PersonnelRoles.CLINICIAN,
 					providerUserId: googleId,
-					password: email || googleId,
 				});
 				const token = await this.authService.signToken(
 					personnelId.toString(),
@@ -236,68 +301,67 @@ export class ChronicCareAuthService {
 		return json;
 	}
 
-	async sendOnboardOtp(dto: GenerateOtpDto) {
-		let email: string | undefined;
-		let personnel: any;
-
-		const account = await this.personnelAccountModel
-			.findOne({ email: dto.identifier })
+	// OTP verifies ownership of one specific email/password account, not the
+	// personnel as a whole — a personnel could also hold an already-verified
+	// Google account. Only ever resolves the EMAIL-provider account, since
+	// that's the only kind OTP applies to.
+	private async resolveOtpAccount(identifier: string) {
+		let account = await this.personnelAccountModel
+			.findOne({ email: identifier, provider: PersonnelProviders.EMAIL })
 			.populate({ path: 'personnel' });
 
-		if (account) {
-			email = account.email;
-			personnel = account.personnel;
-		} else {
-			personnel = await this.personnelModel
-				.findOne({ phoneNumber: dto.identifier })
-				.populate({ path: 'personnelAccounts', select: 'email' });
-			email = personnel?.personnelAccounts?.[0]?.email;
+		if (!account) {
+			const personnel = await this.personnelModel.findOne({
+				phoneNumber: identifier,
+			});
+			if (personnel) {
+				account = await this.personnelAccountModel
+					.findOne({
+						personnel: personnel._id,
+						provider: PersonnelProviders.EMAIL,
+					})
+					.populate({ path: 'personnel' });
+			}
 		}
 
-		if (!personnel || !email) {
+		return account;
+	}
+
+	async sendOnboardOtp(dto: GenerateOtpDto) {
+		const account = await this.resolveOtpAccount(dto.identifier);
+
+		if (!account) {
 			throw new NotFoundException('Personnel not found');
 		}
 
-		if (personnel.isVerified) {
+		if (
+			account.verificationStatus === PersonnelAccountVerificationStatus.VERIFIED
+		) {
 			throw new BadRequestException('Personnel already verified');
 		}
 
+		const personnel = account.personnel as any;
 		const code = await this.otpService.generate({
-			identifier: `${email}`,
+			identifier: `${account.email}`,
 		});
 
 		this.sendVerificationCodeMail({
-			mail: email,
-			fullName: personnel.userName,
+			mail: account.email,
+			fullName: personnel?.userName,
 			code: code,
-			phoneNumber: personnel.phoneNumber,
+			phoneNumber: personnel?.phoneNumber,
 		});
 	}
 
 	async verifyOnboardOtp(dto: VerifyOtpDto) {
-		let email: string | undefined;
-		let personnel: any;
+		const account = await this.resolveOtpAccount(dto.identifier);
 
-		const account = await this.personnelAccountModel
-			.findOne({ email: dto.identifier })
-			.populate({ path: 'personnel' });
-
-		if (account) {
-			email = account.email;
-			personnel = account.personnel;
-		} else {
-			personnel = await this.personnelModel
-				.findOne({ phoneNumber: dto.identifier })
-				.populate({ path: 'personnelAccounts', select: 'email' });
-			email = personnel?.personnelAccounts?.[0]?.email;
-		}
-
-		if (!personnel || !email) {
+		if (!account) {
 			throw new NotFoundException('Personnel not found');
 		}
 
 		const isValid = await this.otpService.verify({
-			identifier: email,
+			identifier: account.email,
 			code: dto.code,
 		});
 
@@ -305,8 +369,8 @@ export class ChronicCareAuthService {
 			throw new BadRequestException('Invalid or expired OTP');
 		}
 
-		personnel.isVerified = true;
-		await personnel.save();
+		account.verificationStatus = PersonnelAccountVerificationStatus.VERIFIED;
+		await (account as any).save();
 	}
 
 	private sendVerificationCodeMail(payload: {
