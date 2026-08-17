@@ -682,7 +682,7 @@ a correctness bug.
 |---|---|---|---|---|
 | 3.1 | Server never computes severity — call commented out, method has zero call sites; only a manual clinician-override endpoint writes it | `vital-histories.service.ts:42`, `determineSeverity` (:62-109) | High | **Resolved** — see notes below |
 | 3.3 | No hypertensive-crisis or hypotension detection tier reachable server-side | (unreachable server classifier) | Medium | **Resolved** — see notes below |
-| 3.6 | `VigilSentinelService` — the safety agent the AI routing prompt explicitly triggers on — is an empty class | `vigil-sentinel.service.ts` | High | Open |
+| 3.6 | `VigilSentinelService` — the safety agent the AI routing prompt explicitly triggers on — is an empty class | `vigil-sentinel.service.ts` | High | **Resolved** — see notes below |
 
 ### Notes — 3.1/3.3 (severity computation, hypertensive-crisis/hypotension tiers)
 
@@ -749,6 +749,54 @@ Care in Diabetes — Glycemic Goals and Hypoglycemia](https://diabetesjournals.o
 report](https://diabetesjournals.org/care) (DKA-risk glucose threshold), general
 clinical hypotension threshold (<90/<60 mmHg, commonly cited across clinical
 references).
+
+### Notes — 3.6 (VigilSentinel safety pipeline)
+
+Worse than the one-line audit description suggests. Traced the full pipeline before
+touching anything: `VigilSentinelService` was empty, *and* the router that was supposed
+to trigger it — `ArchonenService`, which used an LLM call to decide whether a message
+needed `VigilSentinel` routing (triggers listed in its prompt: chest pain, difficulty
+speaking, fainting, etc.) — was never invoked anywhere. Not registered in any module,
+not added to the actual `StateGraph` in `ai.service.ts` (which is just
+`START → llmCall → toolNode loop → END`, no Archonen/VigilSentinel nodes at all). The
+prompt, Zod schema, and service all existed as fully-written code that had never run in
+production — a patient describing chest pain and difficulty speaking got zero special
+handling.
+
+**Also found and fixed while investigating this (see separate commit):** `ai.service.ts`'s
+`llmCall` binds the memory-scribe's tool set directly to the live chat LLM and routes to
+`toolNode` with no trusted-identity overwrite — the same cross-tenant-write gap 2.8
+closed in `memorize()`, just via a second call path that's actually the primary one.
+
+**Per explicit product decision:**
+
+- **Archonen removed entirely**, not revived — deleted `agents/archonen/` (service,
+  spec, prompt/schema) and the now-dead `archonenRoutes`/`ArchonenDecision` references
+  in `client-ai.state.ts`. No conditional-routing layer; the tools below are reached the
+  same way every other memory-scribe tool already is.
+- **VigilSentinel implemented as a facility alert**, not a patient-facing response
+  (that's what the "seek immediate care" prompt change below is for). Added
+  `VigilSentinelService.alertFacility({patientId, summary})`, which resolves the
+  patient's facility (`PatientsService.findPatientById`) and sends a push notification
+  to it via the same `PushService.sendNotificationToTopic()` mechanism already used for
+  critical-vitals alerts (3.1/3.3) — deliberately reused rather than inventing a new
+  alert channel.
+- **Wired as a new memory-scribe tool** (`vigilSentinelAlert`) rather than a separate
+  graph node — `memoryScribeService.memoryTools` is already bound to *both* the live
+  chat LLM (`ai.service.ts`) and the async post-conversation pass (`memorize()`), so
+  this one addition makes the tool reachable from both without new graph wiring. Its
+  schema follows the existing `{filters: {userId, patient}, data: {...}}` shape
+  specifically so it's automatically covered by the trusted-identity overwrite in both
+  call sites — no special-casing needed for this tool to get the same protection as the
+  other 7.
+- **"Seek immediate care" directive added to `ROOT_CLINICAL_PROMPT`** (the shared base
+  of the main patient-facing prompt, `disquisitioner/state.ts`) — confirmed it was
+  genuinely missing before adding it: the existing prompt only had vague references
+  ("Flag urgent concerns", "Safety: Hypoglycemia, hypertensive urgency...") with no
+  explicit instruction to advise the patient to seek immediate/emergency care for
+  red-flag symptoms. Added a mandatory "Emergency Recognition" directive listing the
+  same warning signs and instructing the AI to lead with that advice, plus a pointer to
+  call `vigilSentinelAlert` alongside it.
 
 ## Dead / scaffold code (§9–10)
 
@@ -830,7 +878,7 @@ for 30 days (long enough to debug a failure pattern without accumulating indefin
 9. ~~Fix medication count crash and cast-error query paths (6.4, 6.7)~~ — done
 
 **Subsequent**
-10. Single server-side severity scheme, hypertensive-crisis tier, hypotension detection (3.1–3.3)
+10. ~~Single server-side severity scheme, hypertensive-crisis tier, hypotension detection (3.1–3.3)~~ — done
 11. ~~Re-base adherence on scheduled doses, keyed by medication ID, late-confirmation window, unique index (§4)~~ — done (4.1–4.7)
 12. ~~Fix `formatFrequency` (5.7)~~ — done
 13. ~~Enforce authenticated user identifier server-side on every AI persistence tool~~ — done (2.8); the 8 event handlers are also done now (6.6)
@@ -838,3 +886,4 @@ for 30 days (long enough to debug a failure pattern without accumulating indefin
 15. ~~Replace `deleteMany`+`insertMany` with per-vitalType upserts; drop the dead `patient:userId` filter disjunct; anchor the medication upsert regex; pin vital-history AI identity to `recordedAt`~~ — done (6.1, 6.2, 6.4, 6.5)
 16. ~~Fix `PORT` NaN fallback; add email and patient-code uniqueness with collision-retry; drop `generateCode`'s unused params~~ — done (6.7)
 17. ~~Fix DAILY dose-count math; fix hardcoded/UTC-only cron timezone handling; fix multi-device push token clobbering; fix notification queue scheduler-lookup performance~~ — done (5.2, 5.4, 5.6, 7.3; 5.5 turned out to already be resolved by 5.2, verified empirically)
+18. ~~Wire up the VigilSentinel safety-alert pipeline (delete the never-invoked Archonen router, implement VigilSentinel as a facility push alert); add an explicit emergency-care directive to the main patient-facing prompt~~ — done (3.6, not in the audit's original sequence — grouped with 3.1/3.3 as the rest of the clinical-logic gaps); also fixed a second cross-tenant-write path found while investigating this (see 2.8's notes)

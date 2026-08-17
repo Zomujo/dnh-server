@@ -2,7 +2,6 @@ import { BaseMessage, ToolMessage } from '@langchain/core/messages';
 
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import { PatientPayload } from '../../../patients/dto';
-import { type ArchonenDecision } from '../agents/archonen/state';
 import { type AiInsights } from '../agents/chronicleer/state';
 import {
 	ConversationScope,
@@ -41,7 +40,6 @@ export const ClientAIState = Annotation.Root({
 		},
 		default: () => null,
 	}),
-	archonenRoutes: Annotation<ArchonenDecision>,
 	messages: Annotation<BaseMessage[]>({
 		reducer: messagesStateReducer,
 		default: () => [],

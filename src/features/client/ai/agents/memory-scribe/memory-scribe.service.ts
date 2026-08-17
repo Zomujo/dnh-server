@@ -54,6 +54,11 @@ import {
 } from '@/features/vital-histories/dto';
 import { VitalHistoriesService } from '@/features/vital-histories/vital-histories.service';
 import { ClientAIState, getUserTimezone } from '../../states';
+import {
+	VigilSentinelAlertInput,
+	VigilSentinelAlertSchema,
+} from '../vigil-sentinel/state';
+import { VigilSentinelService } from '../vigil-sentinel/vigil-sentinel.service';
 import { MEMORY_SCRIBE_PROMPT } from './state';
 
 @Injectable()
@@ -69,6 +74,7 @@ export class MemoryScribeService {
 		private readonly patientsService: PatientsService,
 		private readonly vitalHistoriesService: VitalHistoriesService,
 		private readonly notificationsService: NotificationsService,
+		private readonly vigilSentinelService: VigilSentinelService,
 		private readonly eventEmitter: EventEmitter2,
 	) {
 		this.model = new ChatGoogleGenerativeAI({
@@ -108,6 +114,7 @@ export class MemoryScribeService {
 			this.medication,
 			this.patient,
 			this.vitalHistory,
+			this.vigilSentinelAlert,
 		];
 		const toolNode = new ToolNode(tools);
 
@@ -154,6 +161,7 @@ export class MemoryScribeService {
 			[this.medication.name]: this.medication,
 			[this.patient.name]: this.patient,
 			[this.vitalHistory.name]: this.vitalHistory,
+			[this.vigilSentinelAlert.name]: this.vigilSentinelAlert,
 		};
 	}
 
@@ -241,6 +249,25 @@ export class MemoryScribeService {
 		schema: NotificationUpsertRequestSchema,
 		func: async ({ filters, data }) => {
 			this.eventEmitter.emit('notification.persist', { filters, data });
+			return 'queued';
+		},
+	});
+
+	private vigilSentinelAlert = new DynamicStructuredTool({
+		name: 'vigilSentinelAlert',
+		description:
+			"Alert the patient's care facility that this conversation revealed a " +
+			'possible medical risk or emergency warning sign — chest pain, shortness ' +
+			'of breath, sudden confusion or difficulty speaking, fainting, severe or ' +
+			'uncontrolled bleeding, signs of stroke, severe headache, numbness or ' +
+			'weakness, dizziness, blurred vision, swelling, or a dangerously abnormal ' +
+			'vital reading. Call this whenever such a sign is present, even if ' +
+			'uncertain — it is better to alert unnecessarily than to miss a genuine ' +
+			'emergency. This does not replace advising the patient to seek immediate ' +
+			'care in your own reply — do both.',
+		schema: VigilSentinelAlertSchema,
+		func: async ({ filters, data }: VigilSentinelAlertInput) => {
+			this.eventEmitter.emit('vigilSentinel.alert', { filters, data });
 			return 'queued';
 		},
 	});
@@ -352,6 +379,25 @@ export class MemoryScribeService {
 			await this.notificationsService.upsertNotification(filters, data);
 		} catch (error) {
 			this.logger.error('Error persisting notification', { payload, error });
+		}
+	}
+
+	@OnEvent('vigilSentinel.alert')
+	async vigilSentinelAlertEvent(payload: {
+		filters: { userId: string; patient: string };
+		data: { summary: string };
+	}) {
+		try {
+			const { filters, data } = payload;
+			await this.vigilSentinelService.alertFacility({
+				patientId: filters.patient,
+				summary: data.summary,
+			});
+		} catch (error) {
+			this.logger.error('Error sending VigilSentinel alert', {
+				payload,
+				error,
+			});
 		}
 	}
 }

@@ -8,6 +8,7 @@ import { AugurNotificationsModule } from '@/features/notifications/notifications
 import { PatientsModule } from '@/features/patients/patients.module';
 import { VitalHistoriesModule } from '@/features/vital-histories/vital-histories.module';
 import { MemoryScribeService } from './agents/memory-scribe/memory-scribe.service';
+import { VigilSentinelService } from './agents/vigil-sentinel/vigil-sentinel.service';
 import { ClientAIService } from './ai.service';
 import { ExtClientAIService } from './ai-ext.service';
 import { ClientAIChatService } from './client-ai-chat.service';
@@ -32,6 +33,7 @@ import { ClientAIChat, ClientAiChatSchema } from './entities/ai-chat.entity';
 		ExtClientAIService,
 		MemoryScribeService,
 		ClientAIChatService,
+		VigilSentinelService,
 	],
 	exports: [
 		ClientAIService,
