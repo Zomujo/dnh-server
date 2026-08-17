@@ -674,7 +674,7 @@ a correctness bug.
 | 7.1 | Cache-invalidation utility hits Redis on every write across 15 entities, but the only consumer interceptor is never registered — 100% overhead, re-raises on transient faults and fails the originating write | `delete-prefix.util.ts:4-38`; `caching.module.ts:34-37`; `caching.interceptor.ts:52` | High | **Resolved** — see notes below |
 | 7.2 | AI service creates 3 unmanaged DB connection pools with no `onModuleDestroy`/`close()`; quadratic re-encoding per model call | `ai.service.ts:52-55,96-108`; `ai-ext.service.ts:24-25`; `planner-ai.service.ts:50-51` | Medium | **Resolved (connection pools)** — see notes below |
 | 7.4 | Vital-history count pipeline has no `$match` stage — full collection scan, reports global count as per-patient | `vital-histories.service.ts:562-570` | Medium | **Resolved** — see notes below |
-| 7.5 | Unwrapped integer/double coercion on a free-text BP value — unhandled 500 on trends endpoint | `:747-748,853`; `vital-history.dto.ts:76-79` | Medium | Open |
+| 7.5 | Unwrapped integer/double coercion on a free-text BP value — unhandled 500 on trends endpoint | `:747-748,853`; `vital-history.dto.ts:76-79` | Medium | **Resolved** — see notes below |
 
 ### Notes — 7.1 (pointless cache-invalidation overhead + write-failure risk)
 
@@ -783,6 +783,33 @@ indexed field on the `VitalHistory` schema, so this also resolves the performanc
 the finding (indexed lookup instead of a full collection scan). This is an API contract
 change: `GET personnel/pharmacies/vital-histories` now requires `patientId` and rejects
 requests without it, where it previously silently returned a global, unscoped listing.
+
+### Notes — 7.5 (unwrapped numeric coercion, unhandled 500 on trends)
+
+Confirmed both call sites: `fetchBPTrend()`'s pipeline split `value` on `/` and ran
+`$toInt` on each half to get `systolic`/`diastolic`, and `fetchVitalTrend()`'s pipeline
+ran `$toDouble` on the raw `value` string. Both operators throw a hard conversion error
+if the input isn't numeric — and since `value` is only validated as a non-empty string of
+length 1-50 (`vital-history.dto.ts:76-79`, confirmed; same permissiveness on the AI-facing
+Zod schema per the audit), any already-stored or newly-created reading with a malformed
+`value` (or a blood-pressure reading not in exactly `"120/80"` form) turns a trends-page
+load into an unhandled 500 for that patient.
+
+Fixed by swapping `$toInt`/`$toDouble` for MongoDB's `$convert` with `onError: null,
+onNull: null` in both pipelines. This makes the failure mode for a non-numeric value
+match the failure mode the audit noted was already graceful for a missing array element
+(`$arrayElemAt` past the array's end already silently returns `null`, which `$toInt`
+accepted and passed through) — a bad reading now contributes a `null` into the
+`systolic`/`diastolic`/`values` trend arrays instead of crashing the whole request, and
+the rest of the readings in the response are unaffected.
+
+Deliberately left the DTO-level validation as-is (`@IsString() @IsNotEmpty() @Length(1,
+50)` on `value`, no format constraint) — the aggregation-level fix already fully closes
+the crash regardless of what's stored, and building a correct per-vitalType format
+validator (blood pressure needs `"120/80"`, others need a bare number, weight/temperature
+have their own conventions) is a separate, more invasive change than what this finding
+asked for; flagging as a follow-up if stricter input validation is wanted independent of
+the crash fix.
 
 ## Backend clinical-logic gaps (§3, server portions)
 
@@ -1030,4 +1057,5 @@ for 30 days (long enough to debug a failure pattern without accumulating indefin
 19. ~~Remove the pointless per-write Redis cache-invalidation scans across 15 entities (dead since the consumer interceptor was never registered) and stop `deleteByPattern` from failing the originating write on a transient Redis error~~ — done (7.1, not in the audit's original sequence — the remaining §7 items (7.2, 7.4, 7.5) are still open); `CustomCacheInterceptor` and `deleteByPattern` were deliberately kept, dormant and documented, rather than deleted, per product decision to preserve the option to enable response caching later
 20. ~~Stop `ClientAIService`/`ExtClientAIService`/`PlannerAiService` from each opening their own unmanaged MongoDB connection pool; reuse Mongoose's already-connected, already-lifecycle-managed client instead~~ — done (7.2's connection-pool half, not in the audit's original sequence — grouped with the other §7 items); the quadratic re-tokenization half of 7.2 was deliberately left as-is per product decision — see notes above; 7.4 and 7.5 remain open
 21. ~~Delete the entire unreachable "planner" feature (AI treatment-plan chat, plans, sessions) — all 3 of its controllers were commented out~~ — done (not an audit finding; raised directly by the product owner and verified before deletion, same shape as 3.6's Archonen removal — see notes above)
-22. ~~Restore patient scoping on the vital-histories `findAll` count/listing pipelines (full collection scan, no patient filter despite the DTO's abandoned required `patientId` scaffolding)~~ — done (7.4, not in the audit's original sequence — grouped with the other §7 items); 7.5 remains open
+22. ~~Restore patient scoping on the vital-histories `findAll` count/listing pipelines (full collection scan, no patient filter despite the DTO's abandoned required `patientId` scaffolding)~~ — done (7.4, not in the audit's original sequence — grouped with the other §7 items)
+23. ~~Replace throwing `$toInt`/`$toDouble` with `$convert`/`onError` fallbacks in the BP and vital-trend aggregation pipelines~~ — done (7.5, not in the audit's original sequence — grouped with the other §7 items); this closes §7 (7.1-7.5) in full — the quadratic re-tokenization half of 7.2 remains a deliberate, documented exception, not an open bug

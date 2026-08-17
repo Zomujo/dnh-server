@@ -906,8 +906,22 @@ export class VitalHistoriesService {
 
 			{
 				$addFields: {
-					systolic: { $toInt: { $arrayElemAt: ['$pressureParts', 0] } },
-					diastolic: { $toInt: { $arrayElemAt: ['$pressureParts', 1] } },
+					systolic: {
+						$convert: {
+							input: { $arrayElemAt: ['$pressureParts', 0] },
+							to: 'int',
+							onError: null,
+							onNull: null,
+						},
+					},
+					diastolic: {
+						$convert: {
+							input: { $arrayElemAt: ['$pressureParts', 1] },
+							to: 'int',
+							onError: null,
+							onNull: null,
+						},
+					},
 				},
 			},
 
@@ -968,7 +982,18 @@ export class VitalHistoriesService {
 					...matchRecord,
 				},
 			},
-			{ $addFields: { parsedValue: { $toDouble: '$value' } } },
+			{
+				$addFields: {
+					parsedValue: {
+						$convert: {
+							input: '$value',
+							to: 'double',
+							onError: null,
+							onNull: null,
+						},
+					},
+				},
+			},
 			{ $sort: { recordedAt: 1 } },
 			{
 				$group: {
