@@ -878,8 +878,6 @@ export class ClientService {
 			await this.doctorNotificationsService.purgeNotifications(patientId);
 			await this.appointmentsService.removeByPatientId(patientId);
 			await this.appointmentRequestsService.removeByPatientId(patientId);
-			this.eventEmitter.emit('patient.purge.sessions', { patientId });
-			this.eventEmitter.emit('patient.purge.plans', { patientId });
 		}
 		this.eventEmitter.emit('patient.purge.chat', { userId });
 		await this.dhVectorsService.cleanOrphans(userId);

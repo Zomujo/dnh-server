@@ -889,6 +889,38 @@ closed in `memorize()`, just via a second call path that's actually the primary 
 | 9 | 20 of 21 server test files contain only the generated "service is defined" stub — no coverage of §3–5 subsystems | server test suite | High | **Open — deliberately deferred, see notes below** |
 | 10 | `VitalHistoriesController` fully commented out of its module | `vital-histories.module.ts:9,20` | Medium | **Resolved (stale claim)** — see notes below |
 | 10 | `Adherences`, `Concerns`, `ChronicConditions`, parts of `Medications` are unmodified scaffolding exposed through unauthenticated controllers | (see §2.5) | Medium | **Resolved** — see notes below |
+| — | Entire "planner" feature (AI-assisted treatment-plan chat, plans, sessions) unreachable — all 3 of its controllers commented out | `doctors/planner/**` | Medium | **Resolved** — see notes below |
+
+### Notes — planner module removal (not in the original audit)
+
+Raised directly by the product owner ("I know for a fact planner is not being used by any
+application, check for me"), not one of the audit's own numbered findings. Verified before
+deleting anything: `PlannerController`, `PlansController`, and `SessionsController` were all
+commented out — both their import statements and their `controllers: [...]` registrations —
+across `planner.module.ts`, `plans.module.ts`, and `sessions.module.ts`. `PlannerModule` had
+no `exports` array, so even though `DoctorsModule` imported it, none of its providers
+(`PlannerService`, `PlannerAiService`) were reachable from anywhere else in the DI graph
+either. Grepped the rest of the codebase for the `Plan`, `PlannerSession`, and `PlannerChat`
+entities — zero references outside the directory being deleted. The only live wiring
+touching this tree was two `eventEmitter.emit('patient.purge.sessions'/'patient.purge.plans',
+...)` calls inside `client.service.ts`'s account-purge flow — cleanup plumbing for a feature
+nobody could actually create data through via any reachable route. This is the same shape of
+finding as 3.6's Archonen removal earlier in this branch (fully unwired, zero live callers)
+just discovered independently rather than while working an audit item.
+
+Deleted the entire `src/features/doctors/planner/` subtree (`planner.controller.ts`,
+`planner.module.ts`, `planner.service.ts`, `planner-ai.service.ts`, its `dto/`/`entities/`/
+`state/` files, and the `plans/` and `sessions/` sub-features in full, including their own
+already-commented-out controllers). Removed the now-dangling `PlannerModule` import and
+`forwardRef(() => PlannerModule)` entry from `doctors.module.ts`, and the two
+`patient.purge.sessions`/`patient.purge.plans` event emits from `client.service.ts` (the
+sibling `patient.purge.chat` emit two lines below is unrelated — handled by the live
+`chat.service.ts` feature — and was left untouched). The `Plan`/`PlannerSession`/
+`PlannerChat` MongoDB collections themselves are not migrated or dropped — deleting the
+Mongoose schema doesn't touch existing documents, and no other code path reads or writes
+them anymore. The shared LangGraph `checkpoints`/`checkpoint_writes` collections (used by the
+now-deleted `PlannerAiService` alongside the two still-live AI services, see 7.2's notes)
+needed no changes — they're unmodeled, shared infrastructure, not planner-specific.
 
 ## Data protection (§11, server-side)
 
@@ -973,3 +1005,4 @@ for 30 days (long enough to debug a failure pattern without accumulating indefin
 18. ~~Wire up the VigilSentinel safety-alert pipeline (delete the never-invoked Archonen router, implement VigilSentinel as a facility push alert); add an explicit emergency-care directive to the main patient-facing prompt~~ — done (3.6, not in the audit's original sequence — grouped with 3.1/3.3 as the rest of the clinical-logic gaps); also fixed a second cross-tenant-write path found while investigating this (see 2.8's notes)
 19. ~~Remove the pointless per-write Redis cache-invalidation scans across 15 entities (dead since the consumer interceptor was never registered) and stop `deleteByPattern` from failing the originating write on a transient Redis error~~ — done (7.1, not in the audit's original sequence — the remaining §7 items (7.2, 7.4, 7.5) are still open); `CustomCacheInterceptor` and `deleteByPattern` were deliberately kept, dormant and documented, rather than deleted, per product decision to preserve the option to enable response caching later
 20. ~~Stop `ClientAIService`/`ExtClientAIService`/`PlannerAiService` from each opening their own unmanaged MongoDB connection pool; reuse Mongoose's already-connected, already-lifecycle-managed client instead~~ — done (7.2's connection-pool half, not in the audit's original sequence — grouped with the other §7 items); the quadratic re-tokenization half of 7.2 was deliberately left as-is per product decision — see notes above; 7.4 and 7.5 remain open
+21. ~~Delete the entire unreachable "planner" feature (AI treatment-plan chat, plans, sessions) — all 3 of its controllers were commented out~~ — done (not an audit finding; raised directly by the product owner and verified before deletion, same shape as 3.6's Archonen removal — see notes above)

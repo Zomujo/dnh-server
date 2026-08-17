@@ -1,10 +1,9 @@
-import { forwardRef, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ChronicCareAuthModule } from './auth/chronic-care-auth.module';
 // import { DoctorsController } from './doctors.controller';
 import { DoctorsService } from './doctors.service';
 import { Personnel, PersonnelSchema } from './entities/personnel.entity';
-import { PlannerModule } from './planner/planner.module';
 
 @Module({
 	imports: [
@@ -12,7 +11,6 @@ import { PlannerModule } from './planner/planner.module';
 		MongooseModule.forFeature([
 			{ name: Personnel.name, schema: PersonnelSchema },
 		]),
-		forwardRef(() => PlannerModule),
 	],
 	providers: [DoctorsService],
 	// controllers: [DoctorsController],
