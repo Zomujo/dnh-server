@@ -1,6 +1,7 @@
 import { PromptTemplate } from '@langchain/core/prompts';
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { Model } from 'mongoose';
+import { escapeRegExp } from '@/common/utils/helpers';
 import { AdherenceLog } from '../entities/adherence-log.entity';
 import { AdherencePattern } from '../entities/adherence-pattern.entity';
 import { ADHERENCE_NOTE_PROMPT } from './adherence-note-prompt.util';
@@ -12,12 +13,15 @@ export async function upsertAdherencePattern(
 ) {
 	if (log.targetType !== 'medication') return;
 
+	const escapedTargetType = escapeRegExp(log.targetType);
+	const escapedTargetName = escapeRegExp(log.targetName);
+
 	const adherenceLogs = await adherenceLogModel
 		.find({
 			userId: log.userId,
 			patient: log.patient,
-			targetType: new RegExp(log.targetType, 'i'),
-			targetName: new RegExp(log.targetName, 'i'),
+			targetType: new RegExp(escapedTargetType, 'i'),
+			targetName: new RegExp(escapedTargetName, 'i'),
 		})
 		.sort({ takenAt: -1 })
 		.limit(14)
@@ -33,8 +37,8 @@ export async function upsertAdherencePattern(
 		{
 			userId: log.userId,
 			patient: log.patient,
-			targetType: new RegExp(log.targetType, 'i'),
-			targetName: new RegExp(log.targetName, 'i'),
+			targetType: new RegExp(escapedTargetType, 'i'),
+			targetName: new RegExp(escapedTargetName, 'i'),
 		},
 		{
 			userId: log.userId,

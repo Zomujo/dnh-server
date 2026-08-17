@@ -7,6 +7,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
 import { Model } from 'mongoose';
 import { generateFilter } from '@/common/factory';
+import { escapeRegExp } from '@/common/utils/helpers';
 import { AuthService } from '@/core/auth/auth.service';
 import { GoogleLoginDto } from '@/core/auth/dto';
 import { PersonnelProviders } from '../dto';
@@ -78,7 +79,7 @@ export class PersonnelAccountsService {
 		const filter: Record<string, any> = { personnel: personnelId };
 		if (query.search) {
 			filter.email = {
-				$regex: `^${query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+				$regex: `^${escapeRegExp(query.search)}`,
 				$options: 'i',
 			};
 		}

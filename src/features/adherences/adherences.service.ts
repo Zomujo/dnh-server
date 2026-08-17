@@ -10,6 +10,7 @@ import {
 import { Model } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
+import { escapeRegExp } from '../../common/utils/helpers';
 import { AdherenceStatus } from '../../features/patients/dto';
 import { Patient } from '../../features/patients/entities/patient.entity';
 import {
@@ -221,7 +222,7 @@ export class AdherencesService {
 		const filter: Record<string, any> = {
 			userId,
 			targetType,
-			targetName: new RegExp(targetName, 'i'),
+			targetName: new RegExp(escapeRegExp(targetName), 'i'),
 		};
 
 		if (date) {

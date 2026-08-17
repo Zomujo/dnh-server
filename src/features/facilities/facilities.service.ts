@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { generateFilter } from '@/common/factory';
+import { escapeRegExp } from '@/common/utils/helpers';
 import {
 	CreateFacilityDto,
 	GetFacilitiesQueryDto,
@@ -27,7 +28,7 @@ export class FacilitiesService {
 		const filter: Record<string, any> = {};
 		if (query.search) {
 			filter.name = {
-				$regex: `^${query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+				$regex: `^${escapeRegExp(query.search)}`,
 				$options: 'i',
 			};
 		}

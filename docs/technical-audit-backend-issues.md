@@ -19,7 +19,7 @@ if you use the last one).
 | 2.4 | Google OAuth sign-in falls back to `password = email` — full account-takeover path, plus duplicate Personnel records for existing users | `chronic-care-auth.service.ts:80-118` | Critical | **Resolved** — see notes below |
 | 2.5 | Unauthenticated, DB-backed endpoints: full patient list (paginated + unpaginated), any patient's latest vitals, any patient record, clinical summary SSE, full notification CRUD, med catalogue, debug auth scaffolding | `patients.controller.ts:36-41,93,112,127-132,145`; `notifications.controller.ts:77-176`; `seeded-meds.controller.ts:54`; `main.ts:26` | Critical | **Partially resolved** — see notes below |
 | 2.6 | IDOR: patient can rewrite any other patient's medication dosage/times; chat delete filters loosely; bulk "receive-choice" endpoint can falsify any patient's adherence records | `medications.service.ts:253,354`, `client.service.ts:257-269`, `medications.service.ts:239-251` | High | **Resolved** — see notes below |
-| 2.7 | `searchFields`/`orderBy` bypass the global validation whitelist → unescaped `RegExp` from client input. ReDoS pre-auth on 4 endpoints; character-by-character oracle can extract Ghana Card/NHIS numbers via the unauthenticated patient list. `pageSize`/`page` unbounded | `pagination-filter.factory.ts:42-50`; `patients.service.ts:277,329`; `notifications.service.ts:76`; `seeded-meds.service.ts:23` | High | Open |
+| 2.7 | `searchFields`/`orderBy` bypass the global validation whitelist → unescaped `RegExp` from client input. ReDoS pre-auth on 4 endpoints; character-by-character oracle can extract Ghana Card/NHIS numbers via the unauthenticated patient list. `pageSize`/`page` unbounded | `pagination-filter.factory.ts:42-50`; `patients.service.ts:277,329`; `notifications.service.ts:76`; `seeded-meds.service.ts:23` | High | **Resolved** — see notes below |
 | 2.8 | AI memory-scribe tools accept `{filters, data}` straight from LLM output with `upsert:true`, never compared against the authenticated caller — prompt injection becomes a cross-tenant write | `memory-scribe.service.ts:141-235` | Critical | Open |
 | 2.9 | Plaintext passwords logged; JWT payload logged on every signing; generic error handler leaks raw internal error text to clients | `auth.service.ts:75-80,159`; `common/dto/error.dto.ts:52` | High | Open |
 | 2.10 | JWT audience/issuer signed but never verified; `JWT_TOKEN_ISSUER` missing from `.envrc.example`; no revocation path for 24h tokens | `auth.service.ts:148-169`; `auth.module.ts:13-21`; `ws-auth.verifier.ts:49` | Low/Medium | Open |
@@ -118,6 +118,55 @@ only route was this one), `MedicationsService.receiveChoice`,
 `UpdateAdherenceLogQueryDto` (confirmed via repo-wide grep, including specs, that nothing
 else referenced any of these).
 
+### Notes — 2.7 (ReDoS / PII-extraction oracle via search)
+
+This turned out to be two separable problems that needed two different fixes:
+
+**Unescaped regex (ReDoS + precise anchored extraction).** `new RegExp(search, 'i')`
+compiled the client's `search` string as a real pattern, not literal text — anchors
+(`^`), wildcards, and catastrophic-backtracking patterns all worked. Added
+`escapeRegExp()` (`common/utils/helpers/regex.helper.ts`) and applied it everywhere a
+client- or model-supplied string reaches `new RegExp()`: the shared `generateFilter`
+factory, plus four one-off call sites that had the same pattern
+(`adherences.service.ts`, `adherence.util.ts` ×2, `chronic-conditions.service.ts`,
+`medications.service.ts:125` — the last one is also 6.5's injection vector). Also
+consolidated three places that had already hand-rolled the same escape inline
+(`facilities.service.ts`, `personnel-accounts.service.ts`, `client.service.ts`) onto the
+shared helper instead of three copies that could drift.
+
+**Client-controlled `searchFields` (field-selection oracle) — escaping alone doesn't fix
+this.** Even a fully-escaped literal-substring search against an arbitrary field is still
+a presence/absence oracle against a field the API was never meant to expose (e.g.
+`ghanaCardNumber`, deliberately absent from every response projection). Fixed by having
+`generateFilter` take the *same projection the caller already passes to `.select()`* as
+an allowlist — one source of truth, so a field excluded from the response can't be
+searched either. `resolveSearchableFields()` handles both Mongoose projection styles:
+inclusion (`'name age'` → those fields are the allowlist) and exclusion (`'-password
+-qdrantId'` → allowlist is the complement, but only computable if the full field set is
+supplied; without it, exclusion-style projections **deny all custom search fields** by
+design, rather than misreading `-password` as permission to search `password`). No
+current call site uses exclusion-style projections, so this path isn't exercised today,
+but it's implemented and safe-by-default for when one does.
+
+Updated the 4 call sites that had a real `.select()` to derive from (`patients.service.ts`
+×2, `notifications.service.ts`) to pass it into `generateFilter`. The other 3 live
+consumers (`seeded-meds`, `planner`, `plans`, `sessions` services) never projected a fixed
+field set at all, so there was nothing safe to derive — **custom `searchFields` is now
+disabled on those four rather than guessed at.** This is a real, if narrow, behavior
+change: if client-side search-by-field was actually relied on there (most plausibly
+`seeded-meds` search-by-medication-name), restoring it is a one-line fix — add the
+intended field(s) as the second argument to `generateFilter`, e.g.
+`generateFilter(query, 'name')` — once someone confirms that's an intended feature rather
+than a happy accident of the unrestricted original code.
+
+Also capped `pageSize` (`@Max(100)`) and `page` (`@Max(100_000)`) on
+`PaginationRequestDto`, which were `@Min(1)` with no ceiling.
+
+**Not touched:** `orderBy`/`buildSortObject` still takes the raw client field name as a
+sort key. Left as-is — the audit itself calls this "a lesser concern" (ordering
+inference and slow unindexed scans, not an injection vector, since the sort direction is
+always a hardcoded ±1), and unlike `searchFields` there's no PII-oracle shape to it.
+
 ## Data integrity (§6)
 
 | # | Issue | Location | Severity | Status |
@@ -126,7 +175,7 @@ else referenced any of these).
 | 6.1 | Non-atomic `deleteMany`+`insertMany` with no session/transaction; malformed cluster still returns 200 success | `vital-histories.service.ts:426-465` | High | Open |
 | 6.2 | `deleteMany` result object always truthy — deleting a nonexistent cluster returns success | `vital-histories.service.ts:467-476` | Medium | Open |
 | 6.4 | `$or:[{userId},{patient:userId}]` compares ObjectId path against Firebase string ID — silently never matches in aggregations, throws unhandled `CastError`→500 in query methods | `:486,581,650,732,849,636-638,765,866-869,714-716` | High | Open |
-| 6.5 | Unanchored, unescaped `new RegExp(filters.name)` in medication upsert; vital-history identity filter has no `recordedAt` component | `medications.service.ts:125`; `vital-history.schema.ts:122-131` | High | Open |
+| 6.5 | Unanchored, unescaped `new RegExp(filters.name)` in medication upsert; vital-history identity filter has no `recordedAt` component | `medications.service.ts:125`; `vital-history.schema.ts:122-131` | High | **Partially resolved** — the injection/ReDoS half is fixed (see 2.7 notes); still unanchored ("Met" matches "Metformin") and the `recordedAt` gap is untouched |
 | 6.6 | 8 AI event handlers `return` before awaiting persistence — errors unobservable; tool generates its own disconnected ObjectId | `memory-scribe.service.ts:241-341` | Medium | Open |
 | 6.7 | Medication count query crashes 500 for zero-medication patients; `PORT` `??` doesn't catch `NaN`; `email` has no unique index; `referralCode` generator ignores its args and has no collision retry | `medications.service.ts:405-406`; `main.ts:10`; `personnel.entity.ts:30-31,45-48`; `code-generator.helper.ts:1-5` | Medium/High | Open |
 
@@ -203,7 +252,7 @@ else referenced any of these).
 7. Add ownership checks to the 4 object-reference routes (2.6); 2.3 done differently than
    originally recommended — see notes above (personnel-identity checks on mutations,
    not facility scoping on reads, per product decision)
-8. Remove/allowlist `searchFields`/`orderBy`; escape search expression; cap `pageSize` (2.7)
+8. ~~Remove/allowlist `searchFields`/`orderBy`; escape search expression; cap `pageSize` (2.7)~~ — done (allowlist derived from `.select()`, not `orderBy` — see notes)
 9. Fix medication count crash and cast-error query paths (6.4, 6.7)
 
 **Subsequent**

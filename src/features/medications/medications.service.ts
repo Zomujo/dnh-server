@@ -15,6 +15,7 @@ import {
 } from '@/features/notifications/dto/notification.dto';
 import { NotificationsService } from '@/features/notifications/notifications.service';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
+import { escapeRegExp } from '../../common/utils/helpers';
 import { DhVectorsService } from '../dh-vectors/dh-vectors.service';
 import { DHDocumentType } from '../dh-vectors/dto';
 import {
@@ -120,7 +121,7 @@ export class MedicationsService {
 
 		const whereConditions: Record<string, any> = {};
 		if (!searchMedication.length) {
-			whereConditions.name = new RegExp(filters.name, 'i');
+			whereConditions.name = new RegExp(escapeRegExp(filters.name), 'i');
 			whereConditions.patient = filters.patient;
 		} else {
 			whereConditions._id = new Types.ObjectId(

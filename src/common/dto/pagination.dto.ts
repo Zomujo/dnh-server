@@ -7,6 +7,7 @@ import {
 	IsInt,
 	IsOptional,
 	IsString,
+	Max,
 	Min,
 } from 'class-validator';
 import { IsGreaterThan } from '../decorators/validators';
@@ -40,6 +41,7 @@ export class PaginationRequestDto {
 	@Type(() => Number)
 	@IsInt()
 	@Min(1)
+	@Max(100_000)
 	page: number;
 
 	@ApiPropertyOptional({ default: 10 })
@@ -47,6 +49,7 @@ export class PaginationRequestDto {
 	@Type(() => Number)
 	@IsInt()
 	@Min(1)
+	@Max(100)
 	pageSize: number = 10;
 
 	@ApiPropertyOptional()

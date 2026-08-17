@@ -338,7 +338,9 @@ export class PatientsService {
 	}
 
 	async findAll(query: FilterPatientsDto) {
-		let { pageFilter, searchFilter } = generateFilter(query);
+		const projection =
+			'name dateOfBirth chronicConditions lastCheckInDate adherenceRate adherenceStatus';
+		let { pageFilter, searchFilter } = generateFilter(query, projection);
 		const findFilter: Record<string, any> = {};
 		if (query.personnelId) {
 			findFilter.pharmaciesVisited = query.personnelId;
@@ -380,9 +382,7 @@ export class PatientsService {
 			.skip(pageFilter.offset)
 			.limit(pageFilter.limit)
 			.sort(pageFilter.orderBy)
-			.select(
-				'name dateOfBirth chronicConditions lastCheckInDate adherenceRate adherenceStatus',
-			);
+			.select(projection);
 
 		const count = await this.patientModel.countDocuments({ ...searchFilter });
 
@@ -390,16 +390,15 @@ export class PatientsService {
 	}
 
 	async findAllNoPaginate(query: FilterPatientsNoPaginateDto) {
-		const { searchFilter } = generateFilter(query);
+		const projection = 'userId name patientCode';
+		const { searchFilter } = generateFilter(query, projection);
 
 		const filter: Record<string, any> = { ...searchFilter };
 		if (query.facility) {
 			filter.facility = query.facility;
 		}
 
-		const patients = await this.patientModel
-			.find(filter)
-			.select('userId name patientCode');
+		const patients = await this.patientModel.find(filter).select(projection);
 
 		return patients;
 	}

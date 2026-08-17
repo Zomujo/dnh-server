@@ -36,7 +36,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { v7 as uuidv7 } from 'uuid';
 import { generateFilter } from '@/common/factory';
-import { generateCode } from '@/common/utils/helpers';
+import { escapeRegExp, generateCode } from '@/common/utils/helpers';
 import { CacheService } from '@/core/caching/caching.service';
 import { FirebaseService } from '@/core/firebase/firebase.service';
 import { AdherencesService } from '@/features/adherences/adherences.service';
@@ -887,7 +887,7 @@ export class ClientService {
 		const filter: Record<string, any> = {};
 		if (query.search) {
 			filter.name = {
-				$regex: `^${query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+				$regex: `^${escapeRegExp(query.search)}`,
 				$options: 'i',
 			};
 		}

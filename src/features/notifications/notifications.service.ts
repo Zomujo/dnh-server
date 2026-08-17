@@ -73,22 +73,23 @@ export class NotificationsService {
 	}
 
 	async findAll(query: FilterNotificationsDto) {
-		const { pageFilter, searchFilter } = generateFilter(query);
+		const projection = [
+			'notificationType',
+			'channel',
+			'goal',
+			'priority',
+			'frequency',
+			'startDate',
+			'createdAt',
+			'updatedAt',
+		];
+		const { pageFilter, searchFilter } = generateFilter(query, projection);
 		const notifications = await this.notificationModel
 			.find({ patient: query.patientId, ...searchFilter })
 			.skip(pageFilter.offset)
 			.limit(pageFilter.limit)
 			.sort(pageFilter.orderBy)
-			.select([
-				'notificationType',
-				'channel',
-				'goal',
-				'priority',
-				'frequency',
-				'startDate',
-				'createdAt',
-				'updatedAt',
-			]);
+			.select(projection);
 
 		const count = await this.notificationModel.countDocuments({
 			patient: query.patientId,

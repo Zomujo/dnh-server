@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
+import { escapeRegExp } from '../../common/utils/helpers';
 import { Patient } from '../../features/patients/entities/patient.entity';
 import { DhVectorsService } from '../dh-vectors/dh-vectors.service';
 import { DHDocumentType } from '../dh-vectors/dto';
@@ -45,7 +46,10 @@ export class ChronicConditionsService {
 			whereConditions.userId = filters.userId;
 			whereConditions.patient = filters.patient;
 			if (filters.conditionName) {
-				whereConditions.conditionName = new RegExp(filters.conditionName, 'i');
+				whereConditions.conditionName = new RegExp(
+					escapeRegExp(filters.conditionName),
+					'i',
+				);
 			}
 		} else {
 			whereConditions._id = new Types.ObjectId(
