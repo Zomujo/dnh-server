@@ -209,6 +209,25 @@ export class ClientAIService {
 			timestamp: new Date().toISOString(),
 		};
 
+		// This model is bound to the same memory-scribe persistence tools as
+		// memorize() (see memory-scribe.service.ts), invoked here in real time
+		// via toolNode rather than in the async post-conversation pass — the
+		// same prompt-injection-to-cross-tenant-write risk applies, and this is
+		// actually the primary path (it runs on every message, not just after
+		// the conversation ends). Overwrite with the authenticated caller's
+		// real identity before any tool call reaches toolNode, exactly as
+		// memorize() does.
+		const trustedUserId = state.user?.userId;
+		const trustedPatientId = state.user?.patientId;
+		for (const toolCall of response.tool_calls ?? []) {
+			const filters = (toolCall.args as Record<string, any> | undefined)
+				?.filters;
+			if (filters && typeof filters === 'object') {
+				if ('userId' in filters) filters.userId = trustedUserId;
+				if ('patient' in filters) filters.patient = trustedPatientId;
+			}
+		}
+
 		return {
 			messages: [response],
 		};

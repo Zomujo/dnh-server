@@ -216,6 +216,21 @@ before the block's execution window ends; only `return await` would let `catch` 
 Separate issue from 2.8 (this is about swallowed persistence errors going unlogged, not
 authorization), left for its own pass.
 
+**Follow-up (found while implementing §3.6, addressed as its own fix):** the 2.8 fix above
+only covered `MemoryScribeService.memorize()` — the async pass that runs after a
+conversation via the event emitter. It turns out `ClientAIService`'s *main* chat graph
+(`ai.service.ts`) independently binds the exact same tool set
+(`this.model = model.bindTools(this.memoryScribeService.memoryTools)`) directly to the
+live conversational LLM, and routes straight from `llmCall` to `toolNode` with no
+equivalent overwrite step — meaning the identical prompt-injection-to-cross-tenant-write
+vulnerability was still fully exploitable via this second path, which is actually the
+*primary* one (it runs on every patient message in real time, not just once per
+conversation). Fixed by adding the same trusted-identity overwrite loop directly inside
+`llmCall`, mutating `response.tool_calls` before the graph transitions to `toolNode` —
+same mechanism as `memorize()`, just inlined into the graph node instead of a standalone
+method (LangGraph's `toolNode` here is a real graph node invoked by the framework, not a
+manual call site memorize() could just insert code before).
+
 ### Notes — 2.9 (credential/JWT logging, generic error leak)
 
 `AuthService.login()`/`findAll()` — the pair that concatenated `${email} ${password}`
