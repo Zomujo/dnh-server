@@ -30,7 +30,7 @@ export class SeededMedsController {
 
 	constructor(private readonly seededMedsService: SeededMedsService) {}
 
-	@CustomApiResponse(['created'], {
+	@CustomApiResponse(['created', 'authorizeChronicCare'], {
 		message: 'Seeded medication created successfully',
 	})
 	@Post()
@@ -89,7 +89,7 @@ export class SeededMedsController {
 		}
 	}
 
-	@CustomApiResponse(['updated', 'notfound'], {
+	@CustomApiResponse(['updated', 'notfound', 'authorizeChronicCare'], {
 		message: 'Seeded medication updated successfully',
 	})
 	@Patch(':id')
@@ -109,7 +109,7 @@ export class SeededMedsController {
 		}
 	}
 
-	@CustomApiResponse(['successNull', 'notfound'], {
+	@CustomApiResponse(['successNull', 'notfound', 'authorizeChronicCare'], {
 		message: 'Seeded medication deleted successfully',
 	})
 	@Delete(':id')

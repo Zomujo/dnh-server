@@ -113,7 +113,7 @@ export class NotificationsController {
 		}
 	}
 
-	@CustomApiResponse(['created'], {
+	@CustomApiResponse(['created', 'authorizeChronicCare'], {
 		message: 'Notification created successfully',
 	})
 	@Post()
@@ -132,7 +132,7 @@ export class NotificationsController {
 		}
 	}
 
-	@CustomApiResponse(['paginated'], {
+	@CustomApiResponse(['paginated', 'authorizeChronicCare'], {
 		type: GetNotificationsDto,
 		message: 'Notifications fetched successfully',
 	})
@@ -157,7 +157,7 @@ export class NotificationsController {
 		}
 	}
 
-	@CustomApiResponse(['success', 'notfound'], {
+	@CustomApiResponse(['success', 'notfound', 'authorizeChronicCare'], {
 		type: GetNotificationDto,
 		message: 'Notification fetched successfully',
 	})
@@ -175,7 +175,7 @@ export class NotificationsController {
 		}
 	}
 
-	@CustomApiResponse(['updated', 'notfound'], {
+	@CustomApiResponse(['updated', 'notfound', 'authorizeChronicCare'], {
 		message: 'Notification updated successfully',
 	})
 	@Patch(':id')
@@ -198,7 +198,7 @@ export class NotificationsController {
 		}
 	}
 
-	@CustomApiResponse(['successNull', 'notfound'], {
+	@CustomApiResponse(['successNull', 'notfound', 'authorizeChronicCare'], {
 		message: 'Notification deleted successfully',
 	})
 	@Delete(':id')

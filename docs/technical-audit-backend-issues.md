@@ -17,7 +17,7 @@ if you use the last one).
 | 2.2b | `POST /personnel/auth/onboard` is public and creates a second, disconnected Personnel document instead of completing signup | `chronic-care-auth.service.ts:37-45` | High | **Resolved** — see notes below |
 | 2.3 | Facility scoping fails open (`create()` never persists `facility`); every per-patient route does existence checks only, no facility/care-team comparison | `hcp.controller.ts:165,184,215,242,267,292,323,347,374-463`; `patients.service.ts:283-285` | Critical | **Resolved (by product decision, not facility scoping)** — see notes below |
 | 2.4 | Google OAuth sign-in falls back to `password = email` — full account-takeover path, plus duplicate Personnel records for existing users | `chronic-care-auth.service.ts:80-118` | Critical | **Resolved** — see notes below |
-| 2.5 | Unauthenticated, DB-backed endpoints: full patient list (paginated + unpaginated), any patient's latest vitals, any patient record, clinical summary SSE, full notification CRUD, med catalogue, debug auth scaffolding | `patients.controller.ts:36-41,93,112,127-132,145`; `notifications.controller.ts:77-176`; `seeded-meds.controller.ts:54`; `main.ts:26` | Critical | **Partially resolved** — see notes below |
+| 2.5 | Unauthenticated, DB-backed endpoints: full patient list (paginated + unpaginated), any patient's latest vitals, any patient record, clinical summary SSE, full notification CRUD, med catalogue, debug auth scaffolding | `patients.controller.ts:36-41,93,112,127-132,145`; `notifications.controller.ts:77-176`; `seeded-meds.controller.ts:54`; `main.ts:26` | Critical | **Resolved** — see notes below |
 | 2.6 | IDOR: patient can rewrite any other patient's medication dosage/times; chat delete filters loosely; bulk "receive-choice" endpoint can falsify any patient's adherence records | `medications.service.ts:253,354`, `client.service.ts:257-269`, `medications.service.ts:239-251` | High | **Resolved** — see notes below |
 | 2.7 | `searchFields`/`orderBy` bypass the global validation whitelist → unescaped `RegExp` from client input. ReDoS pre-auth on 4 endpoints; character-by-character oracle can extract Ghana Card/NHIS numbers via the unauthenticated patient list. `pageSize`/`page` unbounded | `pagination-filter.factory.ts:42-50`; `patients.service.ts:277,329`; `notifications.service.ts:76`; `seeded-meds.service.ts:23` | High | **Resolved** — see notes below |
 | 2.8 | AI memory-scribe tools accept `{filters, data}` straight from LLM output with `upsert:true`, never compared against the authenticated caller — prompt injection becomes a cross-tenant write | `memory-scribe.service.ts:141-235` | Critical | **Resolved** — see notes below |
@@ -99,8 +99,29 @@ require `authorizeChronicCare`, and — since neither controller had *any* role 
 before, despite living under `/pharmacies/` — added `@Roles(PersonnelRoles.PHARMACY)`
 throughout both for consistency with how `hcp.controller.ts` scopes to `CLINICIAN`.
 
-**Still open from 2.5:** full notification CRUD (`notifications.controller.ts`),
-`seeded-meds.controller.ts`, debug auth scaffolding, and the permissive CORS in `main.ts`.
+**2.5 is now fully resolved.** Remaining gaps closed:
+
+- **`notifications.controller.ts`** — all 5 CRUD routes (`create`, `findAll`, `findOne`,
+  `update`, `remove`) had no auth token at all; only the FCM-token routes were gated.
+  Added `authorizeChronicCare` to all 5, no `@Roles` restriction (both clinicians and
+  pharmacy staff plausibly manage patient notification schedules), consistent with 2.3's
+  precedent of not facility/role-restricting patient-adjacent records.
+- **`seeded-meds.controller.ts`** — all 5 CRUD routes had no auth token. Per explicit
+  product decision, `findAll`/`findOne` were left fully public — this is a shared
+  reference catalog of drug names/dosing units with nothing patient-specific or sensitive
+  in it, and it's read by all user types. `create`/`update`/`remove` (the routes that can
+  actually corrupt the catalog) now require `authorizeChronicCare`. No role restriction
+  possible here either way — `PersonnelRoles` only has `CLINICIAN`/`PHARMACY`, no admin
+  tier to scope catalog-editing to.
+- **Debug auth scaffolding** — see the 2.9 notes above: `AuthController`'s unauthenticated
+  `GET /auth/test` (writes to a hardcoded Firestore doc) and `POST /auth`
+  (`testNotification`, sends an arbitrary FCM push to any supplied token) were found while
+  closing 2.9 and bucketed here per product decision — left as-is, not fixed.
+- **Permissive CORS (`main.ts:21`, `app.enableCors()`)** — left as an accepted gap by
+  product decision. There's currently no known real web-client origin to allowlist
+  (`HCP-WebApp` is an unconnected prototype per this doc's header), and the mobile client
+  doesn't send an `Origin` header, so it isn't affected either way. Revisit once there's a
+  real web origin to restrict to.
 
 ### Notes — 2.6 (IDOR)
 
