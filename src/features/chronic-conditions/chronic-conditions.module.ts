@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { DhVectorsModule } from '../dh-vectors/dh-vectors.module';
 import { Patient, PatientSchema } from '../patients/entities/patient.entity';
-// import { ChronicConditionsController } from './chronic-conditions.controller';
 import { ChronicConditionsService } from './chronic-conditions.service';
 import {
 	ChronicCondition,
@@ -17,7 +16,6 @@ import {
 		]),
 		DhVectorsModule,
 	],
-	// controllers: [ChronicConditionsController],
 	providers: [ChronicConditionsService],
 	exports: [ChronicConditionsService],
 })

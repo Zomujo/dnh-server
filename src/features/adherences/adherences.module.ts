@@ -6,7 +6,6 @@ import {
 	MedicationSchema,
 } from '../medications/entities/medication.entity';
 import { Patient, PatientSchema } from '../patients/entities/patient.entity';
-// import { AdherencesController } from './adherences.controller';
 import { AdherencesService } from './adherences.service';
 import {
 	AdherenceLog,
@@ -31,7 +30,6 @@ import {
 		]),
 		DhVectorsModule,
 	],
-	// controllers: [AdherencesController],
 	providers: [AdherencesService],
 	exports: [AdherencesService],
 })

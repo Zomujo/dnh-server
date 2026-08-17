@@ -673,16 +673,61 @@ a correctness bug.
 
 | # | Issue | Location | Severity | Status |
 |---|---|---|---|---|
-| 9 | 20 of 21 server test files contain only the generated "service is defined" stub — no coverage of §3–5 subsystems | server test suite | High | Open |
-| 10 | `VitalHistoriesController` fully commented out of its module | `vital-histories.module.ts:9,20` | Medium | Open |
-| 10 | `Adherences`, `Concerns`, `ChronicConditions`, parts of `Medications` are unmodified scaffolding exposed through unauthenticated controllers | (see §2.5) | Medium | Open |
+| 9 | 20 of 21 server test files contain only the generated "service is defined" stub — no coverage of §3–5 subsystems | server test suite | High | **Open — deliberately deferred, see notes below** |
+| 10 | `VitalHistoriesController` fully commented out of its module | `vital-histories.module.ts:9,20` | Medium | **Resolved (stale claim)** — see notes below |
+| 10 | `Adherences`, `Concerns`, `ChronicConditions`, parts of `Medications` are unmodified scaffolding exposed through unauthenticated controllers | (see §2.5) | Medium | **Resolved** — see notes below |
 
 ## Data protection (§11, server-side)
 
 | # | Issue | Location | Severity | Status |
 |---|---|---|---|---|
-| 11 | Patient conversations sent to a third-party LLM with no redaction, consent gate, or data-residency control | `ai.service.ts:181` | High | Open |
-| 11 | Notification payloads (goal, target name, patient reference) persisted indefinitely in Redis as job data | `notifications.service.ts:210` | Medium | Open |
+| 11 | Patient conversations sent to a third-party LLM with no redaction, consent gate, or data-residency control | `ai.service.ts:181` | High | **Open — needs a product/compliance decision, see notes below** |
+| 11 | Notification payloads (goal, target name, patient reference) persisted indefinitely in Redis as job data | `notifications.service.ts:210` | Medium | **Resolved** — see notes below |
+
+### Notes — §9 (test coverage)
+
+Confirmed the finding exactly: 21 spec files, every one is the plain NestJS-generated
+"service should be defined" stub (18–27 lines each). Zero real coverage of any business
+logic, including everything fixed across this entire audit pass. Writing meaningful
+coverage for all of it would be a substantially larger effort than the rest of this
+pass combined, and per standing instruction not to run the test suite in this repo
+unless explicitly asked, writing test code without being able to run it to verify
+correctness isn't something worth handing over as "done." Deliberately left open per
+explicit decision — flagged here as a dedicated future effort, not silently dropped.
+
+### Notes — §10 (dead/scaffold code)
+
+**`VitalHistoriesController`** — stale claim, already known from earlier in this pass:
+it's genuinely registered and live (`vital-histories.module.ts`'s `controllers:` array),
+already properly authorized (see 2.5's notes). No action needed.
+
+**`AdherencesController`/`ConcernsController`/`ChronicConditionsController`** — verified
+all three were commented out of their respective modules' `controllers:` arrays, backed
+by non-functional stub service methods (`create()` literally `return 'This action adds
+a new adherence'`, etc.) — genuinely unregistered and unreachable, zero live risk today,
+but dead landmines that would ship unauthenticated if anyone ever uncommented them
+without also adding auth. Per explicit product decision, deleted all three outright
+(same "retired functionality" treatment as `MedicationsController` earlier in this
+pass) rather than leaving them commented out, along with their now-dead imports/
+`controllers:` references in each module. `MedicationsController` (the 4th one this
+finding names) was already deleted in that earlier pass.
+
+### Notes — §11 (LLM data protection, Redis job retention)
+
+**Patient conversations sent to a third-party LLM (`ai.service.ts:181`)** — left open.
+This needs a product/compliance decision (what specifically to redact before sending to
+Gemini, what a consent gate should look like in the patient app, whether your existing
+agreement with Google already covers PHI handling for this use case) that isn't mine to
+make unilaterally. Flagged for a dedicated conversation rather than guessed at.
+
+**Notification payloads persisted indefinitely in Redis** — `addJob()`'s job template
+had no `removeOnComplete`/`removeOnFail` options, so BullMQ's default is to keep every
+completed/failed execution record forever. Each job's `data` embeds the full
+notification document (goal, targetName, patient reference) via `upsertJob()`'s
+`{notification: notification.toJSON()}` — for a daily/weekly repeating reminder, this
+accumulates one such record per firing, forever. Added a retention policy: completed
+jobs kept for 7 days or the most recent 100 (whichever is hit first), failed jobs kept
+for 30 days (long enough to debug a failure pattern without accumulating indefinitely).
 
 ---
 

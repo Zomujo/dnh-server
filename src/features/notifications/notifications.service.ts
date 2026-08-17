@@ -338,6 +338,15 @@ export class NotificationsService {
 		return await this.notificationQueue.upsertJobScheduler(jobId, repeatOpts, {
 			name: 'notify',
 			data,
+			opts: {
+				// Each firing embeds the full notification document (goal,
+				// targetName, patient reference) in the job's Redis-stored data.
+				// With no retention policy, BullMQ keeps every completed/failed
+				// execution record forever — for a daily/weekly repeating
+				// reminder that accumulates indefinitely.
+				removeOnComplete: { age: 7 * 24 * 3600, count: 100 },
+				removeOnFail: { age: 30 * 24 * 3600 },
+			},
 		});
 	}
 
