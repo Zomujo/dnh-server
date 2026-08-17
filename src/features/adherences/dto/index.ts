@@ -32,4 +32,4 @@ export {
 export { CreateAdherenceDto } from './create.dto';
 export { AdherenceItemsDto, GetAdherencePatternDto } from './get.dto';
 export { TargetType } from './target-type.enum';
-export { UpdateAdherenceDto, UpdateAdherenceLogQueryDto } from './update.dto';
+export { UpdateAdherenceDto } from './update.dto';

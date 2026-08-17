@@ -3,11 +3,7 @@ export {
 	MedicationAdherenceDayDto,
 	MedicationAdherenceLogsDto,
 } from './adherence-log.dto';
-export {
-	CreateMedicationDto,
-	MedicationNotificationChoiceDto,
-	UpsertMedicationDto,
-} from './create.dto';
+export { CreateMedicationDto, UpsertMedicationDto } from './create.dto';
 export { GetMedicationDto, MedicationDetailDto } from './get.dto';
 export {
 	DosingSchedule,

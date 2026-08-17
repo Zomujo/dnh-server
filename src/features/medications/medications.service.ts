@@ -5,7 +5,6 @@ import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { AdherencesService } from '@/features/adherences/adherences.service';
 import { TargetType } from '@/features/adherences/dto/target-type.enum';
-import { UpdateAdherenceLogQueryDto } from '@/features/adherences/dto/update.dto';
 import {
 	type Frequency,
 	NotificationChannel,
@@ -20,7 +19,6 @@ import { DhVectorsService } from '../dh-vectors/dh-vectors.service';
 import { DHDocumentType } from '../dh-vectors/dto';
 import {
 	CreateMedicationDto,
-	MedicationNotificationChoiceDto,
 	MedicationQueryFilter,
 	UpdateMedicationDto,
 	UpsertMedicationDto,
@@ -236,22 +234,8 @@ export class MedicationsService {
 		return `This action returns a #${id} medication`;
 	}
 
-	async receiveChoice(
-		userId: string,
-		dto: MedicationNotificationChoiceDto,
-		query: UpdateAdherenceLogQueryDto,
-	) {
-		if (dto.choice === 'yes') {
-			await this.adherencesService.updateManyAdherenceLogs(
-				{ _id: { $in: query.id } },
-				{ $set: { taken: true, takenAt: new Date(), status: 'taken' } },
-			);
-		}
-		return `The user of ${userId} selected choice ${dto.choice}`;
-	}
-
-	async update(id: string, dto: UpdateMedicationDto) {
-		const medication = await this.medicationModel.findById(id);
+	async update(id: string, dto: UpdateMedicationDto, userId: string) {
+		const medication = await this.medicationModel.findOne({ _id: id, userId });
 		if (!medication) {
 			throw new NotFoundException('Medication not found');
 		}
@@ -330,8 +314,8 @@ export class MedicationsService {
 		return medication._id.toString();
 	}
 
-	async remove(id: string) {
-		const medication = await this.medicationModel.findById(id);
+	async remove(id: string, userId: string) {
+		const medication = await this.medicationModel.findOne({ _id: id, userId });
 		if (!medication) {
 			throw new NotFoundException('Medication not found');
 		}

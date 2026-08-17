@@ -4,7 +4,6 @@ import { AdherencesModule } from '@/features/adherences/adherences.module';
 import { AugurNotificationsModule } from '@/features/notifications/notifications.module';
 import { DhVectorsModule } from '../dh-vectors/dh-vectors.module';
 import { Medication, MedicationSchema } from './entities/medication.entity';
-// import { MedicationsController } from './medications.controller';
 import { MedicationsService } from './medications.service';
 import { SeededMedsModule } from './seeded-meds/seeded-meds.module';
 
@@ -18,7 +17,6 @@ import { SeededMedsModule } from './seeded-meds/seeded-meds.module';
 		AugurNotificationsModule,
 		SeededMedsModule,
 	],
-	// controllers: [MedicationsController],
 	providers: [MedicationsService],
 	exports: [MedicationsService, SeededMedsModule],
 })

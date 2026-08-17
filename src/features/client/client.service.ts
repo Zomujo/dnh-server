@@ -261,8 +261,8 @@ export class ClientService {
 		return { rows: messages, count };
 	}
 
-	async removeChatMessages(chatmessageId: string) {
-		const whereOptions: Record<string, any> = {};
+	async removeChatMessages(chatmessageId: string, userId: string) {
+		const whereOptions: Record<string, any> = { userId };
 
 		if (isValidObjectId(chatmessageId)) {
 			whereOptions._id = chatmessageId;
@@ -871,12 +871,12 @@ export class ClientService {
 		return this.medicationsService.create(dto, userId, patient!._id.toString());
 	}
 
-	async deleteMedication(id: string) {
-		return this.medicationsService.remove(id);
+	async deleteMedication(id: string, userId: string) {
+		return this.medicationsService.remove(id, userId);
 	}
 
-	async updateMedication(id: string, dto: UpdateMedicationDto) {
-		return this.medicationsService.update(id, dto);
+	async updateMedication(id: string, dto: UpdateMedicationDto, userId: string) {
+		return this.medicationsService.update(id, dto, userId);
 	}
 
 	async fetchMedicationById(id: string) {

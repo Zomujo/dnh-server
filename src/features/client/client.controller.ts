@@ -738,9 +738,12 @@ export class ClientController {
 		message: 'Chat conversation message deleted successfully',
 	})
 	@Delete('chats/:id')
-	async deleteChatMessage(@Param('id') id: string) {
+	async deleteChatMessage(
+		@Param('id') id: string,
+		@GetUser('sub') userId: string,
+	) {
 		try {
-			await this.clientService.removeChatMessages(id);
+			await this.clientService.removeChatMessages(id, userId);
 			return new ApiSuccessResponseNoData(
 				HttpStatus.OK,
 				'Chat conversation message deleted successfully',
@@ -844,9 +847,14 @@ export class ClientController {
 	async updateMedication(
 		@Param('id') id: string,
 		@Body() dto: UpdateMedicationDto,
+		@GetUser('sub') userId: string,
 	) {
 		try {
-			const response = await this.clientService.updateMedication(id, dto);
+			const response = await this.clientService.updateMedication(
+				id,
+				dto,
+				userId,
+			);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,
@@ -861,9 +869,12 @@ export class ClientController {
 		message: 'Medication deleted successfully',
 	})
 	@Delete('medications/:id')
-	async deleteMedication(@Param('id') id: string) {
+	async deleteMedication(
+		@Param('id') id: string,
+		@GetUser('sub') userId: string,
+	) {
 		try {
-			await this.clientService.deleteMedication(id);
+			await this.clientService.deleteMedication(id, userId);
 			return new ApiSuccessResponseNoData(
 				HttpStatus.OK,
 				'Medication deleted successfully',

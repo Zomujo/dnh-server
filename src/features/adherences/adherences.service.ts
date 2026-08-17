@@ -417,11 +417,4 @@ export class AdherencesService {
 	async removePatternsByUserId(userId: string) {
 		return this.adherencePatternModel.deleteMany({ userId });
 	}
-
-	async updateManyAdherenceLogs(
-		filter: Record<string, any>,
-		update: Record<string, any>,
-	) {
-		return this.adherenceLogModel.updateMany(filter, update);
-	}
 }

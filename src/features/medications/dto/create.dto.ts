@@ -1,5 +1,4 @@
-import { ApiProperty, PickType } from '@nestjs/swagger';
-import { IsEnum, IsNotEmpty } from 'class-validator';
+import { PickType } from '@nestjs/swagger';
 import { MedicationDto } from './medication.dto';
 
 export class CreateMedicationDto extends PickType(MedicationDto, [
@@ -12,10 +11,3 @@ export class CreateMedicationDto extends PickType(MedicationDto, [
 ]) {}
 
 export class UpsertMedicationDto {}
-
-export class MedicationNotificationChoiceDto {
-	@ApiProperty({ example: 'yes', enum: ['yes', 'no'] })
-	@IsNotEmpty()
-	@IsEnum(['yes', 'no'])
-	choice: 'yes' | 'no';
-}

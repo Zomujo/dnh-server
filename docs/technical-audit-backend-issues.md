@@ -18,7 +18,7 @@ if you use the last one).
 | 2.3 | Facility scoping fails open (`create()` never persists `facility`); every per-patient route does existence checks only, no facility/care-team comparison | `hcp.controller.ts:165,184,215,242,267,292,323,347,374-463`; `patients.service.ts:283-285` | Critical | **Resolved (by product decision, not facility scoping)** — see notes below |
 | 2.4 | Google OAuth sign-in falls back to `password = email` — full account-takeover path, plus duplicate Personnel records for existing users | `chronic-care-auth.service.ts:80-118` | Critical | **Resolved** — see notes below |
 | 2.5 | Unauthenticated, DB-backed endpoints: full patient list (paginated + unpaginated), any patient's latest vitals, any patient record, clinical summary SSE, full notification CRUD, med catalogue, debug auth scaffolding | `patients.controller.ts:36-41,93,112,127-132,145`; `notifications.controller.ts:77-176`; `seeded-meds.controller.ts:54`; `main.ts:26` | Critical | **Partially resolved** — see notes below |
-| 2.6 | IDOR: patient can rewrite any other patient's medication dosage/times; chat delete filters loosely; bulk "receive-choice" endpoint can falsify any patient's adherence records | `medications.service.ts:253,354`, `client.service.ts:257-269`, `medications.service.ts:239-251` | High | Open |
+| 2.6 | IDOR: patient can rewrite any other patient's medication dosage/times; chat delete filters loosely; bulk "receive-choice" endpoint can falsify any patient's adherence records | `medications.service.ts:253,354`, `client.service.ts:257-269`, `medications.service.ts:239-251` | High | **Resolved** — see notes below |
 | 2.7 | `searchFields`/`orderBy` bypass the global validation whitelist → unescaped `RegExp` from client input. ReDoS pre-auth on 4 endpoints; character-by-character oracle can extract Ghana Card/NHIS numbers via the unauthenticated patient list. `pageSize`/`page` unbounded | `pagination-filter.factory.ts:42-50`; `patients.service.ts:277,329`; `notifications.service.ts:76`; `seeded-meds.service.ts:23` | High | Open |
 | 2.8 | AI memory-scribe tools accept `{filters, data}` straight from LLM output with `upsert:true`, never compared against the authenticated caller — prompt injection becomes a cross-tenant write | `memory-scribe.service.ts:141-235` | Critical | Open |
 | 2.9 | Plaintext passwords logged; JWT payload logged on every signing; generic error handler leaks raw internal error text to clients | `auth.service.ts:75-80,159`; `common/dto/error.dto.ts:52` | High | Open |
@@ -101,6 +101,22 @@ throughout both for consistency with how `hcp.controller.ts` scopes to `CLINICIA
 
 **Still open from 2.5:** full notification CRUD (`notifications.controller.ts`),
 `seeded-meds.controller.ts`, debug auth scaffolding, and the permissive CORS in `main.ts`.
+
+### Notes — 2.6 (IDOR)
+
+Medication update/delete (`client.controller.ts` → `medications.service.ts`) and chat
+message delete (`removeChatMessages`) now scope their lookup by the authenticated
+caller's `userId` in addition to the record id — a mismatch falls through to the
+existing `NotFoundException`, same pattern as the earlier vital-history-log fix.
+
+The bulk `receive-choice` endpoint (`PUT /chronic-care/doctors/medications/receive-choice`)
+was **deleted entirely, not fixed**, per explicit instruction — it was retired
+functionality (its controller was already commented out of `medications.module.ts`, so
+the route was unreachable regardless). Removed: `MedicationsController` (the file — its
+only route was this one), `MedicationsService.receiveChoice`,
+`MedicationNotificationChoiceDto`, `AdherencesService.updateManyAdherenceLogs`, and
+`UpdateAdherenceLogQueryDto` (confirmed via repo-wide grep, including specs, that nothing
+else referenced any of these).
 
 ## Data integrity (§6)
 
