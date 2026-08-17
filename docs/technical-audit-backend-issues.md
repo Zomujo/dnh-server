@@ -680,9 +680,75 @@ a correctness bug.
 
 | # | Issue | Location | Severity | Status |
 |---|---|---|---|---|
-| 3.1 | Server never computes severity — call commented out, method has zero call sites; only a manual clinician-override endpoint writes it | `vital-histories.service.ts:42`, `determineSeverity` (:62-109) | High | Open |
-| 3.3 | No hypertensive-crisis or hypotension detection tier reachable server-side | (unreachable server classifier) | Medium | Open |
+| 3.1 | Server never computes severity — call commented out, method has zero call sites; only a manual clinician-override endpoint writes it | `vital-histories.service.ts:42`, `determineSeverity` (:62-109) | High | **Resolved** — see notes below |
+| 3.3 | No hypertensive-crisis or hypotension detection tier reachable server-side | (unreachable server classifier) | Medium | **Resolved** — see notes below |
 | 3.6 | `VigilSentinelService` — the safety agent the AI routing prompt explicitly triggers on — is an empty class | `vigil-sentinel.service.ts` | High | Open |
+
+### Notes — 3.1/3.3 (severity computation, hypertensive-crisis/hypotension tiers)
+
+The "call commented out" claim was stale — `determineSeverity()` was already called from
+`loadVitalHistory()` (used by the patient chat app and USSD channel). The real gap was
+`create()` (the personnel-facing multi-vital cluster creation used by `hcp.controller.ts`
+and the pharmacy vitals controller) and `update()`, which both just stored whatever
+`severity` the client optionally submitted, with no independent server-side verification
+and — for `create()` — no critical-alert path at all, unlike `loadVitalHistory()`.
+
+Combined with 3.3 as one redesign, per explicit product decision (both traced to the same
+`determineSeverity()`/`VitalSeverityEnum`). Researched current clinical thresholds and
+terminology before implementing (AHA blood pressure categories, ADA glycemic goals —
+see sources below) rather than inventing numbers:
+
+- **`VitalSeverityEnum`** expanded from `NORMAL/ELEVATED/CRITICAL` to add
+  `HYPERTENSIVE`/`HYPERTENSIVE_CRISIS`/`HYPOTENSIVE`/`SEVERE_HYPOTENSION` (blood
+  pressure) and `LOW`/`CRITICALLY_LOW`/`HIGH`/`CRITICALLY_HIGH` (blood sugar).
+  `CRITICAL` kept as a legacy value for existing stored records and any vital type
+  without dedicated tiers (heart rate, temperature, etc. — still just `NORMAL`, no
+  audited scope change there).
+- **Blood pressure** (mmHg): Normal <120/<80, Elevated 120–129/<80, Hypertensive
+  130–179/80–119 (AHA's Stage 1 and Stage 2 folded into one tier — the system only
+  needs "needs attention" vs "needs urgent care", not the stage distinction),
+  Hypertensive Crisis ≥180/≥120 (AHA's official term and threshold — checked as ≥ to
+  catch the boundary; AHA's own guidance is to call emergency services at this level).
+  AHA's guidance is hypertension-focused and doesn't define hypotension; used the
+  commonly cited <90/<60 threshold for Hypotensive and a conservative <80/<50 cutoff
+  for Severe Hypotension (shock-risk territory).
+- **Blood sugar** (mmol/L, ADA *Standards of Care in Diabetes*): Critically Low <3.0
+  (ADA Level 2 hypoglycemia), Low 3.0–<3.9 (ADA Level 1), Normal 3.9–<7.3, Elevated
+  7.3–<11.1 (11.1 mmol/L / 200 mg/dL is a commonly used "significant hyperglycemia"
+  marker), High 11.1–<13.9, Critically High ≥13.9 (250 mg/dL — the diagnostic DKA-risk
+  threshold; this exact boundary already existed in the code before this change).
+- A `CRITICAL_VITAL_SEVERITIES` constant centralizes which tiers count as a genuine
+  emergency (the legacy `CRITICAL` plus `HYPERTENSIVE_CRISIS`/`SEVERE_HYPOTENSION`/
+  `CRITICALLY_LOW`/`CRITICALLY_HIGH`) — used everywhere "is this critical?" was
+  previously a literal `=== CRITICAL` check, so the urgent facility push alert
+  (`loadVitalHistory()`), the "critical readings" dashboard count
+  (`hcp.service.ts`/`countVitalsBySeverity()`), and the patient-facing notification-body
+  switch (`buildVitalNotificationBody()`) all still fire for true emergencies without
+  needing 6+ new individual case checks scattered across files. Deliberate behavior
+  change from before: a reading of 145/92 (old blanket ≥140/90 "critical") no longer
+  triggers the *urgent* facility push — only true crisis-level readings (≥180/120) do —
+  while still being recorded and counted as `HYPERTENSIVE`. This was the actual point of
+  splitting the tiers (distinguishing "needs attention" from "needs emergency response"
+  reduces alert fatigue for genuinely urgent cases); flagging in case that's not the
+  intended tradeoff.
+- `buildVitalNotificationBody()`'s per-case switch was replaced with a grouped
+  NORMAL/critical/else check specifically so no future tier addition can silently fall
+  through to the "looks normal, keep it up!" message — the exact gap that existed for
+  every new tier before this change (a hypertensive-crisis reading would have gotten a
+  "normal" message, since `default` in the old switch meant "not CRITICAL and not
+  ELEVATED", which every new tier satisfied).
+- `create()` and `update()` now compute `severity` server-side via `determineSeverity()`
+  and unconditionally overwrite whatever the client submitted (the actual 3.1 fix);
+  `create()` also gained the same critical-alert facility push that `loadVitalHistory()`
+  already had, since personnel-entered readings previously had no alerting path at all.
+
+Sources consulted: [AHA blood pressure categories](https://www.heart.org) (Normal,
+Elevated, Stage 1/2 Hypertension, Hypertensive Crisis thresholds), [ADA Standards of
+Care in Diabetes — Glycemic Goals and Hypoglycemia](https://diabetesjournals.org/care)
+(Level 1/Level 2 hypoglycemia thresholds), [ADA Hyperglycemic Crises consensus
+report](https://diabetesjournals.org/care) (DKA-risk glucose threshold), general
+clinical hypotension threshold (<90/<60 mmHg, commonly cited across clinical
+references).
 
 ## Dead / scaffold code (§9–10)
 

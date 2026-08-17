@@ -47,7 +47,7 @@ import {
 	UpdateVitalLogDto,
 	VitalHistoryTrendsQueryDto,
 } from '@/features/vital-histories/dto';
-import { VitalSeverityEnum } from '@/features/vital-histories/entities/vital-history.entity';
+import { CRITICAL_VITAL_SEVERITIES } from '@/features/vital-histories/entities/vital-history.entity';
 import { VitalHistoriesService } from '@/features/vital-histories/vital-histories.service';
 
 @Injectable()
@@ -606,7 +606,7 @@ export class HcpService {
 		const criticalReadingsCount =
 			await this.vitalHistoriesService.countVitalsBySeverity(
 				plain.userId,
-				VitalSeverityEnum.CRITICAL,
+				CRITICAL_VITAL_SEVERITIES,
 			);
 
 		return {

@@ -12,8 +12,36 @@ import { VitalTypes } from '../dto/vital-history.dto';
 export enum VitalSeverityEnum {
 	NORMAL = 'normal',
 	ELEVATED = 'elevated',
+
+	// Blood pressure specific (AHA thresholds)
+	HYPERTENSIVE = 'hypertensive',
+	HYPERTENSIVE_CRISIS = 'hypertensive_crisis',
+	HYPOTENSIVE = 'hypotensive',
+	SEVERE_HYPOTENSION = 'severe_hypotension',
+
+	// Blood sugar specific (ADA thresholds)
+	LOW = 'low',
+	CRITICALLY_LOW = 'critically_low',
+	HIGH = 'high',
+	CRITICALLY_HIGH = 'critically_high',
+
+	// Legacy value, kept for existing stored records and any vital type
+	// without dedicated tiers (heart rate, temperature, etc. — determineSeverity
+	// doesn't classify those beyond NORMAL).
 	CRITICAL = 'critical',
 }
+
+// The tiers that represent a genuine emergency — used to gate the urgent
+// facility push alert and the "critical readings" count, as opposed to
+// ELEVATED/HYPERTENSIVE/HYPOTENSIVE/LOW/HIGH, which are worth recording but
+// don't warrant an urgent interruption.
+export const CRITICAL_VITAL_SEVERITIES: VitalSeverityEnum[] = [
+	VitalSeverityEnum.CRITICAL,
+	VitalSeverityEnum.HYPERTENSIVE_CRISIS,
+	VitalSeverityEnum.SEVERE_HYPOTENSION,
+	VitalSeverityEnum.CRITICALLY_LOW,
+	VitalSeverityEnum.CRITICALLY_HIGH,
+];
 
 export enum BloodSugarSubTypeEnum {
 	RANDOM_BLOOD_SUGAR = 'randomBloodSugar',

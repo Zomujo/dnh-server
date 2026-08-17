@@ -14,7 +14,10 @@ import {
 } from '../../concerns/dto';
 import { Frequency, NotificationType } from '../../notifications/dto';
 import { AugurNotification } from '../../notifications/entities/notification.entity';
-import { VitalSeverityEnum } from '../../vital-histories/entities/vital-history.entity';
+import {
+	CRITICAL_VITAL_SEVERITIES,
+	VitalSeverityEnum,
+} from '../../vital-histories/entities/vital-history.entity';
 
 export async function upsertChronicCondition(
 	chronicCondition: { data: ChronicCondition; model: Model<ChronicCondition> },
@@ -234,11 +237,16 @@ export function upsertVitalHistories(
 	existing.endDate = addMonths(endDate, 3);
 
 	existing.totalCount += 1;
-	if (data.severity === VitalSeverityEnum.NORMAL) existing.normalCount! += 1;
-	if (data.severity === VitalSeverityEnum.ELEVATED)
-		existing.elevatedCount! += 1;
-	if (data.severity === VitalSeverityEnum.CRITICAL)
+	// Grouped rather than exact-matched against every tier so newer,
+	// non-emergency tiers (HYPERTENSIVE, HYPOTENSIVE, LOW, HIGH, etc.) still
+	// land in the "elevated" bucket instead of silently going uncounted.
+	if (data.severity === VitalSeverityEnum.NORMAL) {
+		existing.normalCount! += 1;
+	} else if (CRITICAL_VITAL_SEVERITIES.includes(data.severity)) {
 		existing.criticalCount! += 1;
+	} else {
+		existing.elevatedCount! += 1;
+	}
 
 	if (type === VitalTypes.BLOOD_PRESSURE && data.value.includes('/')) {
 		const [sys, dia] = data.value.split('/').map(Number);

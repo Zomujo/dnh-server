@@ -25,6 +25,7 @@ import {
 	VitalTypes,
 } from './dto';
 import {
+	CRITICAL_VITAL_SEVERITIES,
 	VitalHistory,
 	VitalSeverityEnum,
 } from './entities/vital-history.entity';
@@ -61,7 +62,7 @@ export class VitalHistoriesService {
 			body: userBody,
 		});
 
-		if (severity === VitalSeverityEnum.CRITICAL && facilityId) {
+		if (CRITICAL_VITAL_SEVERITIES.includes(severity) && facilityId) {
 			this.pushService.sendNotificationToTopic(
 				() => ({
 					notification: {
@@ -106,21 +107,29 @@ export class VitalHistoriesService {
 				return VitalSeverityEnum.NORMAL;
 			}
 
-			if (systolic >= 140 || diastolic >= 90) {
-				return VitalSeverityEnum.CRITICAL;
+			// AHA thresholds (mmHg): Normal <120/<80, Elevated 120-129/<80,
+			// Stage 1 130-139/80-89, Stage 2 >=140/>=90 (both stages folded into
+			// HYPERTENSIVE below — this system only needs "needs attention" vs
+			// "needs urgent care", not the stage distinction), Hypertensive
+			// Crisis >180/>120 (checked as >=180/>=120 to catch the boundary).
+			// AHA doesn't define hypotension (it's hypertension-focused
+			// guidance); <90/<60 and a conservative <80/<50 "severe" cutoff
+			// are the commonly cited clinical thresholds.
+			if (systolic >= 180 || diastolic >= 120) {
+				return VitalSeverityEnum.HYPERTENSIVE_CRISIS;
 			}
-
-			if (
-				(systolic >= 120 && systolic <= 139) ||
-				(diastolic >= 80 && diastolic <= 89)
-			) {
+			if (systolic < 80 || diastolic < 50) {
+				return VitalSeverityEnum.SEVERE_HYPOTENSION;
+			}
+			if (systolic >= 130 || diastolic >= 80) {
+				return VitalSeverityEnum.HYPERTENSIVE;
+			}
+			if (systolic < 90 || diastolic < 60) {
+				return VitalSeverityEnum.HYPOTENSIVE;
+			}
+			if (systolic >= 120) {
 				return VitalSeverityEnum.ELEVATED;
 			}
-
-			if (systolic < 120 && diastolic < 80) {
-				return VitalSeverityEnum.NORMAL;
-			}
-
 			return VitalSeverityEnum.NORMAL;
 		}
 
@@ -131,18 +140,17 @@ export class VitalHistoriesService {
 				return VitalSeverityEnum.NORMAL;
 			}
 
-			// Critically Low (<3.0 mmol/L) or Very High / Critical (>=13.9 mmol/L)
-			if (val < 3.0 || val >= 13.9) {
-				return VitalSeverityEnum.CRITICAL;
-			}
-
-			// Low (3.0 - 3.8 mmol/L) or Slightly High / High (7.3 - 13.8 mmol/L)
-			if ((val >= 3.0 && val <= 3.8) || (val >= 7.3 && val <= 13.8)) {
-				return VitalSeverityEnum.ELEVATED;
-			}
-
-			// In Target (3.9 - 7.2 mmol/L / 4.4 - 7.2 mmol/L)
-			return VitalSeverityEnum.NORMAL;
+			// ADA thresholds (mmol/L): Level 2 hypoglycemia <3.0, Level 1
+			// hypoglycemia 3.0-<3.9, in-target 3.9-<7.3, elevated 7.3-<11.1
+			// (11.1 mmol/L / 200mg/dL is a commonly used "significant
+			// hyperglycemia" marker), high 11.1-<13.9, critically high >=13.9
+			// (250mg/dL — the diagnostic DKA-risk threshold).
+			if (val < 3.0) return VitalSeverityEnum.CRITICALLY_LOW;
+			if (val < 3.9) return VitalSeverityEnum.LOW;
+			if (val < 7.3) return VitalSeverityEnum.NORMAL;
+			if (val < 11.1) return VitalSeverityEnum.ELEVATED;
+			if (val < 13.9) return VitalSeverityEnum.HIGH;
+			return VitalSeverityEnum.CRITICALLY_HIGH;
 		}
 
 		return VitalSeverityEnum.NORMAL;
@@ -164,23 +172,29 @@ export class VitalHistoriesService {
 
 		const label = vitalLabels[vitalType] ?? vitalType;
 
-		switch (severity) {
-			case VitalSeverityEnum.CRITICAL:
-				return [
-					`Thanks for logging your ${label}. Your readings are critically out of range — please consult your doctor as soon as possible.`,
-					`Critical alert: a patient has logged a ${label} reading that is critically out of range. Please review and follow up immediately.`,
-				];
-			case VitalSeverityEnum.ELEVATED:
-				return [
-					`Thanks for logging your ${label}. Your readings are slightly elevated — keep monitoring and stay in touch with your care team.`,
-					`Notice: a patient has logged an elevated ${label} reading. You may want to check in with them.`,
-				];
-			default:
-				return [
-					`Thanks for logging your ${label}. Your readings look normal — keep it up!`,
-					`A patient has logged a normal ${label} reading.`,
-				];
+		// Grouped rather than an exhaustive switch so every tier added above
+		// (HYPERTENSIVE, HYPOTENSIVE, LOW, HIGH, etc.) lands on an explicit
+		// message instead of silently falling through to "looks normal" —
+		// that's exactly the kind of gap that would tell a patient in a
+		// hypertensive crisis their reading was fine.
+		if (severity === VitalSeverityEnum.NORMAL) {
+			return [
+				`Thanks for logging your ${label}. Your readings look normal — keep it up!`,
+				`A patient has logged a normal ${label} reading.`,
+			];
 		}
+
+		if (CRITICAL_VITAL_SEVERITIES.includes(severity)) {
+			return [
+				`Thanks for logging your ${label}. Your readings are critically out of range — please consult your doctor as soon as possible.`,
+				`Critical alert: a patient has logged a ${label} reading that is critically out of range. Please review and follow up immediately.`,
+			];
+		}
+
+		return [
+			`Thanks for logging your ${label}. Your readings are slightly elevated — keep monitoring and stay in touch with your care team.`,
+			`Notice: a patient has logged an elevated ${label} reading. You may want to check in with them.`,
+		];
 	}
 
 	async create(
@@ -202,8 +216,36 @@ export class VitalHistoriesService {
 
 		const input = await Promise.all(
 			dto.vitals.map(async (vital) => {
+				// Server-computed, not trusted from the client — this path
+				// previously relied entirely on whatever severity the client
+				// optionally submitted, with no independent verification (3.1)
+				// and no critical-alert path at all for personnel-entered
+				// readings (unlike loadVitalHistory()).
+				const severity = this.determineSeverity(vital.vitalType, vital.value);
+
+				if (CRITICAL_VITAL_SEVERITIES.includes(severity) && facilityId) {
+					const [, personnelBody] = this.buildVitalNotificationBody(
+						vital.vitalType,
+						severity,
+					);
+					this.pushService.sendNotificationToTopic(
+						() => ({
+							notification: {
+								title: 'Critical Patient Reading',
+								body: personnelBody,
+							},
+							data: {
+								notification_type: 'notification',
+								click_action: 'FLUTTER_NOTIFICATION_CLICK',
+							},
+						}),
+						facilityId,
+					);
+				}
+
 				const summary = this.generateVitalSummary({
 					...vital,
+					severity,
 					recordedAt: dto.recordedAt,
 					notes: dto.notes,
 				} as Partial<VitalHistory>);
@@ -218,6 +260,7 @@ export class VitalHistoriesService {
 					createdBy: personnelId,
 					...(facilityId && { facility: facilityId }),
 					...vital,
+					severity,
 				};
 
 				dhVectorsData.push({
@@ -532,11 +575,14 @@ export class VitalHistoriesService {
 			// the process died in between. A single-document upsert is atomic on
 			// its own without needing a transaction, so this never has that gap.
 			await Promise.all(
-				vitals.map((vital) =>
-					this.vitalHistoryModel.updateOne(
+				vitals.map((vital) => {
+					// Server-computed, not trusted from the client — same
+					// rationale as create() (3.1).
+					const severity = this.determineSeverity(vital.vitalType, vital.value);
+					return this.vitalHistoryModel.updateOne(
 						{ clusterId: id, vitalType: vital.vitalType },
 						{
-							$set: { ...vital, recordedAt, notes },
+							$set: { ...vital, severity, recordedAt, notes },
 							$setOnInsert: {
 								userId: vHistory.userId,
 								patient: vHistory.patient,
@@ -545,8 +591,8 @@ export class VitalHistoriesService {
 							},
 						},
 						{ upsert: true },
-					),
-				),
+					);
+				}),
 			);
 
 			// Drop any reading whose vitalType is no longer present in the new set.
@@ -964,8 +1010,11 @@ export class VitalHistoriesService {
 
 	async countVitalsBySeverity(
 		userId: string,
-		severity: VitalSeverityEnum,
+		severity: VitalSeverityEnum | VitalSeverityEnum[],
 	): Promise<number> {
-		return this.vitalHistoryModel.countDocuments({ userId, severity });
+		return this.vitalHistoryModel.countDocuments({
+			userId,
+			severity: Array.isArray(severity) ? { $in: severity } : severity,
+		});
 	}
 }
