@@ -115,6 +115,22 @@ export class MemoryScribeService {
 		const memoryScriber = this.model.bindTools(tools);
 		const response = await memoryScriber.invoke(prompt);
 
+		// The model picks filters.userId/filters.patient from the patient's
+		// free-text chat message — never trust them. An injected instruction in
+		// that message would otherwise become a cross-tenant write once the
+		// tool executes. Overwrite with the authenticated caller's real
+		// identity before any tool runs, for every tool call the model made.
+		const trustedUserId = state.user?.userId;
+		const trustedPatientId = state.user?.patientId;
+		for (const toolCall of response.tool_calls ?? []) {
+			const filters = (toolCall.args as Record<string, any> | undefined)
+				?.filters;
+			if (filters && typeof filters === 'object') {
+				if ('userId' in filters) filters.userId = trustedUserId;
+				if ('patient' in filters) filters.patient = trustedPatientId;
+			}
+		}
+
 		if (process.env.NODE_ENV === 'development') {
 			console.log('Memory Scribe response:', JSON.stringify(response));
 		}
