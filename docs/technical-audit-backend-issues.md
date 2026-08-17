@@ -671,10 +671,50 @@ a correctness bug.
 
 | # | Issue | Location | Severity | Status |
 |---|---|---|---|---|
-| 7.1 | Cache-invalidation utility hits Redis on every write across 15 entities, but the only consumer interceptor is never registered — 100% overhead, re-raises on transient faults and fails the originating write | `delete-prefix.util.ts:4-38`; `caching.module.ts:34-37`; `caching.interceptor.ts:52` | High | Open |
+| 7.1 | Cache-invalidation utility hits Redis on every write across 15 entities, but the only consumer interceptor is never registered — 100% overhead, re-raises on transient faults and fails the originating write | `delete-prefix.util.ts:4-38`; `caching.module.ts:34-37`; `caching.interceptor.ts:52` | High | **Resolved** — see notes below |
 | 7.2 | AI service creates 3 unmanaged DB connection pools with no `onModuleDestroy`/`close()`; quadratic re-encoding per model call | `ai.service.ts:52-55,96-108`; `ai-ext.service.ts:24-25`; `planner-ai.service.ts:50-51` | Medium | Open |
 | 7.4 | Vital-history count pipeline has no `$match` stage — full collection scan, reports global count as per-patient | `vital-histories.service.ts:562-570` | Medium | Open |
 | 7.5 | Unwrapped integer/double coercion on a free-text BP value — unhandled 500 on trends endpoint | `:747-748,853`; `vital-history.dto.ts:76-79` | Medium | Open |
+
+### Notes — 7.1 (pointless cache-invalidation overhead + write-failure risk)
+
+Confirmed both halves of the audit finding directly: `CustomCacheInterceptor`'s
+registration as `APP_INTERCEPTOR` in `caching.module.ts` was commented out, so no HTTP
+response was ever cached under its `token=<userId>:<path>...` key format — and 16 files
+(15 entities plus the util itself) called `deleteByPattern()` from Mongoose
+post-save/post-update/post-delete hooks on every single write, scanning Redis for keys
+matching that same format that could never exist. Each call opened a brand-new Redis
+connection (`createClient().connect()` per invocation, not pooled), ran a cursor-based
+`SCAN` across the keyspace, and — critically — re-threw on error after logging. Since
+this ran synchronously inside Mongoose hooks, a transient Redis blip unrelated to the
+actual write (which had already succeeded in MongoDB) could reject the hook chain and
+surface as a failed API call for data that was, in fact, saved.
+
+Per product decision, resolved by removing the invalidation call sites (they were
+serving no purpose while the interceptor is disabled) rather than enabling the
+interceptor — **`CustomCacheInterceptor` is being kept, deliberately dormant, for future
+use**, not deleted. Concretely:
+
+- Removed all ~40 `deleteByPattern(...)` call sites across the 15 entities'
+  post-save/post-update/post-delete/post-insertMany/post-deleteMany hooks
+  (`patient`, `adherence-pattern`, `adherence-log`, `medication`, `appointment`,
+  `vital-history`, `plan`, `session`, `planner-chat`, `personnel`, `ai-chat`,
+  `notification`, `chronic-condition`, `concern`). Where a hook did *only* cache
+  invalidation, the whole hook registration was deleted; where a hook also drove other
+  logic (e.g. `myEmitter.emit('upsertSummary', ...)`), only the `deleteByPattern` call
+  was stripped and the rest left intact. Also removed the now-unused
+  `deleteByPattern` imports.
+- Left `delete-prefix.util.ts` (`deleteByPattern`) and `caching.interceptor.ts`
+  (`CustomCacheInterceptor`) in place, both now dormant with zero live callers/
+  registrations, and added comments in both files plus at the commented-out
+  `APP_INTERCEPTOR` registration in `caching.module.ts` explaining why they're inactive
+  and exactly what re-enabling response caching would require (uncomment the provider,
+  and re-add invalidation calls to the relevant entities' hooks).
+- While already in the dormant `deleteByPattern()`, also fixed the re-throw: it now
+  logs and swallows the error instead of propagating it. This was flagged as part of
+  7.1 but is otherwise inert right now (zero callers) — fixed proactively so that if/when
+  this utility is re-wired back into entity hooks, cache-invalidation failures can never
+  again fail the write they're meant to invalidate on behalf of.
 
 ## Backend clinical-logic gaps (§3, server portions)
 
@@ -887,3 +927,4 @@ for 30 days (long enough to debug a failure pattern without accumulating indefin
 16. ~~Fix `PORT` NaN fallback; add email and patient-code uniqueness with collision-retry; drop `generateCode`'s unused params~~ — done (6.7)
 17. ~~Fix DAILY dose-count math; fix hardcoded/UTC-only cron timezone handling; fix multi-device push token clobbering; fix notification queue scheduler-lookup performance~~ — done (5.2, 5.4, 5.6, 7.3; 5.5 turned out to already be resolved by 5.2, verified empirically)
 18. ~~Wire up the VigilSentinel safety-alert pipeline (delete the never-invoked Archonen router, implement VigilSentinel as a facility push alert); add an explicit emergency-care directive to the main patient-facing prompt~~ — done (3.6, not in the audit's original sequence — grouped with 3.1/3.3 as the rest of the clinical-logic gaps); also fixed a second cross-tenant-write path found while investigating this (see 2.8's notes)
+19. ~~Remove the pointless per-write Redis cache-invalidation scans across 15 entities (dead since the consumer interceptor was never registered) and stop `deleteByPattern` from failing the originating write on a transient Redis error~~ — done (7.1, not in the audit's original sequence — the remaining §7 items (7.2, 7.4, 7.5) are still open); `CustomCacheInterceptor` and `deleteByPattern` were deliberately kept, dormant and documented, rather than deleted, per product decision to preserve the option to enable response caching later

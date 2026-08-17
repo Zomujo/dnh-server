@@ -1,6 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from '@/common/entities';
-import { deleteByPattern } from '@/core/caching/utils';
 import { BaseDH } from '../../../common/entities/base-dh.entity';
 import { Patient } from '../../patients/entities/patient.entity';
 import {
@@ -167,40 +166,3 @@ export class AugurNotification extends BaseDH {
 
 export const AugurNotificationSchema =
 	SchemaFactory.createForClass(AugurNotification);
-
-AugurNotificationSchema.post<AugurNotification>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc.userId}*chronic-care*notifications*`,
-	);
-});
-
-AugurNotificationSchema.post<AugurNotification>(
-	'findOneAndUpdate',
-	async function (doc: AugurNotification | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=${doc ? doc.userId : ''}*chronic-care*notifications*`,
-		);
-	},
-);
-
-AugurNotificationSchema.post<AugurNotification>(
-	'findOneAndDelete',
-	async function () {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=*chronic-care*notifications*`,
-		);
-	},
-);
-
-AugurNotificationSchema.post<AugurNotification>(
-	'deleteMany',
-	async function () {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=*chronic-care*notifications*`,
-		);
-	},
-);

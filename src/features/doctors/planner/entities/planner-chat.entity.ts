@@ -1,7 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
 import { BaseEntity } from '@/common/entities';
-import { deleteByPattern } from '@/core/caching/utils';
 import type { ChatTypes } from '@/features/client/dto';
 import { Patient } from '@/features/patients/entities/patient.entity';
 import { Personnel } from '../../entities/personnel.entity';
@@ -66,41 +65,3 @@ export class PlannerChat extends BaseEntity {
 }
 
 export const PlannerChatSchema = SchemaFactory.createForClass(PlannerChat);
-
-PlannerChatSchema.post<PlannerChat>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc.personnel}*chronic-care*doctors*planner*${doc.patient}*sessions*${doc.plannerSession}*chats*`,
-	);
-});
-
-PlannerChatSchema.post('insertMany', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*doctors*planner*sessions*chats*`,
-	);
-});
-
-PlannerChatSchema.post<PlannerChat>(
-	'findOneAndUpdate',
-	async function (doc: PlannerChat | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=${doc ? doc.personnel : ''}*chronic-care*doctors*planner${doc ? `*${doc.patient}*` : '*'}sessions${doc ? `*${doc.plannerSession}*` : '*'}chats*`,
-		);
-	},
-);
-
-PlannerChatSchema.post<PlannerChat>('findOneAndDelete', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*doctors*planner*${this.patient}*sessions*${this.plannerSession}*chats*`,
-	);
-});
-
-PlannerChatSchema.post<PlannerChat>('deleteMany', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*doctors*planner*sessions*chats*`,
-	);
-});

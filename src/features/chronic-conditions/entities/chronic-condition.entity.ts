@@ -1,6 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
-import { deleteByPattern } from '@/core/caching/utils';
 import { BaseDH } from '../../../common/entities/base-dh.entity';
 import { Patient } from '../../patients/entities/patient.entity';
 import { myEmitter } from '../../patients/utils/summary.event';
@@ -107,20 +106,9 @@ export class ChronicCondition extends BaseDH {
 export const ChronicConditionSchema =
 	SchemaFactory.createForClass(ChronicCondition);
 
-ChronicConditionSchema.post<ChronicCondition>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc.userId}*chronic-care*chronic-conditions*`,
-	);
-});
-
 ChronicConditionSchema.post<ChronicCondition>(
 	'findOneAndUpdate',
 	async function (doc: ChronicCondition | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=${doc ? doc.userId : ''}*chronic-care*chronic-conditions*`,
-		);
 		if (doc) {
 			myEmitter.emit(
 				'upsertSummary',
@@ -138,20 +126,3 @@ ChronicConditionSchema.post<ChronicCondition>(
 		}
 	},
 );
-
-ChronicConditionSchema.post<ChronicCondition>(
-	'findOneAndDelete',
-	async function () {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=*chronic-care*chronic-conditions*`,
-		);
-	},
-);
-
-ChronicConditionSchema.post<ChronicCondition>('deleteMany', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*chronic-conditions*`,
-	);
-});

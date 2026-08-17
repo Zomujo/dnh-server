@@ -1,6 +1,5 @@
 import { Prop, Schema, SchemaFactory, Virtual } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
-import { deleteByPattern } from '@/core/caching/utils';
 import { BaseDH } from '../../../common/entities/base-dh.entity';
 import { Facility } from '../../facilities/entities/facility.entity';
 import { Patient } from '../../patients/entities/patient.entity';
@@ -100,20 +99,9 @@ export class Concern extends BaseDH {
 
 export const ConcernSchema = SchemaFactory.createForClass(Concern);
 
-ConcernSchema.post<Concern>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc.userId}*chronic-care*concerns*`,
-	);
-});
-
 ConcernSchema.post<Concern>(
 	'findOneAndUpdate',
 	async function (doc: Concern | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=${doc ? doc.userId : ''}*chronic-care*concerns*`,
-		);
 		if (doc) {
 			myEmitter.emit(
 				'upsertSummary',
@@ -131,17 +119,3 @@ ConcernSchema.post<Concern>(
 		}
 	},
 );
-
-ConcernSchema.post<Concern>('findOneAndDelete', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*concerns*`,
-	);
-});
-
-ConcernSchema.post<Concern>('deleteMany', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*concerns*`,
-	);
-});

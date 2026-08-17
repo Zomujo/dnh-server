@@ -1,6 +1,13 @@
 import { CACHE_KEY_METADATA, CacheInterceptor } from '@nestjs/cache-manager';
 import { ExecutionContext, Injectable, Logger } from '@nestjs/common';
 
+// NOTE: not currently registered as APP_INTERCEPTOR (see caching.module.ts,
+// where the registration is commented out) — kept here, working, for when
+// response caching is actually needed. If you re-enable it, you also need
+// to re-wire deleteByPattern(...) invalidation calls into the relevant
+// entities' Mongoose post-save/post-update hooks (removed as part of audit
+// item 7.1, since they were pure overhead while this interceptor was
+// inactive) — see src/core/caching/utils/delete-prefix.util.ts.
 @Injectable()
 export class CustomCacheInterceptor extends CacheInterceptor {
 	private logger = new Logger(CustomCacheInterceptor.name);

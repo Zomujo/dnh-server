@@ -31,6 +31,22 @@ import { CacheService } from './caching.service';
 	],
 	providers: [
 		CacheService,
+		// CustomCacheInterceptor (src/core/caching/interceptors/caching.interceptor.ts)
+		// is intentionally NOT registered. It builds per-user, per-route cache
+		// keys (`token=<userId>:<path>...`) but was never actually wired up as
+		// APP_INTERCEPTOR, so no HTTP response has ever been cached under that
+		// key format — meanwhile ~15 entities were unconditionally scanning
+		// Redis for (and re-throwing on failure to delete) keys matching that
+		// same format on every single write, for zero benefit. Those
+		// now-pointless invalidation calls were removed when audit item 7.1
+		// was fixed; see delete-prefix.util.ts for the invalidation helper,
+		// still present and ready to be reused.
+		//
+		// To actually enable response caching: uncomment the block below,
+		// AND re-add deleteByPattern(...) calls to the relevant entities'
+		// Mongoose post-save/post-update hooks so cached responses get
+		// invalidated on writes (see git history prior to the 7.1 fix for
+		// the exact patterns/key formats that were in place).
 		// {
 		// 	provide: APP_INTERCEPTOR,
 		// 	useClass: CustomCacheInterceptor,

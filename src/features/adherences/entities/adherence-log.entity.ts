@@ -1,7 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
 import { Model, Types } from 'mongoose';
-import { deleteByPattern } from '@/core/caching/utils';
 import { BaseDH } from '../../../common/entities/base-dh.entity';
 import { Patient } from '../../patients/entities/patient.entity';
 import { myEmitter } from '../../patients/utils/summary.event';
@@ -122,21 +121,9 @@ AdherenceLogSchema.index(
 	},
 );
 
-AdherenceLogSchema.post<AdherenceLog>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc.userId}*chronic-care*adherence-patterns*`,
-	);
-});
-
 AdherenceLogSchema.post<AdherenceLog>(
 	'findOneAndUpdate',
 	async function (doc: AdherenceLog | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=${doc ? doc.userId : ''}*chronic-care*adherence-patterns*`,
-		);
-
 		if (doc) {
 			myEmitter.emit(
 				'upsertAdherencePattern',
@@ -197,17 +184,3 @@ myEmitter.on(
 		);
 	},
 );
-
-AdherenceLogSchema.post<AdherenceLog>('findOneAndDelete', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*adherence-patterns*`,
-	);
-});
-
-AdherenceLogSchema.post<AdherenceLog>('deleteMany', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*adherence-patterns*`,
-	);
-});

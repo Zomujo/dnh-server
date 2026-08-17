@@ -1,6 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { BaseEntity } from '@/common/entities';
-import { deleteByPattern } from '@/core/caching/utils';
 import type { ChatTypes } from '../../dto';
 
 export enum AIMessageRole {
@@ -45,32 +44,3 @@ export class ClientAIChat extends BaseEntity {
 }
 
 export const ClientAiChatSchema = SchemaFactory.createForClass(ClientAIChat);
-
-ClientAiChatSchema.post<ClientAIChat>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc.userId}*client-ai*chats*`,
-	);
-});
-
-ClientAiChatSchema.post('insertMany', async function () {
-	await deleteByPattern(process.env.REDIS_URL!, `token=*client-ai*chats*`);
-});
-
-ClientAiChatSchema.post<ClientAIChat>(
-	'findOneAndUpdate',
-	async function (doc: ClientAIChat | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=${doc ? doc.userId : ''}*client-ai*chats*`,
-		);
-	},
-);
-
-ClientAiChatSchema.post<ClientAIChat>('findOneAndDelete', async function () {
-	await deleteByPattern(process.env.REDIS_URL!, `token=*client-ai*chats*`);
-});
-
-ClientAiChatSchema.post<ClientAIChat>('deleteMany', async function () {
-	await deleteByPattern(process.env.REDIS_URL!, `token=*client-ai*chats*`);
-});

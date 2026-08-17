@@ -1,7 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
 import { BaseDH } from '@/common/entities/base-dh.entity';
-import { deleteByPattern } from '@/core/caching/utils';
 import { Personnel } from '@/features/doctors/entities/personnel.entity';
 import { Facility } from '@/features/facilities/entities/facility.entity';
 import { AdherenceStatus } from '../dto';
@@ -210,20 +209,9 @@ export class Patient extends BaseDH {
 
 export const PatientSchema = SchemaFactory.createForClass(Patient);
 
-PatientSchema.post<Patient>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc.userId}*chronic-care*patient*`,
-	);
-});
-
 PatientSchema.post<Patient>(
 	'findOneAndUpdate',
 	async function (doc: Patient | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=${doc ? doc.userId : ''}*chronic-care*patient*`,
-		);
 		if (doc) {
 			myEmitter.emit(
 				'upsertSummary',
@@ -241,11 +229,3 @@ PatientSchema.post<Patient>(
 		}
 	},
 );
-
-PatientSchema.post<Patient>('findOneAndDelete', async function () {
-	await deleteByPattern(process.env.REDIS_URL!, `token=*chronic-care*patient*`);
-});
-
-PatientSchema.post<Patient>('deleteMany', async function () {
-	await deleteByPattern(process.env.REDIS_URL!, `token=*chronic-care*patient*`);
-});

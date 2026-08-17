@@ -3,7 +3,6 @@ import { ObjectId } from 'mongodb';
 import type { Model } from 'mongoose';
 import { BaseEntity } from '@/common/entities';
 import { generateCode } from '@/common/utils/helpers/code-generator.helper';
-import { deleteByPattern } from '@/core/caching/utils';
 import { Facility } from '@/features/facilities/entities/facility.entity';
 import { PersonnelAccount } from '../auth/personnel-accounts/entities/personnel-account.entity';
 
@@ -70,20 +69,3 @@ PersonnelSchema.pre<Personnel>('save', async function () {
 		);
 	}
 });
-
-PersonnelSchema.post<Personnel>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc._id}*chronic-care*personnel*current`,
-	);
-});
-
-PersonnelSchema.post<Personnel>(
-	'findOneAndUpdate',
-	async function (doc: Personnel | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=${doc ? doc._id : ''}*chronic-care*personnel*current`,
-		);
-	},
-);

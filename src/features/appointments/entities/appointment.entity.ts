@@ -1,7 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
 import { BaseEntity } from '@/common/entities';
-import { deleteByPattern } from '@/core/caching/utils';
 import { Personnel } from '@/features/doctors/entities/personnel.entity';
 import { Facility } from '@/features/facilities/entities/facility.entity';
 import { Patient } from '@/features/patients/entities/patient.entity';
@@ -107,28 +106,3 @@ export class Appointment extends BaseEntity {
 }
 
 export const AppointmentSchema = SchemaFactory.createForClass(Appointment);
-
-AppointmentSchema.post<Appointment>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc.userId}*appointments*`,
-	);
-});
-
-AppointmentSchema.post<Appointment>(
-	'findOneAndUpdate',
-	async function (doc: Appointment | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=${doc ? doc.userId : ''}*appointments*`,
-		);
-	},
-);
-
-AppointmentSchema.post<Appointment>('findOneAndDelete', async function () {
-	await deleteByPattern(process.env.REDIS_URL!, `token=*appointments*`);
-});
-
-AppointmentSchema.post<Appointment>('deleteMany', async function () {
-	await deleteByPattern(process.env.REDIS_URL!, `token=*appointments*`);
-});

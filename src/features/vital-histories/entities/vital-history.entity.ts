@@ -1,6 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
-import { deleteByPattern } from '@/core/caching/utils';
 import { BaseDH } from '../../../common/entities/base-dh.entity';
 import { Personnel } from '../../doctors/entities/personnel.entity';
 import { Facility } from '../../facilities/entities/facility.entity';
@@ -159,20 +158,9 @@ export class VitalHistory extends BaseDH {
 
 export const VitalHistorySchema = SchemaFactory.createForClass(VitalHistory);
 
-VitalHistorySchema.post<VitalHistory>('save', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*vital-histories*`,
-	);
-});
-
 VitalHistorySchema.post<VitalHistory>(
 	'findOneAndUpdate',
 	async function (doc: VitalHistory | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=*chronic-care*vital-histories*`,
-		);
 		if (doc) {
 			myEmitter.emit(
 				'upsertSummary',
@@ -190,17 +178,3 @@ VitalHistorySchema.post<VitalHistory>(
 		}
 	},
 );
-
-VitalHistorySchema.post<VitalHistory>('findOneAndDelete', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*vital-histories*`,
-	);
-});
-
-VitalHistorySchema.post<VitalHistory>('deleteMany', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*vital-histories*`,
-	);
-});

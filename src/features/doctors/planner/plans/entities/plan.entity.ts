@@ -1,7 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
 import { BaseEntity } from '@/common/entities';
-import { deleteByPattern } from '@/core/caching/utils';
 import { Personnel } from '@/features/doctors/entities/personnel.entity';
 import { Patient } from '@/features/patients/entities/patient.entity';
 import { PlannerSession } from '../../sessions/entities/session.entity';
@@ -80,38 +79,3 @@ export class Plan extends BaseEntity {
 }
 
 export const PlanSchema = SchemaFactory.createForClass(Plan);
-
-PlanSchema.post<Plan>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc.personnel}*chronic-care*doctors*planner*${doc.patient}*plans*`,
-	);
-});
-
-PlanSchema.post('insertMany', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*doctors*planner*plans*`,
-	);
-});
-
-PlanSchema.post<Plan>('findOneAndUpdate', async function (doc: Plan | null) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc ? doc.personnel : ''}*chronic-care*doctors*planner${doc ? `*${doc.patient}*` : '*'}plans*`,
-	);
-});
-
-PlanSchema.post<Plan>('findOneAndDelete', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*doctors*planner*${this.patient}*plans*`,
-	);
-});
-
-PlanSchema.post<Plan>('deleteMany', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*doctors*planner*plans*`,
-	);
-});

@@ -1,6 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
-import { deleteByPattern } from '@/core/caching/utils';
 import {
 	AugurNotification,
 	Frequency,
@@ -168,20 +167,9 @@ export class Medication extends BaseDH {
 
 export const MedicationSchema = SchemaFactory.createForClass(Medication);
 
-MedicationSchema.post<Medication>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc.userId}*chronic-care*medications*`,
-	);
-});
-
 MedicationSchema.post<Medication>(
 	'findOneAndUpdate',
 	async function (doc: Medication | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=${doc ? doc.userId : ''}*chronic-care*medications*`,
-		);
 		if (doc) {
 			myEmitter.emit(
 				'upsertSummary',
@@ -199,17 +187,3 @@ MedicationSchema.post<Medication>(
 		}
 	},
 );
-
-MedicationSchema.post<Medication>('findOneAndDelete', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*medications*`,
-	);
-});
-
-MedicationSchema.post<Medication>('deleteMany', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*medications*`,
-	);
-});

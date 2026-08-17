@@ -1,7 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
 import { BaseEntity } from '@/common/entities';
-import { deleteByPattern } from '@/core/caching/utils';
 import { Patient } from '../../patients/entities/patient.entity';
 
 export enum PatternTargetType {
@@ -71,37 +70,3 @@ export class AdherencePattern extends BaseEntity {
 
 export const AdherencePatternSchema =
 	SchemaFactory.createForClass(AdherencePattern);
-
-AdherencePatternSchema.post<AdherencePattern>('save', async function (doc) {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=${doc.userId}*chronic-care*adherence-patterns*`,
-	);
-});
-
-AdherencePatternSchema.post<AdherencePattern>(
-	'findOneAndUpdate',
-	async function (doc: AdherencePattern | null) {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=${doc ? doc.userId : ''}*chronic-care*adherence-patterns*`,
-		);
-	},
-);
-
-AdherencePatternSchema.post<AdherencePattern>(
-	'findOneAndDelete',
-	async function () {
-		await deleteByPattern(
-			process.env.REDIS_URL!,
-			`token=*chronic-care*adherence-patterns*`,
-		);
-	},
-);
-
-AdherencePatternSchema.post<AdherencePattern>('deleteMany', async function () {
-	await deleteByPattern(
-		process.env.REDIS_URL!,
-		`token=*chronic-care*adherence-patterns*`,
-	);
-});
