@@ -4,7 +4,7 @@ import {
 	IntersectionType,
 	PickType,
 } from '@nestjs/swagger';
-import { IsEnum } from 'class-validator';
+import { IsEnum, IsMongoId, IsNotEmpty } from 'class-validator';
 import { GenericResponseDto, PaginationRequestDto } from '@/common/dto';
 import { PatientDto } from '../../patients/dto';
 import { CreateVitalHistoryDto, DateRange, VitalType } from './create.dto';
@@ -112,10 +112,10 @@ export class FilterVitalHistoriesDto extends PickType(PaginationRequestDto, [
 	'page',
 	'pageSize',
 ]) {
-	// @ApiProperty()
-	// @IsNotEmpty()
-	// @IsMongoId()
-	// patientId: string;
+	@ApiProperty()
+	@IsNotEmpty()
+	@IsMongoId()
+	patientId: string;
 	//
 	// @ApiPropertyOptional({
 	// 	enum: VitalType,

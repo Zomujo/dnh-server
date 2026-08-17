@@ -421,12 +421,14 @@ export class VitalHistoriesService {
 
 	async findAll(query: FilterVitalHistoriesDto) {
 		const { pageFilter } = generateFilter(query);
+		const patientId = new Types.ObjectId(query.patientId);
 		const result = await this.vitalHistoryModel.aggregate([
 			{
 				$match: {
 					clusterId: {
 						$ne: null,
 					},
+					patient: patientId,
 				},
 			},
 			{
@@ -489,6 +491,7 @@ export class VitalHistoriesService {
 			{
 				$match: {
 					clusterId: { $ne: null },
+					patient: patientId,
 				},
 			},
 			{ $group: { _id: '$clusterId' } },

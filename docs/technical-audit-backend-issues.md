@@ -673,7 +673,7 @@ a correctness bug.
 |---|---|---|---|---|
 | 7.1 | Cache-invalidation utility hits Redis on every write across 15 entities, but the only consumer interceptor is never registered — 100% overhead, re-raises on transient faults and fails the originating write | `delete-prefix.util.ts:4-38`; `caching.module.ts:34-37`; `caching.interceptor.ts:52` | High | **Resolved** — see notes below |
 | 7.2 | AI service creates 3 unmanaged DB connection pools with no `onModuleDestroy`/`close()`; quadratic re-encoding per model call | `ai.service.ts:52-55,96-108`; `ai-ext.service.ts:24-25`; `planner-ai.service.ts:50-51` | Medium | **Resolved (connection pools)** — see notes below |
-| 7.4 | Vital-history count pipeline has no `$match` stage — full collection scan, reports global count as per-patient | `vital-histories.service.ts:562-570` | Medium | Open |
+| 7.4 | Vital-history count pipeline has no `$match` stage — full collection scan, reports global count as per-patient | `vital-histories.service.ts:562-570` | Medium | **Resolved** — see notes below |
 | 7.5 | Unwrapped integer/double coercion on a free-text BP value — unhandled 500 on trends endpoint | `:747-748,853`; `vital-history.dto.ts:76-79` | Medium | Open |
 
 ### Notes — 7.1 (pointless cache-invalidation overhead + write-failure risk)
@@ -759,6 +759,30 @@ as-is: the cost is bounded, local, and the "fix" (memoizing per-message token co
 loop iterations) would add a meaningful amount of caching-correctness complexity for a cost
 that isn't currently a network or user-facing latency problem. Revisit if conversations
 start regularly running many tool-calling turns per message.
+
+### Notes — 7.4 (unfiltered count pipeline in `findAll`)
+
+Line numbers in the audit had drifted from all the intervening fixes on this branch, so
+the exact quote from the PDF was used to re-locate the finding: `findAll()`'s `result` and
+`countPipeline` aggregations (personnel/pharmacy route
+`GET personnel/pharmacies/vital-histories`) both only matched `clusterId: {$ne: null}` —
+no patient scoping at all, on either pipeline. Both were self-consistent with each other
+(same unscoped match), so the "count disagrees with rows" framing didn't literally apply
+to the currently-wired behavior, but the underlying bug the audit is describing is real:
+`FilterVitalHistoriesDto` already had a `patientId` field fully scaffolded and ready —
+`@IsNotEmpty() @IsMongoId()`, deliberately **not** `@IsOptional()` unlike its
+`vitalType`/`severity` neighbors — but commented out, so the endpoint could never actually
+be scoped to one patient despite clearly being designed to be. Every call did a full,
+unindexed-by-patient collection scan.
+
+Per product decision, restored `patientId` as a required field (matching its original,
+never-optional scaffolding) and added it to the `$match` stage of both the `result` and
+`countPipeline` aggregations, converting the incoming string to `Types.ObjectId` since raw
+`$match` stages don't auto-cast like Mongoose's `.find()` does. `patient` is already an
+indexed field on the `VitalHistory` schema, so this also resolves the performance half of
+the finding (indexed lookup instead of a full collection scan). This is an API contract
+change: `GET personnel/pharmacies/vital-histories` now requires `patientId` and rejects
+requests without it, where it previously silently returned a global, unscoped listing.
 
 ## Backend clinical-logic gaps (§3, server portions)
 
@@ -1006,3 +1030,4 @@ for 30 days (long enough to debug a failure pattern without accumulating indefin
 19. ~~Remove the pointless per-write Redis cache-invalidation scans across 15 entities (dead since the consumer interceptor was never registered) and stop `deleteByPattern` from failing the originating write on a transient Redis error~~ — done (7.1, not in the audit's original sequence — the remaining §7 items (7.2, 7.4, 7.5) are still open); `CustomCacheInterceptor` and `deleteByPattern` were deliberately kept, dormant and documented, rather than deleted, per product decision to preserve the option to enable response caching later
 20. ~~Stop `ClientAIService`/`ExtClientAIService`/`PlannerAiService` from each opening their own unmanaged MongoDB connection pool; reuse Mongoose's already-connected, already-lifecycle-managed client instead~~ — done (7.2's connection-pool half, not in the audit's original sequence — grouped with the other §7 items); the quadratic re-tokenization half of 7.2 was deliberately left as-is per product decision — see notes above; 7.4 and 7.5 remain open
 21. ~~Delete the entire unreachable "planner" feature (AI treatment-plan chat, plans, sessions) — all 3 of its controllers were commented out~~ — done (not an audit finding; raised directly by the product owner and verified before deletion, same shape as 3.6's Archonen removal — see notes above)
+22. ~~Restore patient scoping on the vital-histories `findAll` count/listing pipelines (full collection scan, no patient filter despite the DTO's abandoned required `patientId` scaffolding)~~ — done (7.4, not in the audit's original sequence — grouped with the other §7 items); 7.5 remains open
