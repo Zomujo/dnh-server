@@ -244,12 +244,6 @@ export class NotificationsConsumer extends WorkerHost {
 		const ONE_YEAR = 365 * ONE_DAY;
 
 		switch (repetitionType) {
-			case RepetitionType.EVERY_SECOND:
-				return repeatEvery * ONE_SEC;
-
-			case RepetitionType.EVERY_MINUTE:
-				return repeatEvery * ONE_MIN;
-
 			case RepetitionType.HOURLY:
 				return repeatEvery * ONE_HOUR;
 

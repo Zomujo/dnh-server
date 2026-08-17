@@ -15,6 +15,8 @@ import {
 	IsOptional,
 	IsString,
 	IsTimeZone,
+	Max,
+	Min,
 	MinDate,
 	ValidateNested,
 } from 'class-validator';
@@ -54,8 +56,6 @@ export enum NotificationPriority {
 }
 
 export enum RepetitionType {
-	EVERY_SECOND = 'everySecond',
-	EVERY_MINUTE = 'everyMinute',
 	HOURLY = 'hourly',
 	DAILY = 'daily',
 	WEEKLY = 'weekly',
@@ -71,6 +71,8 @@ export class Frequency {
 		example: 2,
 	})
 	@IsNumber()
+	@Min(1)
+	@Max(365)
 	repeatEvery: number;
 
 	@ApiProperty({

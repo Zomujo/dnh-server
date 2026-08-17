@@ -158,6 +158,16 @@ export class MedicationsService {
 	}
 
 	private formatFrequency(freq: Frequency): string {
+		// DAILY's repeatEvery means "doses per day" (see create()/update() above
+		// and notifications.service.ts's getCron(), which spreads that many
+		// doses across the day), not "every N days" like every other
+		// repetitionType here — describing it with the generic "every N X"
+		// phrasing below would invert the meaning (e.g. 3 doses/day would read
+		// as "every 3 days").
+		if (freq.repetitionType === RepetitionType.DAILY && freq.repeatEvery > 1) {
+			return `${freq.repeatEvery} times a day`;
+		}
+
 		const typeMap: Record<string, string> = {
 			daily: 'day',
 			weekly: 'week',

@@ -14,7 +14,7 @@ import { UserType } from '@/core/auth/enums';
 	},
 })
 export class UserToken extends BaseEntity {
-	@Prop({ unique: true })
+	@Prop()
 	userId: string;
 
 	@Prop()
@@ -25,3 +25,7 @@ export class UserToken extends BaseEntity {
 }
 
 export const UserTokenSchema = SchemaFactory.createForClass(UserToken);
+
+// One row per (userId, fcmToken) pair, not per userId — a user may be
+// signed in on multiple devices at once, each with its own token.
+UserTokenSchema.index({ userId: 1, fcmToken: 1 }, { unique: true });

@@ -3,6 +3,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Queue, RepeatOptions } from 'bullmq';
 import { subHours } from 'date-fns';
+import { toZonedTime } from 'date-fns-tz';
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { generateFilter } from '@/common/factory';
@@ -213,6 +214,7 @@ export class NotificationsService {
 				startDate: notification.startDate,
 				frequency: notification.frequency,
 				endDate: notification.endDate,
+				timezone: notification.timezone,
 			},
 		);
 
@@ -310,10 +312,16 @@ export class NotificationsService {
 	private async addJob(
 		jobId: string,
 		data: Record<string, any>,
-		dto: { startDate: Date; frequency?: Frequency; endDate?: Date },
+		dto: {
+			startDate: Date;
+			frequency?: Frequency;
+			endDate?: Date;
+			timezone?: string;
+		},
 	) {
+		const timezone = dto.timezone ?? 'Africa/Accra';
 		const repeatOpts: Omit<RepeatOptions, 'key'> = {
-			tz: 'Africa/Accra',
+			tz: timezone,
 			startDate:
 				dto.startDate < new Date()
 					? dto.startDate
@@ -321,7 +329,7 @@ export class NotificationsService {
 		};
 
 		if (dto.frequency) {
-			repeatOpts.pattern = this.getCron(dto.frequency, dto.startDate);
+			repeatOpts.pattern = this.getCron(dto.frequency, dto.startDate, timezone);
 		}
 		if (dto.endDate) {
 			repeatOpts.endDate = dto.endDate;
@@ -343,19 +351,16 @@ export class NotificationsService {
 			return { removed: true, type: 'regular', jobId };
 		}
 
-		const schedulers = await this.notificationQueue.getJobSchedulers();
-		// for (const scheduler of schedulers) {
-		// 	await this.notificationQueue.removeJobScheduler(scheduler.key);
-		// }
-
-		const scheduler = schedulers.find((s) => s.key === jobId);
+		// Direct lookup by id instead of fetching every scheduler in the queue
+		// and scanning for a match — this runs on every notification write.
+		const scheduler = await this.notificationQueue.getJobScheduler(jobId);
 
 		if (scheduler) {
-			await this.notificationQueue.removeJobScheduler(scheduler.key);
+			await this.notificationQueue.removeJobScheduler(jobId);
 			return {
 				removed: true,
 				type: 'repeateable',
-				schedulerKey: scheduler.key,
+				schedulerKey: jobId,
 			};
 		}
 
@@ -370,35 +375,39 @@ export class NotificationsService {
 			.find({ patient: patientId })
 			.select('_id');
 
-		for (const notification of notifications) {
-			await this.remove(notification._id.toString());
-		}
+		await Promise.allSettled(
+			notifications.map((notification) =>
+				this.remove(notification._id.toString()),
+			),
+		);
 	}
 
-	private getCron(frequency: Frequency, startDate: Date): string {
+	private getCron(
+		frequency: Frequency,
+		startDate: Date,
+		timezone: string,
+	): string {
 		const { repeatEvery, repetitionType } = frequency;
 
 		if (repeatEvery < 1) {
 			throw new Error('repeatEvery must be at least 1');
 		}
 
-		const start = new Date(startDate);
-		const sec = start.getUTCSeconds();
-		const min = start.getUTCMinutes();
-		const hour = start.getUTCHours();
-		const day = start.getUTCDate();
-		const month = start.getUTCMonth() + 1;
-		const weekday = start.getUTCDay();
+		// BullMQ's repeatOpts.tz tells the cron parser to interpret this
+		// pattern's fields as wall-clock time in `timezone` — so the fields
+		// must actually be extracted in that timezone, not raw UTC. Using
+		// getUTC*() here would only coincidentally be correct for a
+		// UTC+0 timezone (e.g. Africa/Accra); any other timezone would fire
+		// reminders at the wrong local hour.
+		const start = toZonedTime(startDate, timezone);
+		const sec = start.getSeconds();
+		const min = start.getMinutes();
+		const hour = start.getHours();
+		const day = start.getDate();
+		const month = start.getMonth() + 1;
+		const weekday = start.getDay();
 
 		switch (repetitionType) {
-			case RepetitionType.EVERY_SECOND: {
-				return `*/${repeatEvery} * * * * *`;
-			}
-
-			case RepetitionType.EVERY_MINUTE: {
-				return `${sec} */${repeatEvery} * * * *`;
-			}
-
 			case RepetitionType.HOURLY: {
 				return `${sec} ${min} */${repeatEvery} * * *`;
 			}
@@ -407,12 +416,25 @@ export class NotificationsService {
 				if (repeatEvery === 1) {
 					return `${sec} ${min} ${hour} * * *`;
 				}
-				const intervalHours = Math.floor(12 / (repeatEvery - 1));
-				return `${sec} ${min} ${hour}/${intervalHours} * * *`;
+				// Doses are spread evenly across a 12-hour window starting at
+				// `hour`, listed explicitly rather than encoded as a cron `/N`
+				// step — a step pattern repeats across the full 24h day
+				// regardless of the intended 12h window, silently firing more
+				// often than repeatEvery (e.g. repeatEvery=3 with a 6h step
+				// fires 4x/day: hour, +6, +12, +18 — not the intended 3x).
+				const intervalHours = Math.max(1, Math.floor(12 / (repeatEvery - 1)));
+				const hours: number[] = [];
+				for (let i = 0; i < repeatEvery; i++) {
+					hours.push((hour + i * intervalHours) % 24);
+				}
+				return `${sec} ${min} ${hours.join(',')} * * *`;
 			}
 
 			case RepetitionType.WEEKLY: {
-				const weekInterval = Math.floor(7 / repeatEvery);
+				// Floors to 0 once repeatEvery > 7, which would turn the loop
+				// below into an infinite `+= 0` — clamp to 1 so it's always
+				// bounded, regardless of what validation allows through.
+				const weekInterval = Math.max(1, Math.floor(7 / repeatEvery));
 				const days: number[] = [];
 				for (let i = 0; i < 7; i += weekInterval) {
 					days.push((weekday + i) % 7);
@@ -421,7 +443,8 @@ export class NotificationsService {
 			}
 
 			case RepetitionType.MONTHLY: {
-				const daysInMonth = Math.floor(30.4375 / repeatEvery);
+				// Same infinite-loop risk as WEEKLY once repeatEvery > 30.4375.
+				const daysInMonth = Math.max(1, Math.floor(30.4375 / repeatEvery));
 				const monthDays: number[] = [];
 				for (let d = day; d <= 31; d += daysInMonth) {
 					monthDays.push(d);
@@ -430,7 +453,8 @@ export class NotificationsService {
 			}
 
 			case RepetitionType.YEARLY: {
-				const monthInterval = Math.floor(12 / repeatEvery);
+				// Same infinite-loop risk as WEEKLY once repeatEvery > 12.
+				const monthInterval = Math.max(1, Math.floor(12 / repeatEvery));
 				const months: number[] = [];
 				for (let m = month; m <= 12; m += monthInterval) {
 					months.push(m);

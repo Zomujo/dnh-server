@@ -22,8 +22,10 @@ export class PushService {
 	) {}
 
 	async addFcmToken(dto: CreatePushDto, user: IUserPayload) {
+		// Matched on (userId, fcmToken), not userId alone — registering a new
+		// device's token must add a row, not overwrite another device's.
 		await this.userTokenModel.updateOne(
-			{ userId: user.sub },
+			{ userId: user.sub, fcmToken: dto.fcmToken },
 			{ ...dto, userId: user.sub, userType: user.aud },
 			{ upsert: true },
 		);
@@ -209,8 +211,11 @@ export class PushService {
 	}
 
 	async removeFcmToken(dto: CreatePushDto, userId: string) {
+		// Both must match — signing out on one device must only remove that
+		// device's token, not every token belonging to the user.
 		const userToken = await this.userTokenModel.findOneAndDelete({
-			$or: [{ userId: userId }, { fcmToken: dto.fcmToken }],
+			userId,
+			fcmToken: dto.fcmToken,
 		});
 		if (!userToken) {
 			throw new NotFoundException('FCM token not found');

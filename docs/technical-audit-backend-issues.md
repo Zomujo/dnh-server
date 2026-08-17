@@ -427,14 +427,136 @@ logic in."
 
 | # | Issue | Location | Severity | Status |
 |---|---|---|---|---|
-| 5.1 | Three reachable **infinite loops** in cron generation (WEEKLY ≥8, MONTHLY ≥31, YEARLY ≥13) — no upper bound anywhere; reachable from patient chat parsing. Highest-severity availability finding | `notifications.service.ts:414,423,432`; `notification.schema.ts:45-50`; `notification.dto.ts:73-74`; `notification.entity.ts:16-17` | Critical | Open |
-| 5.2 | Incorrect dose-count math for `DAILY` with `repeatEvery > 1` | `notifications.service.ts` (getCron DAILY branch) | High | Open |
-| 5.3 | `EVERY_SECOND`/`EVERY_MINUTE` repetition types unguarded and reachable from the model | `notification.dto.ts:57-58`; `notification.schema.ts:22-31`; `consumer.ts:53,248` | High | Open |
-| 5.4 | Cron read via `getUTC*()` while repeat option specifies `tz:'Africa/Accra'` — only coincidentally correct; per-notification timezone field never read | `notifications.service.ts:385-390,315`; `notification.entity.ts:144-148` | Medium | Open |
-| 5.5 | Schedule start time subtracted by 12 hours but cron pattern built from unmodified date — meds can fire up to 9 hours early | `notifications.service.ts:316-319`; `medications.service.ts:75-78,294-297` | High | Open |
-| 5.6 | Multi-device push structurally impossible — token upsert keyed on unique `userId`; sign-out on any device deletes the user's only token | `user-tokens.entity.ts:17`; `push.service.ts:24-40,183-185` | Medium | Open |
-| 5.7 | `repeatEvery` means "doses/day" in three places and "interval in days" in a fourth — indexing/description bugs follow | `medications.service.ts:88,165,184,306-311` | High | Open |
-| 7.3 | Notification queue lookup misses scheduler-backed jobs, falls through to unpaginated fetch + linear search on every write; purge is serial with Redis churn from 7.1 | `notifications.service.ts:335-375`; `medications.service.ts:63` | Medium | Open |
+| 5.1 | Three reachable **infinite loops** in cron generation (WEEKLY ≥8, MONTHLY ≥31, YEARLY ≥13) — no upper bound anywhere; reachable from patient chat parsing. Highest-severity availability finding | `notifications.service.ts:414,423,432`; `notification.schema.ts:45-50`; `notification.dto.ts:73-74`; `notification.entity.ts:16-17` | Critical | **Resolved** — see notes below |
+| 5.2 | Incorrect dose-count math for `DAILY` with `repeatEvery > 1` | `notifications.service.ts` (getCron DAILY branch) | High | **Resolved** — see notes below |
+| 5.3 | `EVERY_SECOND`/`EVERY_MINUTE` repetition types unguarded and reachable from the model | `notification.dto.ts:57-58`; `notification.schema.ts:22-31`; `consumer.ts:53,248` | High | **Resolved** — see notes below |
+| 5.4 | Cron read via `getUTC*()` while repeat option specifies `tz:'Africa/Accra'` — only coincidentally correct; per-notification timezone field never read | `notifications.service.ts:385-390,315`; `notification.entity.ts:144-148` | Medium | **Resolved** — see notes below |
+| 5.5 | Schedule start time subtracted by 12 hours but cron pattern built from unmodified date — meds can fire up to 9 hours early | `notifications.service.ts:316-319`; `medications.service.ts:75-78,294-297` | High | **Resolved (already superseded by 5.2)** — see notes below |
+| 5.6 | Multi-device push structurally impossible — token upsert keyed on unique `userId`; sign-out on any device deletes the user's only token | `user-tokens.entity.ts:17`; `push.service.ts:24-40,183-185` | Medium | **Resolved** — see notes below |
+| 5.7 | `repeatEvery` means "doses/day" in three places and "interval in days" in a fourth — indexing/description bugs follow | `medications.service.ts:88,165,184,306-311` | High | **Resolved** — see notes below |
+| 7.3 | Notification queue lookup misses scheduler-backed jobs, falls through to unpaginated fetch + linear search on every write; purge is serial with Redis churn from 7.1 | `notifications.service.ts:335-375`; `medications.service.ts:63` | Medium | **Resolved** — see notes below |
+
+### Notes — 5.1 (infinite loops in cron generation)
+
+All three loops (`getCron()`'s WEEKLY/MONTHLY/YEARLY branches) shared the same root
+cause: each computes a step interval via `Math.floor(N / repeatEvery)`, which floors to
+`0` once `repeatEvery` exceeds `N` (7/30.4375/12 respectively), turning the loop's `+=`
+into a no-op — an infinite loop that hangs the single-threaded Node event loop for every
+user, not just the caller. `Frequency.repeatEvery` had no upper bound in either the REST
+DTO (`@IsNumber()` only) or the AI-facing Zod schema (`z.number().optional()`, fed
+directly from patient chat text via the memory-scribe's notification-upsert tool) — a
+single patient chat message could reach this. Fixed at both layers: `Math.max(1, ...)`
+guards on all three interval computations (the actual crash fix — bounds every loop to
+at most 7/31/12 iterations regardless of input), plus `@Min(1)/@Max(365)` on the DTO and
+`.int().min(1).max(365)` on the Zod schema (rejects pathological values as bad input,
+defense in depth beneath the now-unconditional loop guard).
+
+### Notes — 5.2 (DAILY dose-count math)
+
+`getCron()`'s DAILY branch encoded multi-dose spacing as a cron step pattern
+(`hour/intervalHours`), which cron interprets across the full 24-hour day regardless of
+the intended 12-hour dosing window — `repeatEvery: 3` (interval 6h) fired 4×/day, not 3;
+`repeatEvery: 4` (interval 4h) fired 6×/day, 50% more than prescribed. Replaced with an
+explicit list of exactly `repeatEvery` hour values (the same pattern already used for
+WEEKLY/MONTHLY/YEARLY), guaranteeing the exact count regardless of the value.
+
+### Notes — 5.3 (sub-minute repetition types)
+
+`EVERY_SECOND`/`EVERY_MINUTE` were fully wired end-to-end — reachable from the AI
+notification-upsert tool (Zod schema, "directly parsed from patient statements"), and
+each firing of a `'notify'` job triggers a real LLM API call
+(`notifications.consumer.ts`'s `notifyPatient()`) plus a push send. A patient chat
+message interpreted as `repetitionType: 'everySecond'` would create a BullMQ repeatable
+job firing roughly every second, forever — real LLM billing cost, notification spam, and
+risk of the app getting rate-limited by the LLM/push provider. No legitimate product use
+case exists for sub-minute reminders in a chronic-care app, so removed both values
+entirely (REST enum, AI Zod enum, and the now-dead branches in `getCron()` and
+`buildRepeatEvery()`) rather than just gating the AI path.
+
+### Notes — 5.4 (hardcoded timezone, UTC-based cron extraction)
+
+Two compounding bugs, both needed to fix together. `addJob()` hardcoded
+`repeatOpts.tz: 'Africa/Accra'` even though `AugurNotification.timezone` already exists
+as a per-document field (default `'Africa/Accra'`) — `upsertJob()` was building the
+object passed to `addJob()` from only `{startDate, frequency, endDate}`, dropping
+`timezone` before it reached there. Separately, `getCron()` extracted hour/min/sec/etc.
+via `getUTC*()` — raw UTC components, not components in the notification's actual
+timezone. This only "worked" by coincidence because Ghana (`Africa/Accra`) is UTC+0;
+fixing only the `tz` option without also fixing the UTC extraction would have made
+things *worse* for any non-Ghana patient — BullMQ would then correctly interpret the
+pattern's hour field as being in their real timezone, but that field would still hold
+the UTC hour, not their local hour. Added the `date-fns-tz` dependency (`pnpm add`, per
+explicit instruction — no existing timezone-conversion library in this project) and
+used `toZonedTime()` to extract cron fields in the notification's actual timezone,
+threading `timezone` through `upsertJob()` → `addJob()` → `getCron()`.
+
+### Notes — 5.5 (early-firing meds — resolved by 5.2, verified empirically)
+
+Same root cause as 5.2, not an independent bug. BullMQ's `getNextMillis()` uses
+`repeatOpts.startDate` as the cron search-start point *only* when it's later than "now,"
+and `cron-parser`'s `.next()` is exclusive of that point — which is *why* the code
+subtracts 12 hours before setting `repeatOpts.startDate` (so the exclusive-boundary
+search doesn't skip past the intended first dose). That part was already correct. The
+actual bug: the *old* step-based DAILY pattern (fixed in 5.2) could generate phantom
+dose-hours falling inside that 12-hour lookback window, and `.next()` would catch one of
+those instead of the real intended time. Verified directly against BullMQ's actual
+`cron-parser` dependency (not just read — executed): reproduced a concrete case (dose
+created the day before, intended first dose 2am, `repeatEvery: 4`) where the *old*
+pattern fired **8 hours early** (matching the audit's "up to 9 hours" almost exactly),
+and confirmed the *new* explicit-hour-list pattern from 5.2 produces **0 hours early**
+for the identical inputs — the new pattern structurally can't produce phantom hours in
+that window since it only ever lists exactly `repeatEvery` hours, all confined to the
+intended 12-hour span. Also confirmed `medications.service.ts`'s two cited locations
+never exercise this path at all — every medication-driven notification uses
+`repeatEvery: 1` (one notification per schedule slot), which was never susceptible to
+this bug shape even before the 5.2 fix (a single-hour pattern has nothing else to
+accidentally match early). No additional code change made.
+
+### Notes — 5.6 (multi-device push)
+
+`UserToken.userId` had `@Prop({unique: true})` — a unique index on `userId` alone, so
+only one `UserToken` document could ever exist per user, globally, regardless of how
+many devices they use. `addFcmToken()` upserted by `{userId}` alone, so registering a
+new device's token silently overwrote another device's — whichever device logged in
+most recently stole all push notifications from the rest. `removeFcmToken()` deleted by
+`{$or: [{userId}, {fcmToken}]}` — matching on `userId` alone meant signing out on *any
+single device* deleted the user's only token, killing push for every device they were
+still logged into elsewhere. Notably, the *read* side (`sendAugurNotification`,
+`sendNotification`) already assumed multi-device support — both `.find({userId})` and
+loop over up to 7 tokens — only the write side was broken. Fixed: compound unique index
+on `{userId, fcmToken}` (not `userId` alone), `addFcmToken()` now upserts by
+`{userId, fcmToken}` so a new device adds a row instead of overwriting, and
+`removeFcmToken()` now requires both `userId` and `fcmToken` to match so sign-out only
+removes that specific device's token.
+
+### Notes — 5.7 (repeatEvery semantic collision)
+
+`Frequency.repeatEvery` under `RepetitionType.DAILY` carried two contradictory meanings:
+"doses per day" (used by `getCron()`'s DAILY branch, `buildRepeatEvery()`'s DAILY
+branch, and both `medications.service.ts` `create()`/`update()`, which set
+`repeatEvery: schedules.length`) versus "interval in days" (used by `formatFrequency()`,
+consistent with how WEEKLY/MONTHLY/YEARLY genuinely work elsewhere in the same
+function). A medication configured for 3 doses/day got described as **"every 3 days"** —
+the opposite of reality — and that description flows into the AI's medication summary.
+Since the real scheduling logic (which drives actual reminder timing, already fixed for
+correctness in 5.1/5.2) is committed to the "doses/day" interpretation for DAILY, fixed
+`formatFrequency()` to match it (`"N times a day"` instead of `"every N days"` when
+`repetitionType === DAILY && repeatEvery > 1`) rather than redesigning the scheduler —
+lowest-risk fix, touches only the description string.
+
+### Notes — 7.3 (notification queue lookup performance)
+
+`removeNotificationJob()`'s fallback path called `getJobSchedulers()` (plural) — a full
+Redis `ZRANGE` over every scheduler in the entire queue — then linear-`find()`'d in JS
+for the one matching `jobId`. This ran on every notification create/update/delete, so
+cost grew with total scheduler count across the whole system, not just the caller's own
+notifications. Verified directly against BullMQ's source: `getJobScheduler(id)`
+(singular) already exists and runs a single targeted Lua script keyed by the exact ID,
+not a scan — and it was already the pattern used elsewhere in this same file
+(`upsertJob()`). Swapped the fallback to use it, turning an O(total schedulers) lookup
+into O(1). Also parallelized `purgeNotifications()`'s serial `for` loop with
+`Promise.allSettled` (matching the resilience pattern already used in the consumer's
+`announceActivity()` — one failure shouldn't block the rest).
 
 ## Adherence metrics (§4)
 
@@ -486,7 +608,7 @@ logic in."
 
 **Immediate**
 1. ~~Remove or authorize `DELETE /client/clean/:userId` (2.1)~~ — done
-2. Bound `repeatEvery` at schema/validator/data-layer; remove/gate sub-minute types (5.1, 5.3)
+2. ~~Bound `repeatEvery` at schema/validator/data-layer; remove/gate sub-minute types (5.1, 5.3)~~ — done
 3. ~~Require invitation/facility approval for signup; remove email-as-password Google path (2.2, 2.4)~~ — done
 4. ~~Remove password/payload logging (2.9)~~ — done
 5. ~~Add nested validation to `CreateVitalHistoryDto.vitals`, move spread order (6.3)~~ — done (nested validation alone was sufficient; the allowed vitals keys don't collide with the protected ones, so no spread-order change was needed)
@@ -502,8 +624,9 @@ logic in."
 **Subsequent**
 10. Single server-side severity scheme, hypertensive-crisis tier, hypotension detection (3.1–3.3)
 11. Re-base adherence on scheduled doses, keyed by medication ID, late-confirmation window, unique index (§4)
-12. Fix `formatFrequency` (5.7)
+12. ~~Fix `formatFrequency` (5.7)~~ — done
 13. ~~Enforce authenticated user identifier server-side on every AI persistence tool~~ — done (2.8); the 8 event handlers are also done now (6.6)
 14. ~~Verify JWT audience/issuer on chronic-care tokens; add a Redis-backed revocation path~~ — done (2.10, not in the audit's original sequence — added because it surfaced while closing 2.9)
 15. ~~Replace `deleteMany`+`insertMany` with per-vitalType upserts; drop the dead `patient:userId` filter disjunct; anchor the medication upsert regex; pin vital-history AI identity to `recordedAt`~~ — done (6.1, 6.2, 6.4, 6.5)
 16. ~~Fix `PORT` NaN fallback; add email and patient-code uniqueness with collision-retry; drop `generateCode`'s unused params~~ — done (6.7)
+17. ~~Fix DAILY dose-count math; fix hardcoded/UTC-only cron timezone handling; fix multi-device push token clobbering; fix notification queue scheduler-lookup performance~~ — done (5.2, 5.4, 5.6, 7.3; 5.5 turned out to already be resolved by 5.2, verified empirically)

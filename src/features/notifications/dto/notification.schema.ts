@@ -20,15 +20,7 @@ export const NotificationPriorityEnum = z
 	.describe("Priority level of the notification. Example: 'high'");
 
 export const RepetitionTypeEnum = z
-	.enum([
-		'everySecond',
-		'everyMinute',
-		'hourly',
-		'daily',
-		'weekly',
-		'monthly',
-		'yearly',
-	])
+	.enum(['hourly', 'daily', 'weekly', 'monthly', 'yearly'])
 	.describe(
 		"Unit of time for repetition frequency. Examples: 'daily', 'weekly', 'hourly', etc.",
 	);
@@ -44,6 +36,9 @@ export const FrequencySchema = z
 	.object({
 		repeatEvery: z
 			.number()
+			.int()
+			.min(1)
+			.max(365)
 			.optional()
 			.describe(
 				'Number of time units between each repetition. Directly parsed from patient statements.',

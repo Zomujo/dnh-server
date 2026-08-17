@@ -437,9 +437,7 @@ export class ClientService {
 			case 'daily': {
 				return true;
 			}
-			case 'hourly':
-			case 'everyMinute':
-			case 'everySecond': {
+			case 'hourly': {
 				return differenceInDays(now, start) % repeatEvery === 0;
 			}
 			case 'weekly': {
