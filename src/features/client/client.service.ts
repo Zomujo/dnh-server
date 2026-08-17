@@ -11,6 +11,7 @@ import {
 	differenceInCalendarMonths,
 	differenceInCalendarYears,
 	differenceInDays,
+	differenceInHours,
 	differenceInWeeks,
 	eachDayOfInterval,
 	endOfDay,
@@ -27,7 +28,6 @@ import {
 	set,
 	startOfDay,
 	startOfMonth,
-	subHours,
 } from 'date-fns';
 import * as fs from 'fs/promises';
 import { toHeaderCase } from 'js-convert-case';
@@ -41,6 +41,7 @@ import { CacheService } from '@/core/caching/caching.service';
 import { FirebaseService } from '@/core/firebase/firebase.service';
 import { AdherencesService } from '@/features/adherences/adherences.service';
 import { TargetType } from '@/features/adherences/dto/target-type.enum';
+import { Status } from '@/features/adherences/entities/adherence-log.entity';
 import { AppointmentRequestsService } from '@/features/appointments/appointment-requests/appointment-requests.service';
 import type { CreateAppointmentRequestDto } from '@/features/appointments/appointment-requests/dto';
 import { AppointmentsService } from '@/features/appointments/appointments.service';
@@ -537,53 +538,64 @@ export class ClientService {
 		let hours = hour;
 		if (timeDesignators === 'PM' && hours !== 12) hours += 12;
 		if (timeDesignators === 'AM' && hours === 12) hours = 0;
-		const doseTime = set(startOfDay(new Date()), { hours, minutes });
+		// The scheduled dose datetime — this is the stable identity of "which
+		// dose" is being confirmed (used for the unique index below), not when
+		// the patient actually tapped confirm. See takenAt below for that.
+		const scheduledFor = set(startOfDay(new Date()), { hours, minutes });
 
-		if (new Date() < doseTime) {
+		if (new Date() < scheduledFor) {
 			throw new BadRequestException(
 				`Cannot confirm ${sectionKey} dose — it's not yet time (${hour}:${String(minutes).padStart(2, '0')} ${timeDesignators})`,
 			);
 		}
 
-		const windowStart = subHours(doseTime, 1);
-		const windowEnd = addHours(doseTime, 1);
+		const confirmedAt = new Date();
+		// Still recorded as taken (the patient did take it), but flagged
+		// PARTIAL rather than TAKEN when confirmed well past its scheduled
+		// time — there was previously no way to distinguish on-time adherence
+		// from a much-later catch-up confirmation at all.
+		const LATE_WINDOW_HOURS = 4;
+		const isLate =
+			differenceInHours(confirmedAt, scheduledFor) > LATE_WINDOW_HOURS;
 
-		const existing = await this.adherencesService.findAllAdherenceLogsByQuery({
-			query: {
-				userId,
-				targetType: TargetType.MEDICATION,
-				targetName: medication.name,
-				taken: true,
-				takenAt: { $gte: windowStart, $lte: windowEnd },
-			},
-			limit: 1,
-		} as any);
-
-		if (existing.length > 0) {
-			throw new BadRequestException(
-				`${sectionKey} dose for ${medication.name} already confirmed`,
+		try {
+			// Single atomic upsert instead of a separate existence check +
+			// insert — the filter excludes an already-confirmed dose
+			// (taken: {$ne: true}), so a genuine duplicate confirm can't match
+			// it and instead collides with the unique index on
+			// (userId, medication, scheduledFor) below, raising E11000, which
+			// is translated into the "already confirmed" error. This closes
+			// the race between two concurrent confirms of the same dose that
+			// the old check-then-insert pattern was vulnerable to.
+			const logId = await this.adherencesService.upsertAdherenceLog(
+				{
+					userId,
+					medication: new Types.ObjectId(medicationId),
+					scheduledFor,
+					taken: { $ne: true },
+				},
+				{
+					userId,
+					patient: medication.patient?.toString() ?? medication.patient,
+					medication: new Types.ObjectId(medicationId),
+					targetType: TargetType.MEDICATION,
+					targetName: medication.name,
+					scheduledFor,
+					taken: true,
+					takenAt: confirmedAt,
+					status: isLate ? Status.PARTIAL : Status.TAKEN,
+				} as any,
 			);
+
+			return { id: logId };
+		} catch (error: any) {
+			if (error?.name === 'MongoServerError' && error?.code === 11000) {
+				throw new BadRequestException(
+					`${sectionKey} dose for ${medication.name} already confirmed`,
+				);
+			}
+			throw error;
 		}
-
-		const logId = await this.adherencesService.upsertAdherenceLog(
-			{
-				userId,
-				targetType: TargetType.MEDICATION,
-				targetName: medication.name,
-				takenAt: { $gte: windowStart, $lte: windowEnd },
-			},
-			{
-				userId,
-				patient: medication.patient?.toString() ?? medication.patient,
-				targetType: TargetType.MEDICATION,
-				targetName: medication.name,
-				taken: true,
-				takenAt: doseTime,
-				status: 'taken',
-			} as any,
-		);
-
-		return { id: logId };
 	}
 	async countTodaysMedications(userId: string) {
 		return this.medicationsService.countBySchedules(userId);
@@ -607,6 +619,7 @@ export class ClientService {
 			toBeTakenAt: Date;
 			taken: boolean;
 		}[] = [];
+		const medicationIds: string[] = [];
 
 		for (const med of medications) {
 			const schedule = med[sectionKey] as any;
@@ -626,6 +639,7 @@ export class ClientService {
 				toBeTakenAt,
 				taken: false,
 			});
+			medicationIds.push(med._id.toString());
 		}
 
 		if (result.length === 0) return result;
@@ -635,34 +649,43 @@ export class ClientService {
 
 		const medNames = result.map((m) => m.name);
 
+		// Matched primarily by medication ID — falls back to name +
+		// hour-proximity only for older logs that predate the `medication`
+		// field (targetName alone can false-match a differently-named
+		// medication, or miss a renamed one entirely).
 		const logs = await this.adherencesService.findAllAdherenceLogsByQuery({
 			query: {
 				userId,
 				targetType: TargetType.MEDICATION,
-				targetName: { $in: medNames },
 				takenAt: { $gte: todayStart, $lte: todayEnd },
+				$or: [
+					{ medication: { $in: medicationIds } },
+					{ medication: { $exists: false }, targetName: { $in: medNames } },
+				],
 			},
-			projection: 'targetName taken takenAt',
+			projection: 'medication targetName taken takenAt',
 			limit: 50,
 		} as any);
 
 		const takenMap = new Map<string, boolean>();
 		for (const item of result) {
-			const matchingLog = logs.find(
-				(log) =>
+			const matchingLog = logs.find((log: any) => {
+				if (!log.taken) return false;
+				if (log.medication) return log.medication.toString() === item.id;
+				return (
 					log.targetName === item.name &&
-					log.taken &&
 					Math.abs(
 						new Date(log.takenAt).getHours() - item.toBeTakenAt.getHours(),
-					) <= 1,
-			);
+					) <= 1
+				);
+			});
 			if (matchingLog) {
-				takenMap.set(item.name, true);
+				takenMap.set(item.id, true);
 			}
 		}
 
 		for (const item of result) {
-			if (takenMap.has(item.name)) {
+			if (takenMap.has(item.id)) {
 				item.taken = true;
 			}
 		}
@@ -683,6 +706,7 @@ export class ClientService {
 			medication.name,
 			31,
 			date,
+			medicationId,
 		);
 
 		const monthStart = startOfMonth(date);
@@ -721,7 +745,13 @@ export class ClientService {
 		}
 
 		const takenCount = normalizedLogs.filter((l) => l.taken === true).length;
-		const adherenceRate = Math.round((takenCount / allDays.length) * 100);
+		// Denominator is days that have actually elapsed (taken !== null),
+		// not the whole month — allDays.length included pending future days,
+		// which dragged the rate down purely for being partway through the
+		// month even with perfect adherence so far.
+		const elapsedDays = normalizedLogs.filter((l) => l.taken !== null).length;
+		const adherenceRate =
+			elapsedDays > 0 ? Math.round((takenCount / elapsedDays) * 100) : 0;
 
 		return {
 			medicationName: medication.name,

@@ -562,13 +562,95 @@ into O(1). Also parallelized `purgeNotifications()`'s serial `for` loop with
 
 | # | Issue | Location | Severity | Status |
 |---|---|---|---|---|
-| 4.1 | Fixed 30-day denominator over a 31-day window — false "CRITICAL" for ~26 days at enrollment; rate can exceed 100% | `adherences.service.ts:96-103,63-71,77` | High | Open |
-| 4.2 | Metric is day-based not dose-based — understates ~10x at enrollment, overstates for multi-dose regimens | `adherences.service.ts:82-90` | High | Open |
-| 4.3 | Same flaw recurs in two more calculations; one counts future days as missed doses | `adherences.service.ts:285`; `client.service.ts:658-670,694,704` | High | Open |
-| 4.4 | Adherence keyed on medication **name**, not ID — renaming orphans history; unanchored/unescaped name regex causes false matches | `client.service.ts:534,552,559,622`; `adherences.service.ts:221` | High | Open |
-| 4.5 | No late-confirmation window; timestamp written is scheduled time, not actual | `client.service.ts:522-526,561` | Medium | Open |
-| 4.6 | Race condition between duplicate-confirmation check and upsert write; no unique index | `client.service.ts:531-546,548-564`; `adherence-log.entity.ts` | Medium | Open |
-| 4.7 | "Never logged" and "actively non-adherent" both map to `CRITICAL` | `determineAdherenceStatus` | Medium | Open |
+| 4.1 | Fixed 30-day denominator over a 31-day window — false "CRITICAL" for ~26 days at enrollment; rate can exceed 100% | `adherences.service.ts:96-103,63-71,77` | High | **Resolved** — see notes below |
+| 4.2 | Metric is day-based not dose-based — understates ~10x at enrollment, overstates for multi-dose regimens | `adherences.service.ts:82-90` | High | **Resolved** — see notes below |
+| 4.3 | Same flaw recurs in two more calculations; one counts future days as missed doses | `adherences.service.ts:285`; `client.service.ts:658-670,694,704` | High | **Resolved** — see notes below |
+| 4.4 | Adherence keyed on medication **name**, not ID — renaming orphans history; unanchored/unescaped name regex causes false matches | `client.service.ts:534,552,559,622`; `adherences.service.ts:221` | High | **Resolved** — see notes below |
+| 4.5 | No late-confirmation window; timestamp written is scheduled time, not actual | `client.service.ts:522-526,561` | Medium | **Resolved** — see notes below |
+| 4.6 | Race condition between duplicate-confirmation check and upsert write; no unique index | `client.service.ts:531-546,548-564`; `adherence-log.entity.ts` | Medium | **Resolved** — see notes below |
+| 4.7 | "Never logged" and "actively non-adherent" both map to `CRITICAL` | `determineAdherenceStatus` | Medium | **Resolved** — see notes below |
+
+### Notes — 4.1–4.7 (coordinated adherence redesign)
+
+All 7 findings were symptoms of the same root design choice — adherence tracked by
+calendar day and free-text medication name, not by individual dose and a stable
+medication reference — so they were fixed together as one coordinated change rather
+than 7 independent patches, per explicit product decision. New fields only; no
+pre-existing field was repurposed.
+
+**Schema (`adherence-log.entity.ts`):** two new optional fields —
+`medication?: ObjectId` (ref `Medication`) and `scheduledFor?: Date` (the scheduled
+dose instance's datetime — stable identity for "which dose," independent of when it
+was actually confirmed). Both are optional because AI-inferred logs from patient chat
+text don't have a reliable way to know an internal medication ID, so that path
+continues to write name-only logs; every read path now prefers `medication` when
+present and falls back to `targetName` otherwise. A compound unique index on
+`{userId, medication, scheduledFor}` was added with a `partialFilterExpression` so it
+only constrains medication-linked logs, not AI-inferred ones.
+
+**4.1/4.2 (`estimateAdherenceRate`, drives `Patient.adherenceRate`/`adherenceStatus`):**
+also discovered — this had no `targetType` filter at all, blending medication,
+exercise, diet, vitals, and appointment logs into one score. Per product decision,
+scoped it to `targetType: MEDICATION` specifically and rewrote it as dose-based:
+for each of the patient's medications, expected doses = (days elapsed in a window
+clamped to 30 days *and* to the medication's own start/end dates) × its
+`frequency.repeatEvery` (doses/day). This fixes the >100%-rate bug (the window is now
+computed exactly via `differenceInCalendarDays`, not a hardcoded 30) and the
+false-CRITICAL-at-enrollment bug (a medication started 4 days ago now has an expected
+denominator of ~4 days' worth of doses, not 30) in the same change that fixes the
+day-vs-dose overstatement (a 3×/day medication with 1/3 doses taken now correctly
+counts as 1 of 3 expected doses, not "day fully adherent"). Returns `null` when there
+are no medications with expected doses yet (see 4.7).
+
+**4.3 (recurring flaw + future-days dilution):** `aggregateMedicationAdherence()` (a
+separate 7-day dashboard widget, not the main patient rate) had the identical
+denominator bug — `[sevenDaysAgo, now]` spans 8 calendar days, not 7. Fixed with the
+same `differenceInCalendarDays`-based approach, without converting this smaller widget
+to full dose-based math (not what was flagged here; kept the fix proportionate).
+Separately, `fetchMedicationAdherenceLogs()` (the monthly calendar view) computed
+`takenCount / allDays.length`, where `allDays` included the *entire* month — future
+days were correctly tagged `null` (not counted as taken) but were still counted in the
+denominator, mathematically penalizing the rate just for being partway through a month.
+Fixed by excluding pending (`taken === null`) days from the denominator too.
+
+**4.4 (name-keyed adherence):** `confirmMedication()`, `fetchTodaysMedications()`, and
+`findAdherenceLogsByTarget()` all now match by `medication` ID first, falling back to
+an *anchored* name regex (was unanchored — "Met" matched "Metformin") only for logs
+that predate the `medication` field. Renaming a medication no longer orphans its
+history for anything confirmed after this change.
+
+**4.5 (timestamp/late window):** `confirmMedication()` now writes `takenAt: new Date()`
+(the real confirmation time) instead of the scheduled time, and separately records
+`scheduledFor` (the scheduled time) for dose-instance identity. Introduced a
+4-hour late window: still recorded as taken (the patient did take it) but flagged
+`Status.PARTIAL` instead of `Status.TAKEN` when confirmed more than 4 hours after
+`scheduledFor`, using the existing `Status` enum rather than adding a new one.
+
+**4.6 (race condition):** replaced the check-then-insert pattern (query for an existing
+confirmation, then separately upsert) with a single atomic `findOneAndUpdate` whose
+filter excludes an already-taken dose (`taken: {$ne: true}`). A genuine duplicate
+confirm can't match that filter, so it instead collides with the new unique index on
+insert and raises `E11000`, which is caught and translated into the same
+"already confirmed" `BadRequestException` as before — same user-facing behavior,
+but now race-free instead of relying on a TOCTOU-vulnerable pre-check.
+
+**4.7 (status labels):** added `AdherenceStatus.NO_DATA` (checked minimal blast radius
+first — only consumed in `determineAdherenceStatus` and one Swagger example). Returned
+when `estimateAdherenceRate` has no expected doses to measure against, distinguishing
+"no history yet" from a genuine `CRITICAL` (actively skipping doses).
+
+**Wiring:** `AdherencesModule` now also registers the `Medication` schema via its own
+`MongooseModule.forFeature(...)` (not by importing `MedicationsModule`) specifically to
+avoid a circular module dependency — `MedicationsModule` already imports
+`AdherencesModule`. `AdherencesService` gets read-only access to medication schedule
+data without a service-level circular dependency.
+
+**Deliberately left out of scope:** `removeLogsByTargetName`/`removePatternsByTargetName`
+(medication-deletion cleanup) still match by exact `targetName`, not `medication` ID —
+not one of the 7 audited findings, and since existing logs weren't backfilled with the
+new field, ID-based cleanup wouldn't help old data anyway. A medication rename between
+log-creation and deletion would leave orphaned logs behind; minor data-hygiene gap, not
+a correctness bug.
 
 ## Performance (§7, excl. 7.3 above)
 
@@ -623,7 +705,7 @@ into O(1). Also parallelized `purgeNotifications()`'s serial `for` loop with
 
 **Subsequent**
 10. Single server-side severity scheme, hypertensive-crisis tier, hypotension detection (3.1–3.3)
-11. Re-base adherence on scheduled doses, keyed by medication ID, late-confirmation window, unique index (§4)
+11. ~~Re-base adherence on scheduled doses, keyed by medication ID, late-confirmation window, unique index (§4)~~ — done (4.1–4.7)
 12. ~~Fix `formatFrequency` (5.7)~~ — done
 13. ~~Enforce authenticated user identifier server-side on every AI persistence tool~~ — done (2.8); the 8 event handlers are also done now (6.6)
 14. ~~Verify JWT audience/issuer on chronic-care tokens; add a Redis-backed revocation path~~ — done (2.10, not in the audit's original sequence — added because it surfaced while closing 2.9)

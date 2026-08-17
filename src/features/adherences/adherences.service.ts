@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import {
+	differenceInCalendarDays,
 	endOfMonth,
 	endOfWeek,
 	startOfMonth,
@@ -13,6 +14,7 @@ import { flattenMeta } from '../../common/entities/base-dh.entity';
 import { escapeRegExp } from '../../common/utils/helpers';
 import { AdherenceStatus } from '../../features/patients/dto';
 import { Patient } from '../../features/patients/entities/patient.entity';
+import { Medication } from '../medications/entities/medication.entity';
 import {
 	AdherenceLogQueryFilter,
 	AdherencePatternQueryFilter,
@@ -34,6 +36,8 @@ export class AdherencesService {
 		private adherencePatternModel: Model<AdherencePattern>,
 		@InjectModel(Patient.name)
 		private patientModel: Model<Patient>,
+		@InjectModel(Medication.name)
+		private medicationModel: Model<Medication>,
 	) {}
 
 	create(_createAdherenceDto: CreateAdherenceDto) {
@@ -70,37 +74,79 @@ export class AdherencesService {
 		const patientId = (dto as any).patient;
 		if (patientId) {
 			await this.patientModel.findByIdAndUpdate(patientId, {
-				$set: { adherenceRate, adherenceStatus, lastCheckInDate: new Date() },
+				$set: {
+					adherenceRate: adherenceRate ?? 0,
+					adherenceStatus,
+					lastCheckInDate: new Date(),
+				},
 			});
 		}
 
 		return adherenceLog._id;
 	}
 
-	private async estimateAdherenceRate(userId: string): Promise<number> {
-		const thirtyDaysAgo = subDays(new Date(), 30);
+	/**
+	 * Dose-based, medication-scoped adherence rate over a rolling 30-day
+	 * window. Expected doses are derived from each medication's own
+	 * doses/day (frequency.repeatEvery) and its actual tracked history
+	 * length (clamped to 30 days and to its start/end dates) — not a fixed
+	 * 30-day denominator, which previously produced >100% rates (the query
+	 * window spans 31 calendar days, not 30) and falsely CRITICAL rates for
+	 * newly-enrolled patients (a few days of perfect adherence divided by a
+	 * fixed 30 reads as ~10%). Returns null when there are no medications
+	 * with expected doses yet, so the caller can distinguish "no data" from
+	 * a genuine 0% rate.
+	 */
+	private async estimateAdherenceRate(userId: string): Promise<number | null> {
+		const now = new Date();
+		const thirtyDaysAgo = subDays(now, 30);
 
-		const [result] = await this.adherenceLogModel.aggregate([
-			{ $match: { userId, takenAt: { $gte: thirtyDaysAgo } } },
-			{
-				$group: {
-					_id: { $dateToString: { format: '%Y-%m-%d', date: '$takenAt' } },
-					taken: { $max: '$taken' },
-				},
-			},
-			{
-				$group: {
-					_id: null,
-					adherentDays: { $sum: { $cond: ['$taken', 1, 0] } },
-				},
-			},
-		]);
+		const medications = await this.medicationModel
+			.find({ userId })
+			.select('startDate endDate frequency')
+			.lean();
 
-		const adherentDays = result?.adherentDays ?? 0;
-		return parseFloat(((adherentDays / 30) * 100).toFixed(2));
+		let expectedDoses = 0;
+		for (const medication of medications) {
+			if (!medication.startDate) continue;
+
+			const dosesPerDay = medication.frequency?.repeatEvery || 1;
+			const windowStart =
+				medication.startDate > thirtyDaysAgo
+					? medication.startDate
+					: thirtyDaysAgo;
+			const windowEnd =
+				medication.endDate && medication.endDate < now
+					? medication.endDate
+					: now;
+
+			if (windowEnd < windowStart) continue;
+
+			const windowDays = differenceInCalendarDays(windowEnd, windowStart) + 1;
+			expectedDoses += windowDays * dosesPerDay;
+		}
+
+		if (expectedDoses === 0) {
+			return null;
+		}
+
+		// scheduledFor is the dose-instance identity for confirmations made via
+		// confirmMedication(); older/AI-inferred logs may only have takenAt.
+		const adherentDoses = await this.adherenceLogModel.countDocuments({
+			userId,
+			targetType: TargetType.MEDICATION,
+			taken: true,
+			$or: [
+				{ scheduledFor: { $gte: thirtyDaysAgo } },
+				{ scheduledFor: { $exists: false }, takenAt: { $gte: thirtyDaysAgo } },
+			],
+		});
+
+		return parseFloat(((adherentDoses / expectedDoses) * 100).toFixed(2));
 	}
 
-	private determineAdherenceStatus(rate: number): AdherenceStatus {
+	private determineAdherenceStatus(rate: number | null): AdherenceStatus {
+		if (rate === null) return AdherenceStatus.NO_DATA;
 		if (rate >= 85) return AdherenceStatus.STABLE;
 		if (rate >= 70) return AdherenceStatus.SILENT;
 		return AdherenceStatus.CRITICAL;
@@ -218,12 +264,20 @@ export class AdherencesService {
 		targetName: string,
 		limit: number = 14,
 		date?: Date,
+		medicationId?: string,
 	) {
-		const filter: Record<string, any> = {
-			userId,
-			targetType,
-			targetName: new RegExp(escapeRegExp(targetName), 'i'),
-		};
+		// Prefer the stable medication reference when available — an unanchored
+		// name match would also match a differently-named medication that
+		// happens to share a substring (e.g. "Met" matching "Metformin"), and a
+		// renamed medication would silently lose its history under a
+		// name-only lookup.
+		const filter: Record<string, any> = medicationId
+			? { userId, targetType, medication: medicationId }
+			: {
+					userId,
+					targetType,
+					targetName: new RegExp(`^${escapeRegExp(targetName)}$`, 'i'),
+				};
 
 		if (date) {
 			const start = startOfMonth(date);
@@ -262,7 +316,12 @@ export class AdherencesService {
 	}
 
 	async aggregateMedicationAdherence(userId: string) {
-		const sevenDaysAgo = subDays(new Date(), 7);
+		const now = new Date();
+		const sevenDaysAgo = subDays(now, 7);
+		// The [sevenDaysAgo, now] window spans 8 calendar days inclusive, not 7
+		// — dividing by a fixed 7 let this exceed 100%. Same class of bug as
+		// estimateAdherenceRate's 30-vs-31-day window.
+		const windowDays = differenceInCalendarDays(now, sevenDaysAgo) + 1;
 
 		const result = await this.adherenceLogModel.aggregate([
 			{
@@ -286,7 +345,7 @@ export class AdherencesService {
 		]);
 
 		const uniqueDays = result.length ? result[0].uniqueDays : 0;
-		return Math.round((uniqueDays / 7) * 100);
+		return Math.round((uniqueDays / windowDays) * 100);
 	}
 
 	async aggregateMedicationTakenByWeek(userId: string) {

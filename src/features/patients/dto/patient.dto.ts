@@ -27,6 +27,9 @@ import { FacilityRefDto } from '@/features/facilities/dto';
 import { GenderEnum } from '../entities/patient.entity';
 
 export enum AdherenceStatus {
+	// No medications with expected doses yet — distinct from CRITICAL so a
+	// brand-new patient isn't shown identically to one actively skipping doses.
+	NO_DATA = 'no_data',
 	CRITICAL = 'critical',
 	SILENT = 'silent',
 	STABLE = 'stable',
