@@ -25,7 +25,9 @@ describe('PatientsService', () => {
 		summaryModel = unitRef.get(getModelToken(Summary.name));
 		vitalHistoryModel = unitRef.get(getModelToken(VitalHistory.name));
 		chronicConditionsService = unitRef.get(ChronicConditionsService);
-		summaryCacheService = unitRef.get(CacheService);
+		summaryCacheService = unitRef.get(CacheService) as unknown as Mocked<
+			CacheService<string>
+		>;
 	});
 
 	beforeEach(() => {

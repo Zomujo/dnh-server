@@ -63,7 +63,7 @@ AppModule
 │   └── LoggingModule
 └── FeaturesModule    – domain business logic
     ├── ClientModule       (patient-facing: AI chat, vitals, medications, adherence, facilities)
-    ├── DoctorsModule      (clinician-facing: planner, AI-assisted plans)
+    ├── DoctorsModule      (clinician-facing: personnel profile & auth management)
     ├── PatientsModule
     ├── ChronicConditionsModule
     ├── MedicationsModule
@@ -74,7 +74,10 @@ AppModule
     ├── PharmaciesModule
     ├── DhVectorsModule    (Qdrant vector store management)
     ├── FacilitiesModule   (Facility CRUD)
-    └── ChatModule         (peer-to-peer chat)
+    ├── AppointmentsModule (Appointments & appointment requests)
+    ├── HcpModule          (Healthcare Provider aggregation workflows)
+    ├── ChatModule         (peer-to-peer chat)
+    └── UssdModule         (USSD patient vitals reporting)
 ```
 
 All routes are prefixed `/api/v1`. The root `GET /` is excluded from this prefix and serves as a health-check endpoint.
@@ -172,21 +175,28 @@ All `Client` routes require `@Authorize(UserType.DH_CLIENTS)`.
 #### DoctorsModule
 
 Clinical personnel (clinicians and pharmacy staff). Contains:
-- **ChronicCareAuthModule** — personnel registration, password login, and Google OAuth login. Issues JWT tokens with `chronic-care` audience.
+- **ChronicCareAuthModule** — personnel registration, password login, OTP verification, and Google OAuth login. Issues JWT tokens with `chronic-care` audience.
 - **DoctorsController** — personnel profile management.
-- **PlannerModule** — AI-assisted care planning, plan CRUD, and session management.
 
 #### PatientsModule
 
 Manages MongoDB `Patient` documents. Handles patient creation (called by `AuthService.signup`), retrieval, summary generation (AI-powered, event-driven via `@nestjs/event-emitter`), and updates.
 
-#### ChronicConditionsModule / MedicationsModule / AdherencesModule / VitalHistoriesModule / ConcernsModule
+#### ChronicConditionsModule / MedicationsModule / AdherencesModule / VitalHistoriesModule / ConcernsModule / PharmaciesModule / FacilitiesModule
 
-Standard CRUD modules managing individual health data domains. Each owns its Mongoose schema and is responsible for registering its models.
+Standard domain modules managing individual health data entities. Each owns its Mongoose schema and is responsible for registering and exporting its models and services.
 
-### NotificationsModule
+#### AppointmentsModule
 
-BullMQ-backed notification queue. The `NotificationsConsumer` processes queued FCM push notifications. The `AuguryService` (AI agent — see below) writes to this module to schedule reminders.
+Manages patient clinical appointments and patient appointment requests lifecycle (`pending` → `approved`/`rejected`).
+
+#### HcpModule
+
+Aggregates healthcare provider workflows: assigned patient roster management, vital history trend queries, appointment management, and facility symptom resolution.
+
+#### NotificationsModule
+
+BullMQ-backed notification queue. The `NotificationsConsumer` processes queued FCM push notifications. Scribe tools and event handlers write to this module to schedule reminders.
 
 #### ChatModule
 
@@ -202,6 +212,10 @@ See [`docs/chat-backend.md`](docs/chat-backend.md) for the full technical refere
 #### DhVectorsModule
 
 Manages the Qdrant vector collection `dh_vectors`. On module init (`OnModuleInit`) it ensures the collection and keyword indexes (`userId`, `patient`, `documentType`) exist. Uses `gemini-embedding-001` (3072-dimensional vectors) for embedding and Fuse.js for client-side fuzzy re-ranking of semantic search results.
+
+#### UssdModule
+
+Provides Africa's Talking USSD integration endpoints for low-connectivity patient vitals reporting and health check-ins.
 
 ---
 
@@ -222,17 +236,13 @@ The core conversational agent uses a `StateGraph` with:
 
 **Message trimming** — before each LLM call, messages are trimmed to 80,000 tokens (strategy: `last`) to stay within context limits.
 
-### Specialist Agents
+### Specialist Agents & Scribe Tools
 
-| Agent | File | Role |
+| Agent / Tool | File | Role |
 |---|---|---|
-| **Archonen** | `archonen/` | Router — analyses incoming messages and decides which downstream agents to invoke |
-| **Augury** | `augury/` | Notification scribe — creates or updates scheduled patient notifications (calls `NotificationsService` as a LangChain tool) |
-| **Chronicleer** | `chronicleer/` | Generates AI health insights and summaries from conversation state |
-| **Disquisitioner** | `disquisitioner/` | Manages the structured onboarding questionnaire and conversation scope transitions |
-| **Memory Scribe** | `memory-scribe/` | Reads/writes to the Qdrant vector store to maintain long-term patient health memory |
-| **Requiem** | `requiem/` | Handles end-of-conversation cleanup and final state persistence |
-| **Vigil Sentinel** | `vigil-sentinel/` | Monitors conversations for urgent clinical signals |
+| **Archonen** | `archonen/` | Context retrieval & clinical knowledge agent — queries Qdrant vector store (`DhVectorsService`) for relevant patient history and clinical vectors |
+| **Memory Scribe** | `memory-scribe/` | Event-driven persistence bridge — exposes LangGraph dynamic tools for adherence logs, patterns, chronic conditions, concerns, medications, vitals, notifications, and emergency alerts |
+| **Vigil Sentinel** | `vigil-sentinel/` | Clinical escalation monitor — detects acute symptoms or critical vital readings and dispatches emergency alerts to care facilities |
 
 ### Supported Languages
 
@@ -454,13 +464,14 @@ pnpm test:cov
 pnpm test:e2e
 
 # Run a single test file
-pnpm vitest run src/core/auth/auth.controller.spec.ts
+pnpm vitest run src/core/auth/auth.service.spec.ts
 ```
 
 ### Testing conventions
 
 - **Test runner**: Vitest with `unplugin-swc` (required for NestJS decorator metadata emission).
-- **Mocking**: Use `vitest-mock-extended`'s `mockDeep<T>()` for service mocks. Do not mock Mongoose models directly — mock the service layer.
+- **Solitary Testing**: Use `@suites/unit` (`TestBed.solitary(TargetService).compile()`) to isolate services and automatically mock all injected dependencies. Retrieve mocks via `unitRef.get(ServiceClass)` or `unitRef.get(getModelToken(Entity.name))`.
+- **Mocking**: Use `vitest-mock-extended`'s `mockDeep<T>()` where custom deep mock shapes are required.
 - **Globals**: `describe`, `it`, `expect`, `vi` are available without imports (`globals: true` in `vitest.config.ts`).
 - **Path alias**: `@/` maps to `src/` in both `tsconfig.json` and `vitest.config.ts`.
 

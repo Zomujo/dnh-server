@@ -16,7 +16,7 @@ pnpm test:cov           # coverage report
 pnpm test:e2e           # e2e tests (vitest + supertest)
 
 # Run a single test file
-pnpm vitest run src/core/auth/auth.controller.spec.ts
+pnpm vitest run src/core/auth/auth.service.spec.ts
 ```
 
 Env vars are loaded via **direnv** from `.envrc` — run `direnv allow` after any `.envrc` change.
@@ -29,7 +29,7 @@ The app is a NestJS API (`/api/v1` global prefix) organised into three top-level
 AppModule
 ├── CommonModule   – shared interceptors (response shaping)
 ├── CoreModule     – infrastructure (auth, db, cache, firebase, logging)
-└── FeaturesModule – domain features (currently empty shell)
+└── FeaturesModule – 16 domain feature modules (client, doctors, patients, chronic-conditions, medications, adherences, vital-histories, concerns, notifications, pharmacies, dh-vectors, facilities, appointments, hcp, chat, ussd)
 ```
 
 ### CoreModule breakdown
@@ -73,5 +73,5 @@ The base Firebase service account is composed from individual env vars (`FIREBAS
 ### Tooling notes
 
 - **Linter/formatter**: Biome (`biome.json`) — single quotes, tabs, trailing commas. No ESLint.
-- **Test runner**: Vitest with `unplugin-swc` (required for `emitDecoratorMetadata` / NestJS DI). Use `vitest-mock-extended`'s `mockDeep<T>()` for service mocks in unit tests. Test globals (`describe`, `it`, `expect`, `vi`) are available without imports (`globals: true`).
+- **Test runner**: Vitest with `unplugin-swc` (required for `emitDecoratorMetadata` / NestJS DI). Use `@suites/unit`'s `TestBed.solitary(ServiceClass).compile()` for solitary unit testing and `vitest-mock-extended`'s `mockDeep<T>()` where deep custom mocks are needed. Test globals (`describe`, `it`, `expect`, `vi`) are available without imports (`globals: true`).
 - **Swagger**: available at `http://localhost:4815/docs` in dev/staging (disabled in production).

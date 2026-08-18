@@ -48,7 +48,9 @@ describe('MemoryScribeService', () => {
 
 	describe('DynamicStructuredTools emission', () => {
 		it('memoryTools should expose defined scribe tools that emit eventEmitter events', async () => {
-			const emitSpy = (eventEmitter.emit = vi.fn());
+			const emitSpy = vi.fn();
+			(eventEmitter as any).emit = emitSpy;
+			(service as any).eventEmitter = eventEmitter;
 
 			const tools = service.memoryTools;
 			expect(tools).toHaveProperty('adherenceLogsScribe');

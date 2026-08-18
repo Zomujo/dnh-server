@@ -31,8 +31,12 @@ describe('ChronicCareAuthService', () => {
 		).compile();
 
 		service = unit;
-		personnelModel = unitRef.get(getModelToken(Personnel.name));
-		personnelAccountModel = unitRef.get(getModelToken(PersonnelAccount.name));
+		personnelModel = unitRef.get(
+			getModelToken(Personnel.name),
+		) as unknown as Mocked<Model<Personnel>>;
+		personnelAccountModel = unitRef.get(
+			getModelToken(PersonnelAccount.name),
+		) as unknown as Mocked<Model<PersonnelAccount>>;
 		authService = unitRef.get(AuthService);
 		otpService = unitRef.get(OtpService);
 		communicationsService = unitRef.get(CommunicationsService);
@@ -105,10 +109,8 @@ describe('ChronicCareAuthService', () => {
 				populate: vi.fn().mockResolvedValue(mockPersonnel),
 			} as any);
 
-			otpService.generate.mockResolvedValue('123456');
-			communicationsService.sendVerificationCodeMail.mockResolvedValue(
-				{} as any,
-			);
+			otpService.generate.mockResolvedValue(123456);
+			communicationsService.sendMail.mockReturnValue(undefined);
 
 			const res = await service.onboard({
 				personnelId: validPersonnelId,

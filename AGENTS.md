@@ -33,14 +33,15 @@ AppModule
 ├── CommonModule    – response interceptors (@HandleSuccess, @HandleCreate, etc.)
 ├── CoreModule      – Auth (global guards), DB (Mongoose), Caching (Redis+BullMQ),
 │                     Firebase (Admin SDK), Logging (BetterStack in non-dev)
-└── FeaturesModule  – 13 domain modules: client, doctors, patients,
+└── FeaturesModule  – 16 domain modules: client, doctors, patients,
     chronic-conditions, medications, adherences, vital-histories,
-    concerns, notifications, pharmacies, dh-vectors, facilities, chat
+    concerns, notifications, pharmacies, dh-vectors, facilities,
+    appointments, hcp, chat, ussd
 ```
 
 ### Key conventions
 
-- **Auth**: Two global `APP_GUARD`s. `@Authorize(UserType.X)` enables auth; `@Roles(PersonnelRoles.Y)` further restricts. No decorator = public route. Firebase for DH_CLIENTS/DEV, JWT for CHRONIC_CARE.
+- **Auth**: Two global `APP_GUARD`s. `@Authorize(UserType.X)` enables auth; `@Roles(PersonnelRoles.Y)` further restricts. No decorator = public route. Firebase for `DH_CLIENTS`/`DEV`, JWT for `CHRONIC_CARE`.
 - **Response envelope**: Every controller method uses `@HandleSuccess()` | `@HandleCreate()` | `@HandleUpdate()` | `@HandleSuccessNull()` decorator for consistent `ApiSuccessResponseDto` wrapping. Use `@CustomApiResponse(...)` to combine Swagger + response shaping.
 - **Path alias**: `@/` → `src/`. Import via barrel (`index.ts`) files.
 - **Module ownership**: Each feature module owns its Mongoose schemas. Import the module, not another module's model.
@@ -69,7 +70,8 @@ features/<module>/dto/
 ## Testing
 
 - **Runner**: Vitest with `unplugin-swc` (required for NestJS decorator metadata). Globals (`describe`, `it`, `expect`, `vi`) available without imports.
-- **Mocking**: Use `vitest-mock-extended`'s `mockDeep<T>()` for service mocks. Do not mock Mongoose models directly — mock the service layer.
+- **Solitary Testing**: Use `@suites/unit`'s `TestBed.solitary(TargetService).compile()` to automatically mock injected NestJS dependencies. Retrieve mocks via `unitRef.get(ServiceClass)` or `unitRef.get(getModelToken(Entity.name))`.
+- **Mocking**: Use `vitest-mock-extended`'s `mockDeep<T>()` where custom deep mock shapes are required.
 - **Coverage excludes**: `*.spec.ts`, `*.module.ts`, `src/main.ts`.
 
 ## Firebase gotcha
@@ -98,13 +100,15 @@ Available at `http://localhost:4815/docs` in dev/staging. Disabled in production
 
 ## Medication entity gotcha
 
-`frequency` is a sub-document (`Frequency` from notifications module: `{ repeatEvery: number, repetitionType: RepetitionType }`), **not a string`. The AI zod schema uses `FrequencySchema` from `@/features/notifications/dto/notification.schema`. The `generateMedicationDescription` service method formats it via `formatFrequency()`.
+`frequency` is a sub-document (`Frequency` from notifications module: `{ repeatEvery: number, repetitionType: RepetitionType }`), **not a string**. The AI zod schema uses `FrequencySchema` from `@/features/notifications/dto/notification.schema`. The `generateMedicationDescription` service method formats it via `formatFrequency()`.
 
 ## Module reference
 
 `src/common/utils/` contains helpers (`CodeGeneratorHelper`, `WeekDeterminantHelper`, `IanaTimezonesHelper`, `ZipHelper`, `CheckpointerUtils`).
 `src/features/dh-vectors/` manages Qdrant vector store (`dh_vectors` collection, 3072d Gemini embeddings).
 `src/features/facilities/` manages Facility CRUD. Exports `FacilitiesService` for cross-module use (e.g. `ClientModule`).
+`src/features/hcp/` manages Healthcare Provider aggregation workflows (patient lookups, vitals trends, appointments, and facility symptom management).
+`src/features/ussd/` manages USSD communication sessions for low-connectivity patient vitals reporting.
 
 ## NestJS EventEmitter2 convention
 
@@ -112,14 +116,18 @@ Available at `http://localhost:4815/docs` in dev/staging. Disabled in production
 
 - **Emit**: `this.eventEmitter.emit('some.event.name', { key: value })` — always pass a **single object payload** with named properties.
 - **Listen**: `@OnEvent('some.event.name')` on a method of an `@Injectable()` class. The handler receives the same object payload.
-- **Canonical example** — `PlannerAiService.persistState` at `src/features/doctors/planner/planner-ai.service.ts:262`:
+- **Canonical example** — `MemoryScribeService.adherenceLogEvent` at `src/features/client/ai/agents/memory-scribe/memory-scribe.service.ts`:
   ```ts
-  @OnEvent('planner.state.persist')
-  async persistState(payload: { humanMessage: string; response: string; ... }) {
-    // destructure from payload, never positional args
+  @OnEvent('adherenceLog.persist')
+  async adherenceLogEvent(payload: {
+    filters: AdherenceLogIdentity;
+    data: AdherenceLogUpsertInput;
+  }) {
+    const { filters, data } = payload;
+    await this.adherencesService.upsertAdherenceLog(filters, data);
   }
   ```
-  Callers emit with `this.eventEmitter.emit('planner.state.persist', { humanMessage, response, ... })`.
+  Callers emit with `this.eventEmitter.emit('adherenceLog.persist', { filters, data })`.
 
 ## Chat module
 

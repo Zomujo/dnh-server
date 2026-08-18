@@ -20,10 +20,18 @@ describe('AdherencesService', () => {
 			await TestBed.solitary(AdherencesService).compile();
 
 		service = unit;
-		adherenceLogModel = unitRef.get(getModelToken(AdherenceLog.name));
-		adherencePatternModel = unitRef.get(getModelToken(AdherencePattern.name));
-		patientModel = unitRef.get(getModelToken(Patient.name));
-		medicationModel = unitRef.get(getModelToken(Medication.name));
+		adherenceLogModel = unitRef.get(
+			getModelToken(AdherenceLog.name),
+		) as unknown as Mocked<Model<AdherenceLog>>;
+		adherencePatternModel = unitRef.get(
+			getModelToken(AdherencePattern.name),
+		) as unknown as Mocked<Model<AdherencePattern>>;
+		patientModel = unitRef.get(
+			getModelToken(Patient.name),
+		) as unknown as Mocked<Model<Patient>>;
+		medicationModel = unitRef.get(
+			getModelToken(Medication.name),
+		) as unknown as Mocked<Model<Medication>>;
 	});
 
 	beforeEach(() => {

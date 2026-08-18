@@ -4,6 +4,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { type Mocked, TestBed } from '@suites/unit';
 import type { Queue } from 'bullmq';
 import { Model, Types } from 'mongoose';
+import { mockDeep } from 'vitest-mock-extended';
 import { DhVectorsService } from '../dh-vectors/dh-vectors.service';
 import { DHDocumentType } from '../dh-vectors/dto';
 import { AugurNotification } from './entities/notification.entity';
@@ -18,12 +19,15 @@ describe('NotificationsService', () => {
 	let pushService: Mocked<PushService>;
 
 	beforeAll(async () => {
+		const mockQueue = mockDeep<Queue>();
 		const { unit, unitRef } = await TestBed.solitary(NotificationsService)
 			.mock(getQueueToken(AugurNotification.name))
-			.final()
+			.final(mockQueue)
 			.compile();
 
 		service = unit;
+		(service as any).notificationQueue = mockQueue;
+		notificationQueue = mockQueue;
 		notificationModel = unitRef.get(getModelToken(AugurNotification.name));
 		dhVectorsService = unitRef.get(DhVectorsService);
 		pushService = unitRef.get(PushService);
@@ -31,7 +35,6 @@ describe('NotificationsService', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		notificationQueue = (service as any).notificationQueue;
 	});
 
 	it('should be defined', () => {

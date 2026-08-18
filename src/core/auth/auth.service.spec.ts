@@ -2,6 +2,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { type Mocked, TestBed } from '@suites/unit';
+import { Types } from 'mongoose';
 import { CacheService } from '@/core/caching/caching.service';
 import { PatientsService } from '@/features/patients/patients.service';
 import { FirebaseService } from '../firebase/firebase.service';
@@ -24,7 +25,9 @@ describe('AuthService', () => {
 		jwtService = unitRef.get(JwtService);
 		configService = unitRef.get(ConfigService);
 		patientsService = unitRef.get(PatientsService);
-		tokenDenylistCache = unitRef.get(CacheService);
+		tokenDenylistCache = unitRef.get(CacheService) as unknown as Mocked<
+			CacheService<number>
+		>;
 	});
 
 	beforeEach(() => {
@@ -60,7 +63,8 @@ describe('AuthService', () => {
 
 	describe('onboarding', () => {
 		it('should create patient profile with calculated age from dateOfBirth', async () => {
-			patientsService.create.mockResolvedValue('patient-999');
+			const mockId = new Types.ObjectId('64b1f2a7a2b3c9d5f8e2a111');
+			patientsService.create.mockResolvedValue(mockId);
 
 			const dob = new Date('1990-01-01');
 			const patientId = await service.onboarding('user-123', {
@@ -78,7 +82,7 @@ describe('AuthService', () => {
 					age: expect.any(Number),
 				}),
 			);
-			expect(patientId).toBe('patient-999');
+			expect(patientId).toEqual(mockId);
 		});
 	});
 

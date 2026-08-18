@@ -1,4 +1,5 @@
 import { type Mocked, TestBed } from '@suites/unit';
+import { QueryDateRange } from '@/features/vital-histories/dto';
 import { DoctorsService } from '../doctors/doctors.service';
 import { VitalHistoriesService } from '../vital-histories/vital-histories.service';
 import { PharmaciesService } from './pharmacies.service';
@@ -33,7 +34,7 @@ describe('PharmaciesService', () => {
 			});
 
 			const result = await service.fetchAnalytics(
-				{ dateRange: 'TODAY' as const },
+				{ dateRange: QueryDateRange.TODAY },
 				'personnel-1',
 			);
 

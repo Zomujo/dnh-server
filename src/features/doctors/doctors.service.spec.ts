@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { type Mocked, TestBed } from '@suites/unit';
 import { Model, Types } from 'mongoose';
+import { QueryDateRange } from '@/features/vital-histories/dto';
 import { VitalHistoriesService } from '../vital-histories/vital-histories.service';
 import { DoctorsService } from './doctors.service';
 import { Personnel } from './entities/personnel.entity';
@@ -15,7 +16,9 @@ describe('DoctorsService', () => {
 		const { unit, unitRef } = await TestBed.solitary(DoctorsService).compile();
 
 		service = unit;
-		personnelModel = unitRef.get(getModelToken(Personnel.name));
+		personnelModel = unitRef.get(
+			getModelToken(Personnel.name),
+		) as unknown as Mocked<Model<Personnel>>;
 		vitalHistoriesService = unitRef.get(VitalHistoriesService);
 	});
 
@@ -34,7 +37,7 @@ describe('DoctorsService', () => {
 				vitalsRecordedCount: 25,
 			});
 
-			const query = { dateRange: 'TODAY' as const };
+			const query = { dateRange: QueryDateRange.TODAY };
 			const result = await service.fetchAnalytics(query, 'personnel-1');
 
 			expect(vitalHistoriesService.fetchAnalytics).toHaveBeenCalledWith({
