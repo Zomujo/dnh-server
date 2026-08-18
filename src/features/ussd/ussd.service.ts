@@ -109,14 +109,14 @@ export class UssdService {
 
 		// Step 3b — different time: prompt for date/time
 		if (inputs.length === 3 && timingChoice === '2') {
-			return 'CON Enter date & time of reading:\nFormat: DD-MM-YY HH:MM';
+			return 'CON Enter date & time of reading:\nFormat: DD-MM-YY HH:MM AM|PM\ne.g. 18-08-26 02:30 PM';
 		}
 
 		// Step 4 — parse date/time, store recordedAt and save
 		if (inputs.length === 4 && timingChoice === '2') {
 			const recordedAt = this.parseDateTimeInput(inputs[3]);
 			if (!recordedAt) {
-				return 'END Invalid format. Please dial again and use DD-MM-YY HH:MM.';
+				return 'END Invalid format. Please dial again and use DD-MM-YY HH:MM AM|PM (e.g. 18-08-26 02:30 PM).';
 			}
 			const state = await this.cacheService.get(cacheKey);
 			await this.cacheService.set(
@@ -196,15 +196,26 @@ export class UssdService {
 	private parseDateTimeInput(input: string): Date | null {
 		const match = input
 			.trim()
-			.match(/^(\d{2})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
+			.match(/^(\d{2})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?$/i);
 		if (!match) return null;
 
-		const [, dd, mm, yy, hh, min] = match;
+		const [, dd, mm, yy, rawHh, min, ampm] = match;
+		let hh = parseInt(rawHh, 10);
+
+		if (ampm) {
+			const period = ampm.toUpperCase();
+			if (hh < 1 || hh > 12) return null;
+			if (period === 'PM' && hh < 12) hh += 12;
+			if (period === 'AM' && hh === 12) hh = 0;
+		} else {
+			if (hh < 0 || hh > 23) return null;
+		}
+
 		const date = new Date(
 			2000 + parseInt(yy, 10),
 			parseInt(mm, 10) - 1,
 			parseInt(dd, 10),
-			parseInt(hh, 10),
+			hh,
 			parseInt(min, 10),
 		);
 
