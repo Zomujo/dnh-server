@@ -10,7 +10,7 @@ export class UpdateVitalHistoryDto extends PartialType(
 export class UpdateVitalLogDto {
 	@ApiPropertyOptional({ enum: VitalSeverityEnum, example: 'normal' })
 	@IsOptional()
-	@IsEnum(VitalSeverityEnum)
+	@IsEnum(VitalSeverityEnum || {})
 	severity?: VitalSeverityEnum;
 
 	@ApiPropertyOptional({ example: 'Patient is stable' })

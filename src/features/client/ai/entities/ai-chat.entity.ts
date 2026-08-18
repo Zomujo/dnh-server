@@ -33,7 +33,7 @@ export class ClientAIChat extends BaseEntity {
 	@Prop({ description: 'Content of the chat message' })
 	content: string;
 
-	@Prop({ description: 'Type of chat (e.g., text, audio)' })
+	@Prop({ type: String, description: 'Type of chat (e.g., text, audio)' })
 	type: ChatTypes;
 
 	@Prop({ description: 'Local chat ID for client-side tracking' })

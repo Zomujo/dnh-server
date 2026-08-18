@@ -159,6 +159,15 @@ importers:
       '@nestjs/testing':
         specifier: ^11.0.1
         version: 11.1.24(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.24)(@nestjs/platform-express@11.1.24)
+      '@suites/di.nestjs':
+        specifier: ^3.1.0
+        version: 3.1.0(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)
+      '@suites/doubles.vitest':
+        specifier: ^3.1.0
+        version: 3.1.0(@vitest/spy@4.1.8)(vitest@4.1.8)
+      '@suites/unit':
+        specifier: ^3.1.1
+        version: 3.1.1
       '@swc/core':
         specifier: ^1.15.40
         version: 1.15.40
@@ -1638,6 +1647,39 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@suites/core.unit@3.1.0':
+    resolution: {integrity: sha512-2aG83BiIuOOVwu8Joisi4soSMI2isYBR8wJXWq+jInWOFCtQq+6cFwhXmpqRheMX0aKk7kb14HpclclMvpK3nQ==}
+    engines: {node: ^16.10.0 || ^18.12.0 || >=20.0.0}
+
+  '@suites/di.nestjs@3.1.0':
+    resolution: {integrity: sha512-SKPdfqZRqjDKRfte8Id1xvmhCNOSSnDSFS68Qcw04IirnUEAAm/wjJBv3Bo8tH/YjzlZkAjzpapZTiWePSM9qg==}
+    engines: {node: ^16.10.0 || ^18.12.0 || >=20.0.0}
+    peerDependencies:
+      '@nestjs/common': '>= 8.0'
+      reflect-metadata: <1.0.0
+
+  '@suites/doubles.vitest@3.1.0':
+    resolution: {integrity: sha512-SToF97cTcDjaMbzyUh+pLj33e/dHo2fqoPCcU0OXG2OX+hu+WACruS2xDwj5l/UruA3ckBJmtvVgOvpo1TKbUg==}
+    engines: {node: ^18.12.0 || >=20.0.0}
+    peerDependencies:
+      '@vitest/spy': '>= 1.0'
+      vitest: '>= 1.0'
+
+  '@suites/types.common@3.1.0':
+    resolution: {integrity: sha512-4OW/FKP78HZiUjSeAq6ix/lj2s4vEU4IqFr09LLmQC77v1Rv5vEW1LZLxrRVlP2jeWsxuVka6WX2k7k3HJDu9A==}
+    engines: {node: ^16.10.0 || ^18.12.0 || >=20.0.0}
+
+  '@suites/types.di@3.1.0':
+    resolution: {integrity: sha512-ng/so6i2dbvSUyCAN/UhLO0N/72B08XycXBCUGmE6CK2OgzNGPjTjcIN1moljyUzZQBYHvYSdUju2aZ6Fh2tOA==}
+    engines: {node: ^16.10.0 || ^18.12.0 || >=20.0.0}
+
+  '@suites/types.doubles@3.1.0':
+    resolution: {integrity: sha512-VhEtcgUPYe1L0xLie2VrqO8b+EPCdVnU30qS//nQA9UtRYA3dRqENNGI6ktmfKAvUKC9ToJdwE/B/TohZt290A==}
+
+  '@suites/unit@3.1.1':
+    resolution: {integrity: sha512-gHnAj4Xx5ckFjpo8jhHyriiqdpDXjFmwBTDht1T/czhTv1P3U2rZdEtwyWQISkgJFvxQjC6hfS7GftAKYgehjA==}
+    engines: {node: ^16.10.0 || ^18.12.0 || >=20.0.0}
 
   '@swc/core-darwin-arm64@1.15.40':
     resolution: {integrity: sha512-PaYyclfmQ++77D8ityYvmmVzHv9aG8ROwt2GfG6/ccloy4Hgf80qtOnzb9VYvPsUT7Ty1uhuDRhv3XYpf62qhQ==}
@@ -6490,6 +6532,45 @@ snapshots:
   '@socket.io/component-emitter@3.1.2': {}
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@suites/core.unit@3.1.0':
+    dependencies:
+      '@suites/types.common': 3.1.0
+      '@suites/types.di': 3.1.0
+      '@suites/types.doubles': 3.1.0
+
+  '@suites/di.nestjs@3.1.0(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)':
+    dependencies:
+      '@nestjs/common': 11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@suites/types.common': 3.1.0
+      '@suites/types.di': 3.1.0
+      reflect-metadata: 0.2.2
+
+  '@suites/doubles.vitest@3.1.0(@vitest/spy@4.1.8)(vitest@4.1.8)':
+    dependencies:
+      '@suites/core.unit': 3.1.0
+      '@suites/types.common': 3.1.0
+      '@suites/types.di': 3.1.0
+      '@suites/types.doubles': 3.1.0
+      '@vitest/spy': 4.1.8
+      vitest: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@24.13.0)(@vitest/coverage-v8@4.1.8)(vite@8.0.16(@types/node@24.13.0)(terser@5.48.0)(yaml@2.9.0))
+
+  '@suites/types.common@3.1.0': {}
+
+  '@suites/types.di@3.1.0':
+    dependencies:
+      '@suites/types.common': 3.1.0
+
+  '@suites/types.doubles@3.1.0':
+    dependencies:
+      '@suites/types.common': 3.1.0
+
+  '@suites/unit@3.1.1':
+    dependencies:
+      '@suites/core.unit': 3.1.0
+      '@suites/types.common': 3.1.0
+      '@suites/types.di': 3.1.0
+      '@suites/types.doubles': 3.1.0
 
   '@swc/core-darwin-arm64@1.15.40':
     optional: true

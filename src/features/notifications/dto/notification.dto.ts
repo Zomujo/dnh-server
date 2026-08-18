@@ -2,7 +2,6 @@ import {
 	ApiProperty,
 	ApiPropertyOptional,
 	ApiResponseProperty,
-	PickType,
 } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -23,7 +22,6 @@ import {
 import { addMonths } from 'date-fns';
 import { getAllIANATimezones } from '@/common/utils/helpers/iana-timezones.helper';
 import { TargetType } from '@/features/adherences/dto/target-type.enum';
-import { PatientDto } from '../../patients/dto/patient.dto';
 
 export enum NotificationType {
 	REMINDER = 'reminder',
@@ -84,11 +82,21 @@ export class Frequency {
 	repetitionType: RepetitionType;
 }
 
-class ModifiedPatientDto extends PickType(PatientDto, ['name', 'timezone']) {
+class ModifiedPatientDto {
 	@ApiResponseProperty({
 		example: '678fa53f3a0ba70822aa3555',
 	})
 	id: string;
+
+	@ApiResponseProperty({
+		example: 'John Doe',
+	})
+	name: string;
+
+	@ApiResponseProperty({
+		example: 'Africa/Accra',
+	})
+	timezone: string;
 }
 
 export class NotificationDto {

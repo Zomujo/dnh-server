@@ -20,7 +20,7 @@ export class UserToken extends BaseEntity {
 	@Prop()
 	fcmToken: string;
 
-	@Prop()
+	@Prop({ type: String, enum: UserType })
 	userType: UserType;
 }
 

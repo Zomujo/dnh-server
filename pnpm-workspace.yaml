@@ -2,6 +2,8 @@ allowBuilds:
   '@firebase/util': true
   '@nestjs/core': true
   '@scarf/scarf': true
+  '@suites/di.nestjs': true
+  '@suites/doubles.vitest': true
   '@swc/core': true
   bcrypt: true
   msgpackr-extract: true
