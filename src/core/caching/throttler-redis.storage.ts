@@ -52,20 +52,28 @@ export class RedisThrottlerStorage
 		this.client = createClient({
 			url: this.configService.get('REDIS_URL'),
 		});
-	}
-
-	async onModuleInit() {
 		this.client.on('error', (error) =>
 			this.logger.error(
 				`Redis throttler client error: ${error.message}`,
 				error.stack,
 			),
 		);
-		await this.client.connect();
+	}
+
+	async onModuleInit() {
+		// Nest can invoke lifecycle hooks more than once on this instance
+		// (it's shared across CachingModule and the RedisThrottlerStorageModule
+		// pulled into ThrottlerModule.forRootAsync's `inject`), so connect()
+		// must be idempotent rather than assumed to run exactly once.
+		if (!this.client.isOpen) {
+			await this.client.connect();
+		}
 	}
 
 	async onModuleDestroy() {
-		await this.client.quit();
+		if (this.client.isOpen) {
+			await this.client.quit();
+		}
 	}
 
 	async increment(
