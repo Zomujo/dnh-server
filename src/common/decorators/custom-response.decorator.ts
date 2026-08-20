@@ -6,6 +6,7 @@ import {
 	ApiInternalServerErrorResponse,
 	ApiNotFoundResponse,
 	ApiOkResponse,
+	ApiTooManyRequestsResponse,
 	ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { UserType } from '@/core/auth/enums';
@@ -41,6 +42,10 @@ export function CustomApiResponse(
 		ApiConflictResponse({
 			type: ApiErrorResponse,
 			description: 'Conflict error occurred',
+		}),
+		ApiTooManyRequestsResponse({
+			type: ApiErrorResponse,
+			description: 'Too many requests. Rate limit exceeded',
 		}),
 	];
 	responseTypes.forEach((response) => {
