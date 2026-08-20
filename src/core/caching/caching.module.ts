@@ -3,7 +3,11 @@ import { BullModule } from '@nestjs/bullmq';
 import { CacheModule } from '@nestjs/cache-manager';
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { seconds, ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { CacheService } from './caching.service';
+import { RedisThrottlerStorage } from './throttler-redis.storage';
+import { RedisThrottlerStorageModule } from './throttler-redis-storage.module';
 
 @Global()
 @Module({
@@ -28,9 +32,21 @@ import { CacheService } from './caching.service';
 			}),
 			inject: [ConfigService],
 		}),
+		ThrottlerModule.forRootAsync({
+			imports: [RedisThrottlerStorageModule],
+			useFactory: async (storage: RedisThrottlerStorage) => ({
+				throttlers: [{ ttl: seconds(60), limit: 100 }],
+				storage,
+			}),
+			inject: [RedisThrottlerStorage],
+		}),
 	],
 	providers: [
 		CacheService,
+		{
+			provide: APP_GUARD,
+			useClass: ThrottlerGuard,
+		},
 		// CustomCacheInterceptor (src/core/caching/interceptors/caching.interceptor.ts)
 		// is intentionally NOT registered. It builds per-user, per-route cache
 		// keys (`token=<userId>:<path>...`) but was never actually wired up as
