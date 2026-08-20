@@ -219,6 +219,10 @@ export class UssdService {
 			parseInt(min, 10),
 		);
 
-		return isNaN(date.getTime()) ? null : date;
+		if (isNaN(date.getTime()) || date > new Date()) {
+			return null;
+		}
+
+		return date;
 	}
 }

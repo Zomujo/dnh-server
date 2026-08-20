@@ -110,8 +110,8 @@ describe('UssdService', () => {
 			expect(res).toContain('Format: DD-MM-YY HH:MM AM|PM');
 		});
 
-		it('Step 4: should parse custom AM/PM datetime input and save reading', async () => {
-			const recordedAt = new Date();
+		it('Step 4: should parse custom mixed-case AM/PM datetime input and save reading', async () => {
+			const recordedAt = new Date('2024-01-01T14:30:00.000Z');
 			cacheService.get.mockResolvedValue({
 				vitalType: VitalTypes.BLOOD_PRESSURE,
 				value: '120/80',
@@ -128,7 +128,7 @@ describe('UssdService', () => {
 			const res = await service.handleSession(
 				'sess-1',
 				'+233201234567',
-				'1*120/80*2*18-08-26 02:30 PM',
+				'1*120/80*2*01-01-24 02:30 pM',
 			);
 
 			expect(vitalHistoriesService.loadVitalHistory).toHaveBeenCalledWith(
@@ -140,6 +140,19 @@ describe('UssdService', () => {
 				'u-1',
 			);
 			expect(res).toContain('END Reading logged successfully.');
+		});
+
+		it('Step 4: should reject datetime input that is in the future', async () => {
+			const res = await service.handleSession(
+				'sess-1',
+				'+233201234567',
+				'1*120/80*2*18-08-99 02:30 PM',
+			);
+
+			expect(res).toContain(
+				'END Invalid format. Please dial again and use DD-MM-YY HH:MM AM|PM',
+			);
+			expect(vitalHistoriesService.loadVitalHistory).not.toHaveBeenCalled();
 		});
 	});
 });
