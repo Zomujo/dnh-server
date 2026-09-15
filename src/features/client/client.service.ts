@@ -7,22 +7,11 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
 import {
-	addHours,
-	differenceInCalendarMonths,
-	differenceInCalendarYears,
-	differenceInDays,
 	differenceInHours,
-	differenceInWeeks,
 	eachDayOfInterval,
 	endOfDay,
 	endOfMonth,
 	getDate,
-	getDay,
-	getHours,
-	getMilliseconds,
-	getMinutes,
-	getMonth,
-	getSeconds,
 	isFuture,
 	isToday,
 	set,
@@ -61,7 +50,6 @@ import {
 } from '@/features/medications/dto';
 import { MedicationsService } from '@/features/medications/medications.service';
 import { SeededMedsService } from '@/features/medications/seeded-meds/seeded-meds.service';
-import type { Frequency } from '@/features/notifications/dto/notification.dto';
 import { NotificationsService } from '@/features/notifications/notifications.service';
 import { PushService } from '@/features/notifications/push/push.service';
 import { PatientsService } from '@/features/patients/patients.service';
@@ -431,94 +419,6 @@ export class ClientService {
 			query,
 			patient!._id.toString(),
 		);
-	}
-
-	private shouldTakeToday(startDate: Date, frequency: Frequency): boolean {
-		const now = new Date();
-		const start = new Date(startDate);
-		if (start > now) return false;
-
-		const repType = frequency.repetitionType;
-		const repeatEvery = frequency.repeatEvery || 1;
-
-		switch (repType) {
-			case 'daily': {
-				return true;
-			}
-			case 'hourly': {
-				return differenceInDays(now, start) % repeatEvery === 0;
-			}
-			case 'weekly': {
-				return (
-					differenceInWeeks(now, start) % repeatEvery === 0 &&
-					getDay(now) === getDay(start)
-				);
-			}
-			case 'monthly': {
-				return (
-					differenceInCalendarMonths(now, start) % repeatEvery === 0 &&
-					getDate(now) === getDate(start)
-				);
-			}
-			case 'yearly': {
-				return (
-					differenceInCalendarYears(now, start) % repeatEvery === 0 &&
-					getMonth(now) === getMonth(start) &&
-					getDate(now) === getDate(start)
-				);
-			}
-			default:
-				return false;
-		}
-	}
-
-	private resolveToBeTakenAt(startDate: Date): Date {
-		const now = new Date();
-		const toBeTakenAt = set(now, {
-			hours: getHours(startDate),
-			minutes: getMinutes(startDate),
-			seconds: getSeconds(startDate),
-			milliseconds: getMilliseconds(startDate),
-		});
-		if (
-			getHours(toBeTakenAt) === 0 &&
-			getMinutes(toBeTakenAt) === 0 &&
-			getSeconds(toBeTakenAt) === 0
-		) {
-			return set(toBeTakenAt, {
-				hours: 8,
-				minutes: 0,
-				seconds: 0,
-				milliseconds: 0,
-			});
-		}
-		return toBeTakenAt;
-	}
-
-	private getSection(date: Date): MedicationSection {
-		const hour = getHours(date);
-		if (hour >= 5 && hour < 12) return MedicationSection.MORNING;
-		if (hour >= 12 && hour < 18) return MedicationSection.AFTERNOON;
-		return MedicationSection.EVENING;
-	}
-
-	private getDailyDoseTimes(
-		baseTime: Date,
-		repeatEvery: number,
-	): { time: Date; section: MedicationSection }[] {
-		if (repeatEvery <= 1) {
-			return [{ time: baseTime, section: this.getSection(baseTime) }];
-		}
-
-		const intervalHours = 24 / repeatEvery;
-		const doses: { time: Date; section: MedicationSection }[] = [];
-
-		for (let i = 0; i < repeatEvery; i++) {
-			const doseTime = addHours(baseTime, i * intervalHours);
-			doses.push({ time: doseTime, section: this.getSection(doseTime) });
-		}
-
-		return doses;
 	}
 
 	/**
