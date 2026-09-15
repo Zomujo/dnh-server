@@ -8,7 +8,7 @@ import {
 	startOfWeek,
 	subDays,
 } from 'date-fns';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
 import { escapeRegExp } from '../../common/utils/helpers';
@@ -83,6 +83,27 @@ export class AdherencesService {
 		}
 
 		return adherenceLog._id;
+	}
+
+	/**
+	 * Looks up the single log for one specific dose instance — the same
+	 * (userId, medication, scheduledFor) triple the unique index is built on.
+	 * Used to answer "which log already claims this dose?" after a duplicate
+	 * confirm, so the caller can respond idempotently instead of erroring.
+	 */
+	async findDoseLog(
+		userId: string,
+		medicationId: string | Types.ObjectId,
+		scheduledFor: Date,
+	) {
+		return this.adherenceLogModel
+			.findOne({
+				userId,
+				medication: new Types.ObjectId(medicationId),
+				scheduledFor,
+			})
+			.select('_id status takenAt')
+			.lean();
 	}
 
 	/**

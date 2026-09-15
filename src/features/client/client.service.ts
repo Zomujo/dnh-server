@@ -87,6 +87,13 @@ import {
 
 @Injectable()
 export class ClientService {
+	/**
+	 * Hours after a dose's scheduled time beyond which a confirmation is
+	 * recorded as PARTIAL rather than TAKEN, so a much-later catch-up confirm
+	 * is distinguishable from on-time adherence.
+	 */
+	private static readonly LATE_WINDOW_HOURS = 4;
+
 	private checkpointModel: Collection;
 	private checkpointWritesModel: Collection;
 
@@ -514,6 +521,50 @@ export class ClientService {
 		return doses;
 	}
 
+	/**
+	 * The single place the 12h -> 24h dose arithmetic lives. Both
+	 * `confirmMedication` and `fetchTodaysMedications` derive dose times from
+	 * here — they previously each carried their own copy, which is how the two
+	 * endpoints came to disagree about which dose a log belonged to.
+	 */
+	private toDoseTimeOfDay(time: {
+		hour: number;
+		minutes: number;
+		timeDesignators?: string;
+	}): { hours: number; minutes: number } {
+		const { hour, minutes, timeDesignators } = time;
+		// Case-normalised: a lowercase "pm" slipping through would leave an
+		// evening dose at 08:00, colliding with the morning dose on the unique
+		// (userId, medication, scheduledFor) index and making one of the two
+		// unconfirmable for the rest of the day.
+		const designator = timeDesignators?.toUpperCase();
+		let hours = hour;
+		if (designator === 'PM' && hours !== 12) hours += 12;
+		if (designator === 'AM' && hours === 12) hours = 0;
+		return { hours, minutes };
+	}
+
+	/** Today's occurrence of a scheduled dose time. */
+	private doseTimeOn(
+		time: { hour: number; minutes: number; timeDesignators?: string },
+		day: Date = new Date(),
+	): Date {
+		return set(startOfDay(day), this.toDoseTimeOfDay(time));
+	}
+
+	/**
+	 * How a confirmation is recorded given how late it arrived. Still counts as
+	 * taken (the patient did take it), but flagged PARTIAL rather than TAKEN
+	 * when well past schedule — there was previously no way to distinguish
+	 * on-time adherence from a much-later catch-up confirmation.
+	 */
+	private classifyDoseStatus(scheduledFor: Date, confirmedAt: Date): Status {
+		const hoursLate = differenceInHours(confirmedAt, scheduledFor);
+		return hoursLate > ClientService.LATE_WINDOW_HOURS
+			? Status.PARTIAL
+			: Status.TAKEN;
+	}
+
 	async confirmMedication(
 		medicationId: string,
 		userId: string,
@@ -534,37 +585,26 @@ export class ClientService {
 			throw new NotFoundException(`No schedule defined for ${sectionKey}`);
 		}
 
-		const { hour, minutes, timeDesignators } = schedule.time;
-		let hours = hour;
-		if (timeDesignators === 'PM' && hours !== 12) hours += 12;
-		if (timeDesignators === 'AM' && hours === 12) hours = 0;
-		// The scheduled dose datetime — this is the stable identity of "which
-		// dose" is being confirmed (used for the unique index below), not when
-		// the patient actually tapped confirm. See takenAt below for that.
-		const scheduledFor = set(startOfDay(new Date()), { hours, minutes });
+		// The scheduled dose datetime — the stable identity of "which dose" is
+		// being confirmed (used for the unique index below), not when the
+		// patient actually tapped confirm. See takenAt below for that.
+		const scheduledFor = this.doseTimeOn(schedule.time);
 
 		if (new Date() < scheduledFor) {
+			const { hour, minutes, timeDesignators } = schedule.time;
 			throw new BadRequestException(
 				`Cannot confirm ${sectionKey} dose — it's not yet time (${hour}:${String(minutes).padStart(2, '0')} ${timeDesignators})`,
 			);
 		}
 
 		const confirmedAt = new Date();
-		// Still recorded as taken (the patient did take it), but flagged
-		// PARTIAL rather than TAKEN when confirmed well past its scheduled
-		// time — there was previously no way to distinguish on-time adherence
-		// from a much-later catch-up confirmation at all.
-		const LATE_WINDOW_HOURS = 4;
-		const isLate =
-			differenceInHours(confirmedAt, scheduledFor) > LATE_WINDOW_HOURS;
 
 		try {
 			// Single atomic upsert instead of a separate existence check +
 			// insert — the filter excludes an already-confirmed dose
 			// (taken: {$ne: true}), so a genuine duplicate confirm can't match
 			// it and instead collides with the unique index on
-			// (userId, medication, scheduledFor) below, raising E11000, which
-			// is translated into the "already confirmed" error. This closes
+			// (userId, medication, scheduledFor), raising E11000. This closes
 			// the race between two concurrent confirms of the same dose that
 			// the old check-then-insert pattern was vulnerable to.
 			const logId = await this.adherencesService.upsertAdherenceLog(
@@ -583,16 +623,28 @@ export class ClientService {
 					scheduledFor,
 					taken: true,
 					takenAt: confirmedAt,
-					status: isLate ? Status.PARTIAL : Status.TAKEN,
+					status: this.classifyDoseStatus(scheduledFor, confirmedAt),
 				} as any,
 			);
 
-			return { id: logId };
+			return { id: logId, scheduledFor, alreadyConfirmed: false };
 		} catch (error: any) {
 			if (error?.name === 'MongoServerError' && error?.code === 11000) {
-				throw new BadRequestException(
-					`${sectionKey} dose for ${medication.name} already confirmed`,
+				// Idempotent: the dose is already in exactly the state this
+				// request wanted, so a double-tap or a network retry is a
+				// no-op rather than a failure. The existing log's id is
+				// returned so the caller can't tell the two paths apart
+				// unless it looks at `alreadyConfirmed`.
+				const existing = await this.adherencesService.findDoseLog(
+					userId,
+					medicationId,
+					scheduledFor,
 				);
+				return {
+					id: existing?._id,
+					scheduledFor,
+					alreadyConfirmed: true,
+				};
 			}
 			throw error;
 		}
@@ -619,75 +671,93 @@ export class ClientService {
 			toBeTakenAt: Date;
 			taken: boolean;
 		}[] = [];
-		const medicationIds: string[] = [];
+		// Kept as ObjectIds rather than strings: the `$in` nested inside the
+		// `$or` below is not cast against the schema, so string ids silently
+		// match nothing and every dose comes back untaken.
+		const medicationIds: Types.ObjectId[] = [];
 
 		for (const med of medications) {
 			const schedule = med[sectionKey] as any;
 			if (!schedule?.time) continue;
-
-			const { hour, minutes, timeDesignators } = schedule.time;
-			let hours = hour;
-			if (timeDesignators === 'PM' && hours !== 12) hours += 12;
-			if (timeDesignators === 'AM' && hours === 12) hours = 0;
-			const toBeTakenAt = set(startOfDay(new Date()), { hours, minutes });
 
 			result.push({
 				id: med._id.toString(),
 				name: med.name,
 				dosage: med.dosage,
 				purpose: med.purpose,
-				toBeTakenAt,
+				toBeTakenAt: this.doseTimeOn(schedule.time),
 				taken: false,
 			});
-			medicationIds.push(med._id.toString());
+			medicationIds.push(med._id);
 		}
 
 		if (result.length === 0) return result;
 
 		const todayStart = startOfDay(new Date());
 		const todayEnd = endOfDay(new Date());
-
 		const medNames = result.map((m) => m.name);
 
-		// Matched primarily by medication ID — falls back to name +
-		// hour-proximity only for older logs that predate the `medication`
-		// field (targetName alone can false-match a differently-named
-		// medication, or miss a renamed one entirely).
+		// Scoped by `scheduledFor` (which dose) rather than `takenAt` (when the
+		// patient tapped). Keying on takenAt dropped any dose confirmed after
+		// midnight out of its own day's window, so a late-night confirm came
+		// back as untaken. Legacy logs that predate `scheduledFor` have no dose
+		// identity to filter on, so those two branches still fall back to
+		// takenAt.
 		const logs = await this.adherencesService.findAllAdherenceLogsByQuery({
 			query: {
 				userId,
 				targetType: TargetType.MEDICATION,
-				takenAt: { $gte: todayStart, $lte: todayEnd },
 				$or: [
-					{ medication: { $in: medicationIds } },
-					{ medication: { $exists: false }, targetName: { $in: medNames } },
+					{
+						medication: { $in: medicationIds },
+						scheduledFor: { $gte: todayStart, $lte: todayEnd },
+					},
+					{
+						medication: { $in: medicationIds },
+						scheduledFor: { $exists: false },
+						takenAt: { $gte: todayStart, $lte: todayEnd },
+					},
+					{
+						medication: { $exists: false },
+						targetName: { $in: medNames },
+						takenAt: { $gte: todayStart, $lte: todayEnd },
+					},
 				],
 			},
-			projection: 'medication targetName taken takenAt',
+			projection: 'medication targetName taken takenAt scheduledFor',
 			limit: 50,
 		} as any);
 
-		const takenMap = new Map<string, boolean>();
 		for (const item of result) {
-			const matchingLog = logs.find((log: any) => {
+			item.taken = logs.some((log: any) => {
 				if (!log.taken) return false;
-				if (log.medication) return log.medication.toString() === item.id;
+
+				// Identify the medication: by reference when the log has one,
+				// by name only for logs that predate the `medication` field.
+				if (log.medication) {
+					if (log.medication.toString() !== item.id) return false;
+				} else if (log.targetName !== item.name) {
+					return false;
+				}
+
+				// Then identify the *dose*. Matching on the medication alone
+				// marked every section of the day taken as soon as any single
+				// dose was confirmed — confirming the 8am dose reported the 8pm
+				// dose as already taken.
+				if (log.scheduledFor) {
+					return (
+						new Date(log.scheduledFor).getTime() === item.toBeTakenAt.getTime()
+					);
+				}
+
+				// No dose identity on the log at all; the confirming hour is
+				// the only signal left.
 				return (
-					log.targetName === item.name &&
 					Math.abs(
 						new Date(log.takenAt).getHours() - item.toBeTakenAt.getHours(),
 					) <= 1
 				);
 			});
-			if (matchingLog) {
-				takenMap.set(item.id, true);
-			}
-		}
-
-		for (const item of result) {
-			if (takenMap.has(item.id)) {
-				item.taken = true;
-			}
 		}
 
 		return result;
