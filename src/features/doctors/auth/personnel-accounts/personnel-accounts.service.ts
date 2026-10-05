@@ -97,28 +97,63 @@ export class PersonnelAccountsService {
 		return { rows, count };
 	}
 
-	async findOne(id: string) {
+	// Every lookup is scoped to the caller's personnel so one clinician can
+	// never read, change, or delete another's login.
+	async findOne(id: string, personnelId: string) {
 		const account = await this.personnelAccountModel
-			.findById(id)
+			.findOne({ _id: id, personnel: personnelId })
 			.populate({ path: 'personnel', select: 'userName role' });
 
 		if (!account) throw new NotFoundException('Personnel account not found');
 		return account;
 	}
 
-	async update(id: string, dto: UpdatePersonnelAccountDto) {
-		const account = await this.personnelAccountModel.findByIdAndUpdate(
-			id,
-			dto,
-			{ new: true },
-		);
+	async update(
+		id: string,
+		personnelId: string,
+		dto: UpdatePersonnelAccountDto,
+	) {
+		const account = await this.personnelAccountModel.findOne({
+			_id: id,
+			personnel: personnelId,
+		});
 		if (!account) throw new NotFoundException('Personnel account not found');
+
+		// Ownership and provider identity are fixed at creation; re-pointing
+		// them would let an account be moved to another personnel.
+		const { personnel, provider, providerUserId, ...changes } = dto;
+		account.set(changes);
+		// save() rather than findByIdAndUpdate so the pre-save hook hashes
+		// a changed password instead of storing it in plaintext.
+		await account.save();
 		return account._id.toString();
 	}
 
-	async remove(id: string) {
-		const account = await this.personnelAccountModel.findByIdAndDelete(id);
+	async remove(id: string, personnelId: string) {
+		const account = await this.personnelAccountModel.findOne({
+			_id: id,
+			personnel: personnelId,
+		});
 		if (!account) throw new NotFoundException('Personnel account not found');
+
+		const accountCount = await this.personnelAccountModel.countDocuments({
+			personnel: personnelId,
+		});
+		if (accountCount <= 1) {
+			// Removing the only login would strand the personnel record —
+			// full account deletion goes through DELETE /personnel/auth.
+			throw new ConflictException(
+				'Cannot remove the only login method on this account',
+			);
+		}
+
+		await account.deleteOne();
+		await this.personnelAccountModel.db
+			.collection('personnels')
+			.updateOne(
+				{ _id: new ObjectId(personnelId) },
+				{ $pull: { personnelAccounts: account._id } as any },
+			);
 		return account;
 	}
 }

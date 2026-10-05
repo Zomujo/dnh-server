@@ -12,7 +12,7 @@ import {
 	Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { CustomApiResponse, GetUser } from '@/common/decorators';
+import { Authorize, CustomApiResponse, GetUser } from '@/common/decorators';
 import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import {
 	ApiSuccessResponseDto,
@@ -20,6 +20,7 @@ import {
 	PaginatedDataResponseDto,
 	throwError,
 } from '@/common/utils/responses';
+import { UserType } from '@/core/auth/enums';
 import {
 	CreatePersonnelAccountDto,
 	GetPersonnelAccountDto,
@@ -29,6 +30,7 @@ import {
 import { PersonnelAccountsService } from './personnel-accounts.service';
 
 @ApiTags('Dnh Personnel-Accounts')
+@Authorize(UserType.CHRONIC_CARE)
 @Controller('personnel-accounts')
 export class PersonnelAccountsController {
 	private readonly logger = new Logger(PersonnelAccountsController.name);
@@ -117,9 +119,15 @@ export class PersonnelAccountsController {
 		message: 'Personnel account fetched successfully',
 	})
 	@Get(':id')
-	async findOne(@Param('id', ParseMongoIdPipe) id: string) {
+	async findOne(
+		@GetUser('sub') personnelId: string,
+		@Param('id', ParseMongoIdPipe) id: string,
+	) {
 		try {
-			const response = await this.personnelAccountsService.findOne(id);
+			const response = await this.personnelAccountsService.findOne(
+				id,
+				personnelId,
+			);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,
@@ -140,8 +148,11 @@ export class PersonnelAccountsController {
 		@Body() dto: UpdatePersonnelAccountDto,
 	) {
 		try {
-			dto.personnel = personnelId;
-			const response = await this.personnelAccountsService.update(id, dto);
+			const response = await this.personnelAccountsService.update(
+				id,
+				personnelId,
+				dto,
+			);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,
@@ -157,9 +168,12 @@ export class PersonnelAccountsController {
 		message: 'Personnel account deleted successfully',
 	})
 	@Delete(':id')
-	async remove(@Param('id', ParseMongoIdPipe) id: string) {
+	async remove(
+		@GetUser('sub') personnelId: string,
+		@Param('id', ParseMongoIdPipe) id: string,
+	) {
 		try {
-			await this.personnelAccountsService.remove(id);
+			await this.personnelAccountsService.remove(id, personnelId);
 			return new ApiSuccessResponseNoData(
 				HttpStatus.OK,
 				'Personnel account deleted successfully',
