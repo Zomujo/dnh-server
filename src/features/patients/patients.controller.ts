@@ -97,9 +97,12 @@ export class PatientsController {
 	})
 	@Roles(PersonnelRoles.PHARMACY)
 	@Get()
-	async findAllForPharmacy(@Query() query: FilterPatientsDto) {
+	async findAllForPharmacy(
+		@GetUser('sub') personnelId: string,
+		@Query() query: FilterPatientsDto,
+	) {
 		try {
-			const response = await this.patientsService.findAll(query);
+			const response = await this.patientsService.findAll(query, personnelId);
 			const paginated = new PaginatedDataResponseDto(
 				response.rows,
 				query.page,
@@ -123,9 +126,15 @@ export class PatientsController {
 	})
 	@Roles(PersonnelRoles.PHARMACY)
 	@Get('no-paginate')
-	async findAllNoPaginate(@Query() query: FilterPatientsNoPaginateDto) {
+	async findAllNoPaginate(
+		@GetUser('sub') personnelId: string,
+		@Query() query: FilterPatientsNoPaginateDto,
+	) {
 		try {
-			const response = await this.patientsService.findAllNoPaginate(query);
+			const response = await this.patientsService.findAllNoPaginate(
+				query,
+				personnelId,
+			);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,

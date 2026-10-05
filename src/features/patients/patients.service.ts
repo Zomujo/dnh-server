@@ -350,7 +350,14 @@ export class PatientsService {
 		return results;
 	}
 
-	async findAll(query: FilterPatientsDto) {
+	// "My patients" for a pharmacy: ones it registered or has logged vitals for.
+	// Facility is deliberately not used — it's provenance, not an access boundary.
+	private personnelPatientsFilter(personnelId: string) {
+		const id = new Types.ObjectId(personnelId);
+		return { $or: [{ createdBy: id }, { pharmaciesVisited: id }] };
+	}
+
+	async findAll(query: FilterPatientsDto, scopeToPersonnelId?: string) {
 		const projection =
 			'name dateOfBirth chronicConditions lastCheckInDate adherenceRate adherenceStatus';
 		let { pageFilter, searchFilter } = generateFilter(query, projection);
@@ -389,6 +396,12 @@ export class PatientsService {
 		}
 
 		searchFilter = { ...searchFilter, ...findFilter };
+		if (scopeToPersonnelId) {
+			// $and so the scope's $or can't collide with the search $or.
+			searchFilter = {
+				$and: [searchFilter, this.personnelPatientsFilter(scopeToPersonnelId)],
+			};
+		}
 
 		const patients = await this.patientModel
 			.find({ ...searchFilter })
@@ -402,13 +415,30 @@ export class PatientsService {
 		return { rows: patients, count };
 	}
 
-	async findAllNoPaginate(query: FilterPatientsNoPaginateDto) {
+	async findAllNoPaginate(
+		query: FilterPatientsNoPaginateDto,
+		scopeToPersonnelId?: string,
+	) {
 		const projection = 'userId name patientCode';
+
+		// An exact code is a deliberate lookup (e.g. a walk-in patient), so it
+		// bypasses the personnel scope without exposing anyone else's list.
+		if (query.patientCode) {
+			return this.patientModel
+				.find({ patientCode: query.patientCode.trim().toUpperCase() })
+				.select(projection);
+		}
+
 		const { searchFilter } = generateFilter(query, projection);
 
-		const filter: Record<string, any> = { ...searchFilter };
+		let filter: Record<string, any> = { ...searchFilter };
 		if (query.facility) {
 			filter.facility = query.facility;
+		}
+		if (scopeToPersonnelId) {
+			filter = {
+				$and: [filter, this.personnelPatientsFilter(scopeToPersonnelId)],
+			};
 		}
 
 		const patients = await this.patientModel.find(filter).select(projection);

@@ -146,6 +146,16 @@ export class FilterPatientsNoPaginateDto extends PickType(
 	['search', 'searchFields'],
 ) {
 	@ApiPropertyOptional({
+		description:
+			'Exact patient code. For pharmacies this is the only way to find a ' +
+			'patient outside their own registered/visited list.',
+		example: '3F9A1C7B',
+	})
+	@IsOptional()
+	@IsString()
+	patientCode?: string;
+
+	@ApiPropertyOptional({
 		name: 'facilityId',
 		example: '664b7f8e2c2a1e4b8f1d2c3a',
 	})
