@@ -1,4 +1,8 @@
-import { NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+	ConflictException,
+	NotFoundException,
+	UnauthorizedException,
+} from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { type Mocked, TestBed } from '@suites/unit';
 import * as bcrypt from 'bcrypt';
@@ -7,7 +11,9 @@ import { AuthService } from '@/core/auth/auth.service';
 import { UserType } from '@/core/auth/enums';
 import { CommunicationsService } from '@/core/communications/communications.service';
 import { OtpService } from '@/core/security/otp/otp.service';
+import { Appointment } from '@/features/appointments/entities/appointment.entity';
 import { FacilitiesService } from '@/features/facilities/facilities.service';
+import { Patient } from '@/features/patients/entities/patient.entity';
 import { Personnel } from '../entities/personnel.entity';
 import { ChronicCareAuthService } from './chronic-care-auth.service';
 import { PersonnelProviders, PersonnelRoles } from './dto';
@@ -20,6 +26,8 @@ describe('ChronicCareAuthService', () => {
 	let service: ChronicCareAuthService;
 	let personnelModel: Mocked<Model<Personnel>>;
 	let personnelAccountModel: Mocked<Model<PersonnelAccount>>;
+	let appointmentModel: Mocked<Model<Appointment>>;
+	let patientModel: Mocked<Model<Patient>>;
 	let authService: Mocked<AuthService>;
 	let otpService: Mocked<OtpService>;
 	let communicationsService: Mocked<CommunicationsService>;
@@ -37,6 +45,12 @@ describe('ChronicCareAuthService', () => {
 		personnelAccountModel = unitRef.get(
 			getModelToken(PersonnelAccount.name),
 		) as unknown as Mocked<Model<PersonnelAccount>>;
+		appointmentModel = unitRef.get(
+			getModelToken(Appointment.name),
+		) as unknown as Mocked<Model<Appointment>>;
+		patientModel = unitRef.get(
+			getModelToken(Patient.name),
+		) as unknown as Mocked<Model<Patient>>;
 		authService = unitRef.get(AuthService);
 		otpService = unitRef.get(OtpService);
 		communicationsService = unitRef.get(CommunicationsService);
@@ -212,29 +226,103 @@ describe('ChronicCareAuthService', () => {
 				}),
 			).rejects.toThrow(UnauthorizedException);
 		});
+
+		it('should reject a deleted account with 401 after the password check', async () => {
+			const hashedPassword = await bcrypt.hash('validPassword', 10);
+			const mockAccount = {
+				email: 'doc@example.com',
+				password: hashedPassword,
+				verificationStatus: PersonnelAccountVerificationStatus.VERIFIED,
+				personnel: null,
+			};
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue(mockAccount),
+			} as any);
+
+			await expect(
+				service.login({ email: 'doc@example.com', password: 'validPassword' }),
+			).rejects.toThrow('This account has been deleted');
+			expect(authService.signToken).not.toHaveBeenCalled();
+		});
+
+		it('should not reveal a deleted account to a wrong password', async () => {
+			const hashedPassword = await bcrypt.hash('validPassword', 10);
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue({
+					email: 'doc@example.com',
+					password: hashedPassword,
+					verificationStatus: PersonnelAccountVerificationStatus.VERIFIED,
+					personnel: null,
+				}),
+			} as any);
+
+			await expect(
+				service.login({ email: 'doc@example.com', password: 'wrong' }),
+			).rejects.toThrow('Invalid credentials');
+		});
+
+		it('should signal NotFound for a deleted Google account so it can re-register', async () => {
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue({
+					email: 'doc@example.com',
+					verificationStatus: PersonnelAccountVerificationStatus.VERIFIED,
+					personnel: null,
+				}),
+			} as any);
+
+			await expect(
+				service.login({ email: 'doc@example.com', providerUserId: 'g-123' }),
+			).rejects.toThrow(NotFoundException);
+		});
 	});
 
 	describe('deletePersonnel', () => {
 		it('should delete personnel, accounts, and revoke tokens', async () => {
-			const mockPersonnelId = new Types.ObjectId().toString();
+			const mockPersonnelId = new Types.ObjectId();
+			const mockAccountId = new Types.ObjectId();
 			personnelModel.findById.mockResolvedValue({
 				_id: mockPersonnelId,
+				personnelAccounts: [mockAccountId],
 			} as any);
+			appointmentModel.countDocuments.mockResolvedValue(0);
 			personnelAccountModel.deleteMany.mockResolvedValue({} as any);
 			personnelModel.findByIdAndDelete.mockResolvedValue({} as any);
 			authService.revokePersonnelTokens.mockResolvedValue({} as any);
+			patientModel.updateMany.mockResolvedValue({} as any);
 
-			await service.deletePersonnel(mockPersonnelId);
+			await service.deletePersonnel(mockPersonnelId.toString());
 
 			expect(personnelAccountModel.deleteMany).toHaveBeenCalledWith({
-				personnel: mockPersonnelId,
+				$or: [
+					{ personnel: mockPersonnelId },
+					{ _id: { $in: [mockAccountId] } },
+				],
 			});
 			expect(personnelModel.findByIdAndDelete).toHaveBeenCalledWith(
-				mockPersonnelId,
+				mockPersonnelId.toString(),
 			);
 			expect(authService.revokePersonnelTokens).toHaveBeenCalledWith(
-				mockPersonnelId,
+				mockPersonnelId.toString(),
 			);
+			expect(patientModel.updateMany).toHaveBeenCalledWith(expect.anything(), {
+				$pull: {
+					doctorsVisited: mockPersonnelId,
+					pharmaciesVisited: mockPersonnelId,
+				},
+			});
+		});
+
+		it('should refuse deletion while the personnel hosts open appointments', async () => {
+			personnelModel.findById.mockResolvedValue({
+				_id: new Types.ObjectId(),
+			} as any);
+			appointmentModel.countDocuments.mockResolvedValue(2);
+
+			await expect(
+				service.deletePersonnel(new Types.ObjectId().toString()),
+			).rejects.toThrow(ConflictException);
+			expect(personnelAccountModel.deleteMany).not.toHaveBeenCalled();
+			expect(personnelModel.findByIdAndDelete).not.toHaveBeenCalled();
 		});
 
 		it('should throw NotFoundException if personnel to delete does not exist', async () => {

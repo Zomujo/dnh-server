@@ -14,7 +14,10 @@ import { UserType } from '@/core/auth/enums';
 import { CommunicationsService } from '@/core/communications/communications.service';
 import { GenerateOtpDto, VerifyOtpDto } from '@/core/security/otp/dto';
 import { OtpService } from '@/core/security/otp/otp.service';
+import { AppointmentStatus } from '@/features/appointments/dto';
+import { Appointment } from '@/features/appointments/entities/appointment.entity';
 import { FacilitiesService } from '@/features/facilities/facilities.service';
+import { Patient } from '@/features/patients/entities/patient.entity';
 import { Personnel } from '../entities/personnel.entity';
 import { CreatePersonnelDto, PersonnelProviders, PersonnelRoles } from './dto';
 import {
@@ -28,6 +31,15 @@ import {
 // instead of VERIFIED, so they stay findable and can be pushed through real
 // verification later just by adding PersonnelRoles.PHARMACY here.
 const OTP_REQUIRED_ROLES: PersonnelRoles[] = [PersonnelRoles.CLINICIAN];
+
+// Appointments in these states still need a host. Only the host can modify an
+// appointment, so deleting the host would strand them — deletion is refused
+// until they're completed, cancelled, or handed off.
+const OPEN_APPOINTMENT_STATUSES: AppointmentStatus[] = [
+	AppointmentStatus.SCHEDULED,
+	AppointmentStatus.RESCHEDULED,
+	AppointmentStatus.ACTIVE,
+];
 
 type CreatePersonnelAccountInput = {
 	email: string;
@@ -49,6 +61,9 @@ export class ChronicCareAuthService {
 		@InjectModel(Personnel.name) private personnelModel: Model<Personnel>,
 		@InjectModel(PersonnelAccount.name)
 		private personnelAccountModel: Model<PersonnelAccount>,
+		@InjectModel(Appointment.name)
+		private appointmentModel: Model<Appointment>,
+		@InjectModel(Patient.name) private patientModel: Model<Patient>,
 		private authService: AuthService,
 		private readonly otpService: OtpService,
 		private readonly communicationsService: CommunicationsService,
@@ -220,6 +235,16 @@ export class ChronicCareAuthService {
 		}
 
 		const personnel = personnelAccount.personnel as any;
+		if (!personnel) {
+			// The account row outlived its personnel (deleted account). On the
+			// Google path, NotFound lets googleAuth() re-register through create(),
+			// which drops the orphaned row — same as email re-registration.
+			if (isGoogleLogin) {
+				throw new NotFoundException('Personnel not found');
+			}
+			throw new UnauthorizedException('This account has been deleted');
+		}
+
 		const token = await this.authService.signToken(
 			personnel._id.toString(),
 			{
@@ -284,9 +309,48 @@ export class ChronicCareAuthService {
 		if (!personnel) {
 			throw new NotFoundException('Personnel not found');
 		}
-		await this.personnelAccountModel.deleteMany({ personnel: personnelId });
+
+		const openAppointments = await this.appointmentModel.countDocuments({
+			hostPersonnel: personnel._id,
+			status: { $in: OPEN_APPOINTMENT_STATUSES },
+		});
+		if (openAppointments > 0) {
+			throw new ConflictException(
+				`Cannot delete account with ${openAppointments} upcoming appointment(s). Complete, cancel, or reassign them first.`,
+			);
+		}
+
+		// Accounts are linked both ways (account.personnel and
+		// personnel.personnelAccounts) — clear rows reachable from either side
+		// before the personnel, so a partial failure never leaves a loginable
+		// account pointing at a missing personnel.
+		await this.personnelAccountModel.deleteMany({
+			$or: [
+				{ personnel: personnel._id },
+				{ _id: { $in: (personnel.personnelAccounts as any) ?? [] } },
+			],
+		});
 		await this.personnelModel.findByIdAndDelete(personnelId);
 		await this.authService.revokePersonnelTokens(personnelId);
+
+		// Clinical records (appointments, vitals, createdBy) are kept for
+		// provenance; only the patient-relationship lists are pruned.
+		// Visited lists are typed as populated Personnel docs; cast the raw id.
+		const personnelRef = personnel._id as any;
+		await this.patientModel.updateMany(
+			{
+				$or: [
+					{ doctorsVisited: personnelRef },
+					{ pharmaciesVisited: personnelRef },
+				],
+			},
+			{
+				$pull: {
+					doctorsVisited: personnelRef,
+					pharmaciesVisited: personnelRef,
+				},
+			},
+		);
 	}
 
 	async findAuthenticated(id: string) {
