@@ -52,8 +52,15 @@ export class AppointmentsService {
 	}
 
 	async create(dto: CreateAppointmentDto) {
-		const { patient: patientId, ...rest } = dto;
+		const { patient: patientId, hostPersonnel, ...rest } = dto;
 		const payload: any = { ...rest, status: AppointmentStatus.SCHEDULED };
+
+		// The schema's ObjectId type isn't Mongoose's, so values aren't cast on
+		// write. Store an ObjectId like createPatientAppointment does, or
+		// queries such as deletePersonnel's open-appointment check miss it.
+		if (hostPersonnel) {
+			payload.hostPersonnel = new Types.ObjectId(hostPersonnel);
+		}
 
 		if (patientId) {
 			const patient = await this.patientsService.findPatientById(patientId);
