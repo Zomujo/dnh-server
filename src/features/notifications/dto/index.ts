@@ -3,6 +3,7 @@ export {
 	AugurTopicNotificationDto,
 	CreateNotificationDto,
 	CreatePushDto,
+	PushNotificationType,
 	PushToTopicDto,
 } from './create.dto';
 export {

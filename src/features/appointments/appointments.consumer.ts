@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Job } from 'bullmq';
 import { Model } from 'mongoose';
+import { PushNotificationType } from '@/features/notifications/dto';
 import { PushService } from '@/features/notifications/push/push.service';
 import { APPOINTMENT_REMINDER_QUEUE } from './appointments.constants';
 import { AppointmentStatus } from './dto';
@@ -38,24 +39,30 @@ export class AppointmentsConsumer extends WorkerHost {
 			return;
 		}
 
-		const getMessage = () => ({
+		// The patient app opens Appointments for this type; the clinician's
+		// copy keeps the generic type the HCP web app already handles.
+		const getMessage = (notificationType: string) => () => ({
 			notification: {
 				title: 'Appointment Reminder',
 				body: `Your appointment "${appointment.title}" is starting now.`,
 			},
 			data: {
-				notification_type: 'notification',
+				notification_type: notificationType,
+				appointment_id: appointment._id.toString(),
 				click_action: 'FLUTTER_NOTIFICATION_CLICK',
 			},
 		});
 
 		if (appointment.userId) {
-			this.pushService.sendNotification(getMessage, appointment.userId);
+			this.pushService.sendNotification(
+				getMessage(PushNotificationType.APPOINTMENT),
+				appointment.userId,
+			);
 		}
 
 		if (appointment.hostPersonnel) {
 			this.pushService.sendNotification(
-				getMessage,
+				getMessage('notification'),
 				appointment.hostPersonnel.toString(),
 			);
 		}

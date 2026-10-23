@@ -32,6 +32,7 @@ import {
 	MedicationAdherenceLogsDto,
 } from '@/features/medications/dto';
 import { MedicationsService } from '@/features/medications/medications.service';
+import { PushNotificationType } from '@/features/notifications/dto';
 import { PushService } from '@/features/notifications/push/push.service';
 import {
 	FilterPatientsDto,
@@ -129,7 +130,8 @@ export class HcpService {
 					body: `You have a new appointment: ${dto.title}.`,
 				},
 				data: {
-					notification_type: 'notification',
+					notification_type: PushNotificationType.APPOINTMENT,
+					appointment_id: appointmentId.toString(),
 					click_action: 'FLUTTER_NOTIFICATION_CLICK',
 				},
 			}),
@@ -271,8 +273,9 @@ export class HcpService {
 		});
 		if (!updated) throw new NotFoundException('Appointment request not found');
 
+		let appointmentId: string | undefined;
 		if (dto.status === AppointmentRequestStatus.APPROVED) {
-			await this.appointmentsService.createPatientAppointment(
+			const created = await this.appointmentsService.createPatientAppointment(
 				{
 					title: `${request.type} Appointment`,
 					description: request.description,
@@ -282,6 +285,7 @@ export class HcpService {
 				personnelId,
 				facilityId,
 			);
+			appointmentId = created.toString();
 		}
 
 		const isApproved = dto.status === AppointmentRequestStatus.APPROVED;
@@ -294,7 +298,8 @@ export class HcpService {
 						: 'Your appointment request has been rejected.',
 				},
 				data: {
-					notification_type: 'notification',
+					notification_type: PushNotificationType.APPOINTMENT,
+					...(appointmentId && { appointment_id: appointmentId }),
 					status: dto.status,
 					click_action: 'FLUTTER_NOTIFICATION_CLICK',
 				},

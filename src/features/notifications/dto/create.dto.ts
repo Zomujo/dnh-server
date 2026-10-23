@@ -51,6 +51,21 @@ export class PushToTopicDto {
 	messsage: string;
 }
 
+/**
+ * What a push is about, sent as `data.notification_type`. The patient app
+ * opens the matching screen on tap; any other value (or none) opens home.
+ */
+export enum PushNotificationType {
+	/** Appointment reminders and changes. Opens Appointments. */
+	APPOINTMENT = 'appointment',
+	/** A reading the server flagged. Opens Readings. */
+	VITAL_ALERT = 'vital_alert',
+	/** Server-sent medication reminders. Opens Medications. */
+	MEDICATION = 'medication',
+	/** AI chat messages. Opens the AI chat. */
+	AI_CHAT = 'ai_chat',
+}
+
 export class AugurSendNotificationDto {
 	title: string;
 	body: string;
@@ -59,6 +74,8 @@ export class AugurSendNotificationDto {
 	payload?: {
 		actionId?: string;
 		notification_type?: string;
+		appointment_id?: string;
+		medication_id?: string;
 		actionBtn1Display?: string;
 		actionBtn1Payload?: string;
 		actionBtn1Endpoint?: string;
@@ -76,6 +93,8 @@ export class AugurTopicNotificationDto {
 	payload?: {
 		actionId?: string;
 		notification_type?: string;
+		appointment_id?: string;
+		medication_id?: string;
 		actionBtn1Display?: string;
 		actionBtn1Payload?: string;
 		actionBtn1Endpoint?: string;
