@@ -163,9 +163,12 @@ export class NotificationsConsumer extends WorkerHost {
 		// The message is also saved to the AI chat above. A batch of only
 		// medication reminders opens Medications; anything else is a chat
 		// message the patient reads in the AI chat.
-		const onlyMedications = data.groupedNotifications.every(
-			(not) => not.targetType === TargetType.MEDICATION,
-		);
+		// Lower-cased: older reminders were saved with any casing.
+		const onlyMedications =
+			data.groupedNotifications.length > 0 &&
+			data.groupedNotifications.every(
+				(not) => not.targetType?.toLowerCase() === TargetType.MEDICATION,
+			);
 		await this.pushService.sendAugurNotification({
 			userId: notification.patient.userId,
 			title: 'Yelima AI',

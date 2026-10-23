@@ -18,7 +18,7 @@ import { UserToken } from '../entities/user-tokens.entity';
  * rather than defaulted: with no `notification_type` the app opens home,
  * which is right for a push that isn't about any one screen.
  */
-function pushDataFields(
+export function pushDataFields(
 	payload: AugurSendNotificationDto['payload'],
 ): Record<string, string> {
 	const fields: Record<string, string> = {};
