@@ -22,18 +22,25 @@ export class MissedDosesProcessor extends WorkerHost implements OnModuleInit {
 		super();
 	}
 
+	// A Redis hiccup at boot must not stop the API from starting. The
+	// scheduler lives in Redis, so one registered by an earlier boot keeps
+	// running.
 	async onModuleInit() {
-		await this.queue.upsertJobScheduler(
-			'record-missed-doses',
-			{ pattern: '5 * * * *' },
-			{
-				name: 'record',
-				opts: {
-					removeOnComplete: { count: 48 },
-					removeOnFail: { age: 7 * 24 * 3600 },
+		try {
+			await this.queue.upsertJobScheduler(
+				'record-missed-doses',
+				{ pattern: '5 * * * *' },
+				{
+					name: 'record',
+					opts: {
+						removeOnComplete: { count: 48 },
+						removeOnFail: { age: 7 * 24 * 3600 },
+					},
 				},
-			},
-		);
+			);
+		} catch (error) {
+			this.logger.error('Could not schedule the missed-dose job', error);
+		}
 	}
 
 	async process() {

@@ -159,7 +159,10 @@ export class AdherencesService {
 		userId: string,
 		from: Date,
 		to: Date,
-		medicationId?: string,
+		{
+			medicationId,
+			now = new Date(),
+		}: { medicationId?: string; now?: Date } = {},
 	): Promise<{ medication: ScheduledMedication; doses: ResolvedDose[] }[]> {
 		const [medications, logs] = await Promise.all([
 			this.medicationModel
@@ -201,7 +204,6 @@ export class AdherencesService {
 			]);
 		}
 
-		const now = new Date();
 		return medications.map((medication) => ({
 			medication,
 			doses: resolveDoses(
@@ -234,7 +236,9 @@ export class AdherencesService {
 
 		let recorded = 0;
 		for (const userId of userIds) {
-			const perMedication = await this.resolveUserDoses(userId, from, to);
+			const perMedication = await this.resolveUserDoses(userId, from, to, {
+				now,
+			});
 			let patientId: unknown;
 			for (const { medication, doses } of perMedication) {
 				for (const dose of doses) {
@@ -473,12 +477,9 @@ export class AdherencesService {
 	) {
 		const monthStart = startOfMonth(date);
 		const monthEnd = endOfMonth(date);
-		const [entry] = await this.resolveUserDoses(
-			userId,
-			monthStart,
-			monthEnd,
+		const [entry] = await this.resolveUserDoses(userId, monthStart, monthEnd, {
 			medicationId,
-		);
+		});
 		const doses = entry?.doses ?? [];
 		const now = new Date();
 
