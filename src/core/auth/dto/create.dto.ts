@@ -16,41 +16,19 @@ import {
 	Min,
 	MinLength,
 	Validate,
-	ValidationArguments,
-	ValidatorConstraint,
-	ValidatorConstraintInterface,
 } from 'class-validator';
-import { differenceInYears } from 'date-fns';
 import { GenderEnum } from '@/features/patients/entities/patient.entity';
+import {
+	AgeOrDateOfBirthConstraint,
+	MINIMUM_PATIENT_AGE,
+	MinimumAgeConstraint,
+} from './age.validators';
 
-@ValidatorConstraint({ name: 'ageOrDateOfBirth', async: false })
-export class AgeOrDateOfBirthConstraint
-	implements ValidatorConstraintInterface
-{
-	validate(_value: any, args: ValidationArguments) {
-		const dto = args.object as any;
-		return !!(dto.age || dto.dateOfBirth);
-	}
-
-	defaultMessage() {
-		return 'Either age or dateOfBirth must be provided';
-	}
-}
-
-/** Self-onboarding is adults-only; minors must be registered by an HCP. */
-export const MINIMUM_PATIENT_AGE = 18;
-
-@ValidatorConstraint({ name: 'minimumAge', async: false })
-export class MinimumAgeConstraint implements ValidatorConstraintInterface {
-	validate(value: unknown) {
-		if (!(value instanceof Date) || Number.isNaN(value.getTime())) return true; // IsDate reports it
-		return differenceInYears(new Date(), value) >= MINIMUM_PATIENT_AGE;
-	}
-
-	defaultMessage() {
-		return `Patients must be at least ${MINIMUM_PATIENT_AGE} years old`;
-	}
-}
+export {
+	AgeOrDateOfBirthConstraint,
+	MINIMUM_PATIENT_AGE,
+	MinimumAgeConstraint,
+} from './age.validators';
 
 export class CreateAuthDto {
 	@ApiProperty({ example: 'user@email.com' })
