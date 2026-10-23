@@ -170,7 +170,9 @@ describe('AdherencesService', () => {
 
 				expect(adherenceLogModel.deleteMany).toHaveBeenNthCalledWith(1, {
 					userId: 'u1',
-					medication: medicationId,
+					medication: {
+						$in: [medicationId.toString(), medicationId],
+					},
 				});
 				expect(adherenceLogModel.deleteMany).toHaveBeenNthCalledWith(2, {
 					userId: 'u1',
@@ -201,7 +203,9 @@ describe('AdherencesService', () => {
 				expect(adherenceLogModel.deleteMany).toHaveBeenCalledTimes(1);
 				expect(adherenceLogModel.deleteMany).toHaveBeenCalledWith({
 					userId: 'u1',
-					medication: medicationId,
+					medication: {
+						$in: [medicationId.toString(), medicationId],
+					},
 				});
 				expect(adherencePatternModel.deleteMany).not.toHaveBeenCalled();
 				expect(result).toEqual({ logs: 2, patterns: 0 });

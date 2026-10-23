@@ -11,7 +11,7 @@ import {
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
-import { escapeRegExp } from '../../common/utils/helpers';
+import { anyIdForm, escapeRegExp } from '../../common/utils/helpers';
 import { AdherenceStatus } from '../../features/patients/dto';
 import { Patient } from '../../features/patients/entities/patient.entity';
 import { Medication } from '../medications/entities/medication.entity';
@@ -494,7 +494,8 @@ export class AdherencesService {
 		const { deletedCount: linkedLogs } =
 			await this.adherenceLogModel.deleteMany({
 				userId,
-				medication: new Types.ObjectId(medicationId.toString()),
+				// Mixed field: older rows may hold the id as a string.
+				medication: anyIdForm(medicationId),
 			});
 		if (nameStillInUse) {
 			return { logs: linkedLogs, patterns: 0 };
