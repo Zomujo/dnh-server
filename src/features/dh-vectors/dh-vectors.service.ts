@@ -93,8 +93,8 @@ export class DhVectorsService implements OnModuleInit {
 
 	async search(vector: number[], filter: GetDhVectorDto, limit = 10) {
 		await this.validateVectorDto(GetDhVectorDto, filter);
-		return this.qdrant.search('dh_vectors', {
-			vector: vector,
+		const { points } = await this.qdrant.query('dh_vectors', {
+			query: vector,
 			filter: {
 				must: [
 					{ key: 'userId', match: { value: filter.userId } },
@@ -105,6 +105,7 @@ export class DhVectorsService implements OnModuleInit {
 			limit: limit,
 			with_payload: true,
 		});
+		return points;
 	}
 
 	async deleteByDocumentId(documentId: string) {

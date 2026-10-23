@@ -1,11 +1,11 @@
 import { Logtail } from '@logtail/node';
-import { ConsoleLogger, Injectable } from '@nestjs/common';
+import { ConsoleLogger, Injectable, Optional } from '@nestjs/common';
 
 @Injectable()
 export class DomainLogger extends ConsoleLogger {
 	private logtail: Logtail;
 
-	constructor(context?: string) {
+	constructor(@Optional() context?: string) {
 		super(context || 'DefaultContext');
 		const sourceToken = process.env.LOGTAIL_SOURCE_TOKEN!;
 		this.logtail = new Logtail(sourceToken, {

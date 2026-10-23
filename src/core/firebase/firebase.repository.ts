@@ -1,12 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as admin from 'firebase-admin';
+import type {
+	DocumentData,
+	Firestore,
+	Query,
+	WithFieldValue,
+} from 'firebase-admin/firestore';
 
 import { FirebaseService } from './firebase.service';
 
 @Injectable()
 class FirestoreRepository {
 	private logger = new Logger(FirestoreRepository.name);
-	private db: admin.firestore.Firestore;
+	private db: Firestore;
 
 	constructor(private firebaseService: FirebaseService) {
 		this.db = this.firebaseService.db;
@@ -14,7 +19,7 @@ class FirestoreRepository {
 
 	async addDocument(
 		collectionName: string,
-		payload: FirebaseFirestore.WithFieldValue<FirebaseFirestore.DocumentData>,
+		payload: WithFieldValue<DocumentData>,
 	) {
 		try {
 			const docRef = await this.db.collection(collectionName).add(payload);
@@ -28,7 +33,7 @@ class FirestoreRepository {
 	async addDocumentWithId(
 		collectionName: string,
 		id: string,
-		payload: FirebaseFirestore.WithFieldValue<FirebaseFirestore.DocumentData>,
+		payload: WithFieldValue<DocumentData>,
 	) {
 		try {
 			const docRef = this.db.collection(collectionName).doc(id);
@@ -66,7 +71,7 @@ class FirestoreRepository {
 
 	async getDocumentsBy(collectionName: string, filters: Record<string, any>) {
 		try {
-			let query: admin.firestore.Query = this.db.collection(collectionName);
+			let query: Query = this.db.collection(collectionName);
 			for (const [field, value] of Object.entries(filters)) {
 				query = query.where(field, '==', value);
 			}
@@ -83,7 +88,7 @@ class FirestoreRepository {
 
 	async getDocumentBy(collectionName: string, filters: Record<string, any>) {
 		try {
-			let query: admin.firestore.Query = this.db.collection(collectionName);
+			let query: Query = this.db.collection(collectionName);
 			for (const [field, value] of Object.entries(filters)) {
 				query = query.where(field, '==', value);
 			}

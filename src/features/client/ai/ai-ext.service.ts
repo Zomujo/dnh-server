@@ -1,14 +1,12 @@
-import { randomUUID } from 'node:crypto';
-import { OpenAIWhisperAudio } from '@langchain/community/document_loaders/fs/openai_whisper_audio';
+import { Document } from '@langchain/core/documents';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { END, START, StateGraph } from '@langchain/langgraph';
 import { MongoDBSaver } from '@langchain/langgraph-checkpoint-mongodb';
+import { OpenAIClient, toFile } from '@langchain/openai';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import * as fs from 'fs/promises';
 import { Connection, Model, Types } from 'mongoose';
-import * as os from 'os';
 import * as path from 'path';
 import { FirebaseService } from '@/core/firebase/firebase.service';
 import { PatientPayload } from '../../patients/dto';
@@ -23,6 +21,13 @@ export class ExtClientAIService {
 	// Reuses Mongoose's already-connected, already-lifecycle-managed MongoClient
 	// (see 7.1/7.2 fix notes) instead of opening a dedicated connection pool.
 	private checkpointer: MongoDBSaver;
+	// Created on first use: the constructor throws without OPENAI_API_KEY,
+	// which would otherwise stop the whole app from booting.
+	private openAIClientInstance?: OpenAIClient;
+	private get openAIClient() {
+		this.openAIClientInstance ??= new OpenAIClient();
+		return this.openAIClientInstance;
+	}
 
 	constructor(
 		@InjectModel(ClientAIChat.name)
@@ -63,29 +68,22 @@ export class ExtClientAIService {
 		audioMongoId: Types.ObjectId,
 		question?: string,
 	) {
-		// Server-generated temp name: the client's filename is neither unique
-		// (two users uploading "audio.m4a" at once would read — and unlink —
-		// each other's file) nor safe to join into a path.
+		// Whisper detects the audio format from the file name's extension, so
+		// keep the client's extension when it is a plausible one.
 		const extension = path.extname(path.basename(file.originalname ?? ''));
-		const tempFilePath = path.join(
-			os.tmpdir(),
-			`chat-audio-${randomUUID()}${/^\.[a-zA-Z0-9]{1,8}$/.test(extension) ? extension : '.m4a'}`,
-		);
+		const fileName = `audio${/^\.[a-zA-Z0-9]{1,8}$/.test(extension) ? extension : '.m4a'}`;
 		const medicalPrompt =
 			`Transcribe in context to the question. if the response doesn't correlate to the question, transcribe anyway. Question: ${question}
        Glossary: Gender -> male,female,etc. 
 			`.trim();
 
 		try {
-			await fs.writeFile(tempFilePath, file.buffer);
-
-			const loader = new OpenAIWhisperAudio(tempFilePath, {
-				transcriptionCreateParams: {
-					prompt: medicalPrompt,
-				},
+			const { text } = await this.openAIClient.audio.transcriptions.create({
+				file: await toFile(file.buffer, fileName),
+				model: 'whisper-1',
+				prompt: medicalPrompt,
 			});
-
-			const docs = await loader.load();
+			const docs = [new Document({ pageContent: text, metadata: {} })];
 			const objectPath = this.firebaseService.newObjectPath(
 				`chronic_care_chat_audios/${userId}`,
 				file.originalname,
@@ -103,12 +101,6 @@ export class ExtClientAIService {
 			return docs;
 		} catch (error) {
 			this.logger.error('Error processing audio:', error);
-		} finally {
-			try {
-				await fs.unlink(tempFilePath);
-			} catch (cleanupError) {
-				this.logger.warn('Failed to clean up temporary file:', cleanupError);
-			}
 		}
 	}
 
