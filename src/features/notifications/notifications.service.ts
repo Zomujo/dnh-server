@@ -7,6 +7,7 @@ import { toZonedTime } from 'date-fns-tz';
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { generateFilter } from '@/common/factory';
+import { anyIdForm } from '@/common/utils/helpers';
 import { IUserPayload } from '@/core/firebase/interface/user.interface';
 import { DhVectorsService } from '../dh-vectors/dh-vectors.service';
 import { DHDocumentType } from '../dh-vectors/dto';
@@ -391,7 +392,9 @@ export class NotificationsService {
 	async purgeNotifications(userId: string, patientId?: string) {
 		const notifications = await this.notificationModel
 			.find(
-				patientId ? { $or: [{ userId }, { patient: patientId }] } : { userId },
+				patientId
+					? { $or: [{ userId }, { patient: anyIdForm(patientId) }] }
+					: { userId },
 			)
 			.select('_id');
 
