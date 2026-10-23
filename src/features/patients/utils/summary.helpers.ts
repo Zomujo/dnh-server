@@ -1,5 +1,6 @@
 import { addMonths } from 'date-fns';
 import { Model, Types } from 'mongoose';
+import { APP_TIME_ZONE } from '@/common/utils/time-zone';
 import { AdherenceLog } from '@/features/adherences/entities/adherence-log.entity';
 import { ChronicCondition } from '@/features/chronic-conditions/entities/chronic-condition.entity';
 import { Concern } from '@/features/concerns/entities/concern.entity';
@@ -125,7 +126,13 @@ export async function getConcernInsights(
 				weeklyTrends: [
 					{
 						$group: {
-							_id: { $dateToString: { format: '%G-W%V', date: '$onsetDate' } },
+							_id: {
+								$dateToString: {
+									format: '%G-W%V',
+									date: '$onsetDate',
+									timezone: APP_TIME_ZONE,
+								},
+							},
 							count: { $sum: 1 },
 						},
 					},
@@ -134,7 +141,13 @@ export async function getConcernInsights(
 				monthlyTrends: [
 					{
 						$group: {
-							_id: { $dateToString: { format: '%Y-%m', date: '$onsetDate' } },
+							_id: {
+								$dateToString: {
+									format: '%Y-%m',
+									date: '$onsetDate',
+									timezone: APP_TIME_ZONE,
+								},
+							},
 							count: { $sum: 1 },
 						},
 					},
