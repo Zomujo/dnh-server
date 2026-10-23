@@ -14,4 +14,5 @@ overrides:
   # Security floors for transitive dependencies (pnpm audit).
   # africastalking pins exact, vulnerable versions of these.
   'africastalking>axios': ^1.20.0
+  'africastalking>body-parser': ^2.4.0
   'africastalking>joi': ^18.2.9
