@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { setHours, setMinutes, startOfDay } from 'date-fns';
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
+import { APP_TIME_ZONE } from '@/common/utils/time-zone';
 import { AdherencesService } from '@/features/adherences/adherences.service';
 import { TargetType } from '@/features/adherences/dto/target-type.enum';
 import {
@@ -75,7 +76,7 @@ export class MedicationsService {
 					repeatEvery: 1,
 					repetitionType: RepetitionType.DAILY,
 				},
-				timezone: 'Africa/Accra',
+				timezone: APP_TIME_ZONE,
 			});
 			(schedule as any).notification = notificationId.toString();
 		}
@@ -308,7 +309,7 @@ export class MedicationsService {
 						repeatEvery: 1,
 						repetitionType: RepetitionType.DAILY,
 					},
-					timezone: 'Africa/Accra',
+					timezone: APP_TIME_ZONE,
 				});
 				(dtoSchedule as any).notification = notificationId.toString();
 			}
