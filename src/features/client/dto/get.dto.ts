@@ -5,7 +5,14 @@ import {
 	PickType,
 } from '@nestjs/swagger';
 import { Expose, Type } from 'class-transformer';
-import { IsArray, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import {
+	IsArray,
+	IsInt,
+	IsOptional,
+	IsString,
+	Max,
+	Min,
+} from 'class-validator';
 import { GenericResponseDto, PaginationRequestDto } from '@/common/dto';
 import type { Nullable } from '@/common/types';
 import { AIMessageRole as ChronicCareMessageRole } from '@/features/client/ai/entities/ai-chat.entity';
@@ -19,11 +26,12 @@ export class ChronicChatMessagesQueryDto extends PickType(
 	PaginationRequestDto,
 	['page'],
 ) {
-	@ApiPropertyOptional({ default: 10, name: 'limit' })
+	@ApiPropertyOptional({ default: 10, maximum: 100, name: 'limit' })
 	@IsOptional()
 	@Type(() => Number)
 	@IsInt()
 	@Min(1)
+	@Max(100)
 	@Expose({ name: 'limit' })
 	pageSize: number;
 }
@@ -31,11 +39,12 @@ export class ChronicChatMessagesQueryDto extends PickType(
 export class PreloadedMedsQueryDto extends PickType(PaginationRequestDto, [
 	'page',
 ]) {
-	@ApiPropertyOptional({ default: 10, name: 'limit' })
+	@ApiPropertyOptional({ default: 10, maximum: 100, name: 'limit' })
 	@IsOptional()
 	@Type(() => Number)
 	@IsInt()
 	@Min(1)
+	@Max(100)
 	@Expose({ name: 'limit' })
 	pageSize: number;
 

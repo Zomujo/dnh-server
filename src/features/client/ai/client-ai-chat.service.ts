@@ -22,6 +22,14 @@ export class ClientAIChatService {
 		return this.clientAIChatModel.findOne({ userId, localChatId });
 	}
 
+	async findReplyTo(userId: string, messageId: string) {
+		return this.clientAIChatModel.findOne({
+			userId,
+			role: AIMessageRole.ASSISTANT,
+			replyTo: messageId,
+		});
+	}
+
 	async findNextAssistantMessage(userId: string, afterDate: Date) {
 		return this.clientAIChatModel
 			.findOne({

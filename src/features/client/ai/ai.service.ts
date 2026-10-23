@@ -123,6 +123,7 @@ export class ClientAIService {
 				userId: payload.patient.userId,
 				chatType: payload.chatType ?? 'text',
 				timestamp: now.toISOString(),
+				...(payload.localChatId && { localChatId: payload.localChatId }),
 			},
 		});
 
@@ -164,6 +165,7 @@ export class ClientAIService {
 			inResponse = {
 				_id: message.id,
 				createdAt: message.additional_kwargs.timestamp,
+				...(payload.localChatId && { localChatId: payload.localChatId }),
 			};
 		}
 
@@ -321,6 +323,7 @@ export class ClientAIService {
 				role: AIMessageRole.USER,
 				content: humanMessage.content,
 				type: chatType,
+				localChatId: humanMessage.additional_kwargs.localChatId,
 				createdAt: receivedAt,
 				updatedAt: receivedAt,
 			});
@@ -334,6 +337,7 @@ export class ClientAIService {
 			content: response.content,
 			type: 'text',
 			from: chatType,
+			replyTo: humanMessage?.id,
 			createdAt: aiTimestamp,
 			updatedAt: aiTimestamp,
 		});

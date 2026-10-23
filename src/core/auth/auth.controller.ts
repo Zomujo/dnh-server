@@ -9,7 +9,7 @@ import {
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { seconds, Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
-import { CustomApiResponse, GetUser } from '@/common/decorators';
+import { CustomApiResponse, GetUser, Idempotent } from '@/common/decorators';
 import { ApiSuccessResponseDto, throwError } from '@/common/utils/responses';
 import { AuthService } from './auth.service';
 import { CreateAuthDto, OnboardDto } from './dto';
@@ -41,6 +41,7 @@ export class AuthController {
 	}
 
 	@Post('onboard')
+	@Idempotent()
 	@CustomApiResponse(['created', 'authorize'], {
 		message: 'Patient onboarded successfully',
 	})

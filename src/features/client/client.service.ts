@@ -124,6 +124,38 @@ export class ClientService {
 			return { outResponse: null };
 		}
 
+		// A resend of a message we already answered (offline queue retry):
+		// return the original pair instead of asking the AI again.
+		if (dto.localChatId && chatType === 'text') {
+			const previous = await this.clientAIChatService.findByLocalChatId(
+				userId,
+				dto.localChatId,
+			);
+			if (previous) {
+				const reply = await this.clientAIChatService.findReplyTo(
+					userId,
+					previous.id,
+				);
+				if (reply) {
+					return {
+						outResponse: {
+							_id: reply.id,
+							text: reply.content,
+							createdAt: reply.createdAt,
+							suggestions: [],
+						},
+						inResponse: {
+							_id: previous.id,
+							createdAt: previous.createdAt,
+							localChatId: dto.localChatId,
+						},
+					};
+				}
+				// Saved without a reply: drop it and answer afresh, as for audio.
+				await this.clientAIChatService.deleteById(previous.id, userId);
+			}
+		}
+
 		const patient = await this.retrievePatient(userId, language);
 
 		const cCond = await this.retrieveChronicConditions(userId);
@@ -138,6 +170,7 @@ export class ClientService {
 
 		const response = await this.clientAiService.bulkCompletion({
 			message: dto.message || 'H\u200Bello',
+			localChatId: chatType === 'text' ? dto.localChatId : undefined,
 			userId,
 			chatType,
 			language,

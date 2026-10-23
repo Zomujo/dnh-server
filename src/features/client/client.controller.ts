@@ -7,6 +7,7 @@ import {
 	HttpStatus,
 	Logger,
 	Param,
+	ParseEnumPipe,
 	ParseFilePipeBuilder,
 	Patch,
 	Post,
@@ -24,9 +25,16 @@ import {
 	ApiQuery,
 	ApiTags,
 } from '@nestjs/swagger';
-import { CustomApiResponse, GetUser } from '@/common/decorators';
+import type { Response } from 'express';
+import {
+	CustomApiResponse,
+	GetUser,
+	IdempotencyKeyHeaderDoc,
+	Idempotent,
+} from '@/common/decorators';
 import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import { generateFilter } from '@/common/factory';
+import { IdempotencyInterceptor } from '@/common/interceptors';
 import {
 	ApiSuccessResponseDto,
 	ApiSuccessResponseNoData,
@@ -99,6 +107,7 @@ export class ClientController {
 	constructor(private readonly clientService: ClientService) {}
 
 	@Post('chat')
+	@Idempotent()
 	@ApiQuery({ name: 'lang', enum: SupportedLanguages, required: true })
 	@HttpCode(HttpStatus.OK)
 	@CustomApiResponse(['success', 'authorize'], {
@@ -111,8 +120,11 @@ export class ClientController {
 	async chat(
 		@Body() createChronicCareDto: CreateChronicCareDto,
 		@GetUser('sub') userId: string,
-		@Query('lang') language: SupportedLanguages,
-		@Res() res: any,
+		@Query('lang', new ParseEnumPipe(SupportedLanguages))
+		language: SupportedLanguages,
+		// passthrough (Nest sends the return value) so an idempotent replay,
+		// which never reaches this handler, still gets a response.
+		@Res({ passthrough: true }) res: Response,
 	) {
 		try {
 			const response = await this.clientService.chat(
@@ -121,25 +133,17 @@ export class ClientController {
 				language,
 			);
 
+			// Empty message on a chat that already has messages: 204, no body.
 			if (!response.outResponse) {
-				res
-					.status(HttpStatus.NO_CONTENT)
-					.send(
-						new ApiSuccessResponseNoData(HttpStatus.NO_CONTENT, 'No content'),
-					);
+				res.status(HttpStatus.NO_CONTENT);
 				return;
 			}
 
-			res
-				.status(HttpStatus.OK)
-				.send(
-					new ApiSuccessResponseDto(
-						response,
-						HttpStatus.OK,
-						'Chat message sent successfully',
-					),
-				);
-			return;
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				'Chat message sent successfully',
+			);
 		} catch (error) {
 			throwError(this.logger, error);
 		}
@@ -152,9 +156,13 @@ export class ClientController {
 	@Post('chat/audio')
 	@HttpCode(HttpStatus.OK)
 	// multer enforces this while streaming (413), before the file is buffered
+	// Idempotency after multer, so the file bytes are part of the request
+	// hash. audioId dedupe (in the service) still applies without a key.
 	@UseInterceptors(
 		FileInterceptor('file', { limits: { fileSize: MAX_VOICE_NOTE_BYTES } }),
+		IdempotencyInterceptor,
 	)
+	@IdempotencyKeyHeaderDoc
 	@ApiConsumes('multipart/form-data')
 	@ApiBody({
 		description: 'Audio file to be uploaded',
@@ -169,7 +177,8 @@ export class ClientController {
 				.build({ errorHttpStatusCode: HttpStatus.BAD_REQUEST }),
 		)
 		file: Express.Multer.File,
-		@Query('lang') language: SupportedLanguages,
+		@Query('lang', new ParseEnumPipe(SupportedLanguages))
+		language: SupportedLanguages,
 		@Query('audioId') audioId: string,
 		@GetUser('sub') userId: string,
 	) {
@@ -319,6 +328,7 @@ export class ClientController {
 		message: 'Appointment request created successfully',
 	})
 	@Post('appointment-requests')
+	@Idempotent()
 	async createAppointmentRequest(
 		@Body() dto: CreateAppointmentRequestDto,
 		@GetUser('sub') userId: string,
@@ -466,6 +476,7 @@ export class ClientController {
 		message: 'Vital history logged successfully',
 	})
 	@Post('vital-histories/logs')
+	@Idempotent()
 	async logVitalHistory(
 		@Body() dto: LoadVitalHistoryDto,
 		@GetUser('sub') userId: string,
@@ -736,6 +747,7 @@ export class ClientController {
 		message: 'Medication created successfully',
 	})
 	@Post('medications')
+	@Idempotent()
 	async createMedication(
 		@Body() dto: CreateMedicationDto,
 		@GetUser('sub') userId: string,
@@ -869,6 +881,7 @@ export class ClientController {
 		message: 'Symptom created successfully',
 	})
 	@Post('symptoms')
+	@Idempotent()
 	async createSymptom(
 		@GetUser('sub') userId: string,
 		@Body() dto: AddSymptomsDto,

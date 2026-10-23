@@ -8,11 +8,11 @@ import {
 	ConversationScopes,
 } from '../agents/disquisitioner/state';
 
+// Product decision: the AI chat speaks English and Twi only. The app
+// sends 'Twi' for its Twi locale and 'English' for every other one.
 export enum SupportedLanguages {
 	ENGLISH = 'English',
 	TWI = 'Twi',
-	FRENCH = 'French',
-	PIDGIN = 'Pidgin',
 }
 
 // Define the User type
@@ -27,6 +27,7 @@ export interface PatientState {
 export type ClientAIContext = { user: PatientState };
 export interface ClientAICompletionInput {
 	message: string;
+	localChatId?: string;
 	userId: string;
 	chatType?: string;
 	language: string;
