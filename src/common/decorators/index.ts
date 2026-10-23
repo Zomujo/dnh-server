@@ -9,6 +9,7 @@ export type { CustomResponses } from './custom-response.decorator';
 export { CustomApiResponse } from './custom-response.decorator';
 export { GetTherapist } from './get-therapist.decorator';
 export { GetUser } from './get-user.decorator';
+export { IdempotencyKeyHeaderDoc, Idempotent } from './idempotent.decorator';
 export { ApiOkResponsePaginated } from './paginated-success.decorator';
 export {
 	ApiCreatedSuccessResponse,
