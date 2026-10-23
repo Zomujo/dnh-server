@@ -21,6 +21,7 @@ import { DhVectorsService } from './dh-vectors.service';
 				}
 				return new QdrantClient({
 					...qdrantOptions,
+					checkCompatibility: false,
 				});
 			},
 		},
