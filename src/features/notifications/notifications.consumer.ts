@@ -8,11 +8,12 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Job, Queue } from 'bullmq';
 import { addMilliseconds, addMinutes, subMinutes } from 'date-fns';
 import { Model, Types } from 'mongoose';
+import { TargetType } from '@/features/adherences/dto/target-type.enum';
 import { AUGURY_PROMPT } from '@/features/client/ai/agents/augury/state';
 import { ExtClientAIService } from '@/features/client/ai/ai-ext.service';
 import { getUserTimezone } from '@/features/client/ai/states';
 import { IConfig } from '@/features/client/dto/create.dto';
-import { Frequency, RepetitionType } from './dto';
+import { Frequency, PushNotificationType, RepetitionType } from './dto';
 import { AugurNotification } from './entities/notification.entity';
 import { PushService } from './push/push.service';
 
@@ -159,10 +160,24 @@ export class NotificationsConsumer extends WorkerHost {
 		// adherenceLogIds.forEach((id) => params.append('id', id));
 		// const choiceEndpoint = `/chronic-care/doctors/medications/receive-choice?${params.toString()}`;
 
+		// The message is also saved to the AI chat above. A batch of only
+		// medication reminders opens Medications; anything else is a chat
+		// message the patient reads in the AI chat.
+		// Lower-cased: older reminders were saved with any casing.
+		const onlyMedications =
+			data.groupedNotifications.length > 0 &&
+			data.groupedNotifications.every(
+				(not) => not.targetType?.toLowerCase() === TargetType.MEDICATION,
+			);
 		await this.pushService.sendAugurNotification({
 			userId: notification.patient.userId,
 			title: 'Yelima AI',
 			body: output.content.toString(),
+			payload: {
+				notification_type: onlyMedications
+					? PushNotificationType.MEDICATION
+					: PushNotificationType.AI_CHAT,
+			},
 		});
 
 		// payload: {

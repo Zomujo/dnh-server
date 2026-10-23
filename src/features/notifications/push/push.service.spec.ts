@@ -3,7 +3,7 @@ import { type Mocked, TestBed } from '@suites/unit';
 import { Model, Types } from 'mongoose';
 import { UserType } from '@/core/auth/enums';
 import { UserToken } from '../entities/user-tokens.entity';
-import { PushService } from './push.service';
+import { PushService, pushDataFields } from './push.service';
 
 describe('PushService FCM tokens', () => {
 	let service: PushService;
@@ -71,5 +71,24 @@ describe('PushService FCM tokens', () => {
 	it('never fails startup when de-duplication errors', async () => {
 		userTokenModel.aggregate.mockRejectedValue(new Error('db down'));
 		await expect(service.onModuleInit()).resolves.toBeUndefined();
+	});
+});
+
+describe('pushDataFields', () => {
+	it('leaves notification_type out when none is given, so the app opens home', () => {
+		expect(pushDataFields(undefined)).toEqual({});
+		expect(pushDataFields({})).toEqual({});
+	});
+
+	it('passes the type and any ids through', () => {
+		expect(
+			pushDataFields({
+				notification_type: 'appointment',
+				appointment_id: 'a1',
+			}),
+		).toEqual({ notification_type: 'appointment', appointment_id: 'a1' });
+		expect(
+			pushDataFields({ notification_type: 'medication', medication_id: 'm1' }),
+		).toEqual({ notification_type: 'medication', medication_id: 'm1' });
 	});
 });

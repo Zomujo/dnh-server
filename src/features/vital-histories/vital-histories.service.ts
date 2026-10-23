@@ -10,6 +10,7 @@ import { generateFilter } from '@/common/factory';
 import { PatientsService } from '@/features/patients/patients.service';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
 import { CreateDhVectorDto, DHDocumentType } from '../dh-vectors/dto';
+import { PushNotificationType } from '../notifications/dto';
 import { PushService } from '../notifications/push/push.service';
 import {
 	BpTrendsQueryDto,
@@ -61,6 +62,7 @@ export class VitalHistoriesService {
 			userId: userId,
 			title: 'Yelima',
 			body: userBody,
+			payload: { notification_type: PushNotificationType.VITAL_ALERT },
 		});
 
 		if (CRITICAL_VITAL_SEVERITIES.includes(severity) && facilityId) {

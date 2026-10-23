@@ -10,6 +10,7 @@ import { Queue } from 'bullmq';
 import { Model, Types } from 'mongoose';
 import { generateFilter } from '@/common/factory';
 import { anyIdForm } from '@/common/utils/helpers';
+import { PushNotificationType } from '@/features/notifications/dto';
 import { PushService } from '@/features/notifications/push/push.service';
 import { PatientsService } from '@/features/patients/patients.service';
 import { APPOINTMENT_REMINDER_QUEUE } from './appointments.constants';
@@ -240,7 +241,8 @@ export class AppointmentsService {
 						body: `Your appointment "${appointment.title}" has been cancelled.`,
 					},
 					data: {
-						notification_type: 'notification',
+						notification_type: PushNotificationType.APPOINTMENT,
+						appointment_id: appointment._id.toString(),
 						click_action: 'FLUTTER_NOTIFICATION_CLICK',
 					},
 				}),

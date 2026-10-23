@@ -13,6 +13,23 @@ import {
 } from '../dto';
 import { UserToken } from '../entities/user-tokens.entity';
 
+/**
+ * The `data` fields a caller's payload contributes. A field is left out
+ * rather than defaulted: with no `notification_type` the app opens home,
+ * which is right for a push that isn't about any one screen.
+ */
+export function pushDataFields(
+	payload: AugurSendNotificationDto['payload'],
+): Record<string, string> {
+	const fields: Record<string, string> = {};
+	if (payload?.notification_type) {
+		fields.notification_type = payload.notification_type;
+	}
+	if (payload?.appointment_id) fields.appointment_id = payload.appointment_id;
+	if (payload?.medication_id) fields.medication_id = payload.medication_id;
+	return fields;
+}
+
 @Injectable()
 export class PushService implements OnModuleInit {
 	private logger = new Logger(PushService.name);
@@ -91,7 +108,7 @@ export class PushService implements OnModuleInit {
 			},
 			data: {
 				...(dto.chatId && { chat_id: dto.chatId }),
-				notification_type: dto.payload?.notification_type ?? 'zyptyk_ai',
+				...pushDataFields(dto.payload),
 				click_action: 'FLUTTER_NOTIFICATION_CLICK',
 			},
 			android: {
@@ -149,7 +166,7 @@ export class PushService implements OnModuleInit {
 			notification: { title, body },
 			data: {
 				...(dto.chatId && { chat_id: dto.chatId }),
-				notification_type: dto.payload?.notification_type ?? 'zyptyk_ai',
+				...pushDataFields(dto.payload),
 				click_action: 'FLUTTER_NOTIFICATION_CLICK',
 			},
 			android: {
