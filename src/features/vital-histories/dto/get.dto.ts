@@ -118,7 +118,7 @@ export class VitalHistoryTrendsQueryDto {
 
 	@ApiPropertyOptional({
 		description:
-			'IANA time zone for the day/month boundaries of `dateRange` (default: server time). Ignored with `from`/`to`.',
+			'IANA time zone for the day/month boundaries of `dateRange` (default: Africa/Accra, the server zone). Ignored with `from`/`to`.',
 		example: 'Africa/Accra',
 	})
 	@IsOptional()
