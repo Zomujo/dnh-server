@@ -22,12 +22,10 @@ describe('ConfirmMedicationQueryDto.scheduledFor', () => {
 	});
 
 	// Valid ISO 8601 forms that new Date() can't parse.
-	it.each([
-		'20261022',
-		'2026-W43',
-		'2026-296',
-		'2026-02-30',
-	])('rejects %s', async (value) => {
-		expect(await errors(value)).toEqual(['scheduledFor']);
-	});
+	it.each(['20261022', '2026-W43', '2026-296', '2026-02-30'])(
+		'rejects %s',
+		async (value) => {
+			expect(await errors(value)).toEqual(['scheduledFor']);
+		},
+	);
 });
