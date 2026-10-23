@@ -72,6 +72,13 @@ describe('trends query', () => {
 					to: new Date('2026-01-01'),
 				}),
 			).toThrow(BadRequestException);
+			// 366 days and ~24 h: over the limit even though whole days say 366.
+			expect(() =>
+				resolveTrendWindow({
+					from: new Date('2025-01-01T00:00:00Z'),
+					to: new Date('2026-01-02T23:59:00Z'),
+				}),
+			).toThrow(BadRequestException);
 		});
 
 		it('takes day boundaries in the requested time zone', () => {

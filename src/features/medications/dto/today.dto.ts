@@ -1,5 +1,5 @@
 import { ApiProperty, ApiResponseProperty } from '@nestjs/swagger';
-import { IsEnum, IsISO8601, IsOptional } from 'class-validator';
+import { IsEnum, IsISO8601, IsOptional, Matches } from 'class-validator';
 
 export enum MedicationSection {
 	MORNING = 'MORNING',
@@ -29,7 +29,13 @@ export class ConfirmMedicationQueryDto extends TodaysMedicationsQueryDto {
 		example: '2026-10-22',
 	})
 	@IsOptional()
-	@IsISO8601()
+	// ISO 8601 also allows 20261022, 2026-W43 and 2026-296, which new Date()
+	// can't parse; an Invalid Date would slip past every date check. Require
+	// the calendar form, and strict rejects impossible days like 2026-02-30.
+	@IsISO8601({ strict: true, strictSeparator: true })
+	@Matches(/^\d{4}-\d{2}-\d{2}(T|$)/, {
+		message: 'scheduledFor must be a YYYY-MM-DD date or datetime',
+	})
 	scheduledFor?: string;
 }
 

@@ -520,9 +520,12 @@ export class ClientService {
 		// Back-dated confirmations (a dose taken while offline) are allowed for
 		// a short window only, and never before the course started. The 4 h
 		// PARTIAL rule below still applies relative to this dose time.
+		// Milliseconds, not differenceInHours: that truncates, which let a
+		// dose up to 48h59m old through.
 		if (
-			differenceInHours(new Date(), scheduledFor) >
-			MAX_DOSE_CONFIRM_BACKDATE_HOURS
+			Number.isNaN(scheduledFor.getTime()) ||
+			Date.now() - scheduledFor.getTime() >
+				MAX_DOSE_CONFIRM_BACKDATE_HOURS * 3_600_000
 		) {
 			throw new BadRequestException(
 				`Doses can only be confirmed up to ${MAX_DOSE_CONFIRM_BACKDATE_HOURS} hours after they were due`,

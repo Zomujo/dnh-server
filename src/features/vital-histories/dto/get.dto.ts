@@ -16,7 +16,6 @@ import {
 	IsTimeZone,
 	ValidateIf,
 } from 'class-validator';
-import { differenceInDays } from 'date-fns';
 import { GenericResponseDto, PaginationRequestDto } from '@/common/dto';
 import { PatientDto } from '../../patients/dto';
 import {
@@ -138,7 +137,11 @@ export function resolveTrendWindow(
 		if (query.from > query.to) {
 			throw new BadRequestException('from must be before to');
 		}
-		if (differenceInDays(query.to, query.from) > MAX_TREND_WINDOW_DAYS) {
+		// Milliseconds: differenceInDays truncates, allowing ~367 days.
+		if (
+			query.to.getTime() - query.from.getTime() >
+			MAX_TREND_WINDOW_DAYS * 86_400_000
+		) {
 			throw new BadRequestException(
 				`The window can be at most ${MAX_TREND_WINDOW_DAYS} days`,
 			);

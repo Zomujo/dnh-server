@@ -163,6 +163,19 @@ describe('ClientService', () => {
 				expect(adherencesService.upsertAdherenceLog).not.toHaveBeenCalled();
 			});
 
+			it('rejects a dose 48 h 30 min old (no whole-hour rounding)', async () => {
+				vi.setSystemTime(new Date(2026, 9, 23, 8, 30));
+				await expect(
+					service.confirmMedication(
+						medId,
+						'user-1',
+						MedicationSection.MORNING,
+						new Date(2026, 9, 21),
+					),
+				).rejects.toThrow(/48 hours/);
+				expect(adherencesService.upsertAdherenceLog).not.toHaveBeenCalled();
+			});
+
 			it('rejects a dose from before the medication started', async () => {
 				medicationsService.findOwnedById.mockResolvedValue({
 					_id: medId,
