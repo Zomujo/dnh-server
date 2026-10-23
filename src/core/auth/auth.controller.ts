@@ -1,6 +1,14 @@
-import { Body, Controller, HttpStatus, Logger, Post } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import {
+	Body,
+	Controller,
+	HttpStatus,
+	Logger,
+	Post,
+	Res,
+} from '@nestjs/common';
+import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { seconds, Throttle } from '@nestjs/throttler';
+import type { Response } from 'express';
 import { CustomApiResponse, GetUser } from '@/common/decorators';
 import { ApiSuccessResponseDto, throwError } from '@/common/utils/responses';
 import { AuthService } from './auth.service';
@@ -36,13 +44,29 @@ export class AuthController {
 	@CustomApiResponse(['created', 'authorize'], {
 		message: 'Patient onboarded successfully',
 	})
-	async onboard(@GetUser('sub') userId: string, @Body() dto: OnboardDto) {
+	@ApiOkResponse({
+		description:
+			'This account was already onboarded: the existing patient id is returned and nothing is changed.',
+	})
+	async onboard(
+		@GetUser('sub') userId: string,
+		@Body() dto: OnboardDto,
+		@Res({ passthrough: true }) res: Response,
+	) {
 		try {
-			const response = await this.authService.onboarding(userId, dto);
+			// Safe to retry: a repeat returns the same patient with 200.
+			const { patientId, created } = await this.authService.onboarding(
+				userId,
+				dto,
+			);
+			const status = created ? HttpStatus.CREATED : HttpStatus.OK;
+			res.status(status);
 			return new ApiSuccessResponseDto(
-				response,
-				HttpStatus.CREATED,
-				'Patient onboarded successfully',
+				patientId,
+				status,
+				created
+					? 'Patient onboarded successfully'
+					: 'Patient already onboarded',
 			);
 		} catch (error) {
 			throwError(this.logger, error);

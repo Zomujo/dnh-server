@@ -308,7 +308,21 @@ export class AppointmentsService {
 	}
 
 	async removeByPatientId(patientId: string) {
-		return this.appointmentModel.deleteMany({ patient: patientId });
+		// Queued reminders are keyed by appointment id; drop them first so a
+		// deleted patient's appointment can't still push a reminder.
+		const appointments = await this.appointmentModel
+			.find({ patient: patientId })
+			.select('_id')
+			.lean();
+		await Promise.all(
+			appointments.map((appointment) =>
+				this.cancelReminder(appointment._id.toString()),
+			),
+		);
+		const { deletedCount } = await this.appointmentModel.deleteMany({
+			patient: patientId,
+		});
+		return deletedCount;
 	}
 
 	remove(id: number) {

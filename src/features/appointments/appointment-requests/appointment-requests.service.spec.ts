@@ -173,7 +173,7 @@ describe('AppointmentRequestsService', () => {
 			expect(model.deleteMany).toHaveBeenCalledWith({
 				patient: 'patient-123',
 			});
-			expect(result).toEqual({ deletedCount: 2 });
+			expect(result).toBe(2);
 		});
 	});
 });

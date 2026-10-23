@@ -1,7 +1,7 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Message, Messaging } from 'firebase-admin/messaging';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { UserType } from '@/core/auth/enums';
 import { FirebaseService } from '@/core/firebase/firebase.service';
 import { IUserPayload } from '@/core/firebase/interface/user.interface';
@@ -14,22 +14,61 @@ import {
 import { UserToken } from '../entities/user-tokens.entity';
 
 @Injectable()
-export class PushService {
+export class PushService implements OnModuleInit {
 	private logger = new Logger(PushService.name);
 	constructor(
 		@InjectModel(UserToken.name) private userTokenModel: Model<UserToken>,
 		private firebaseService: FirebaseService,
 	) {}
 
+	/**
+	 * A device token identifies one app install, so it belongs to whoever
+	 * signed in on it last. Keyed on fcmToken alone: registering it moves the
+	 * row to this user in one atomic upsert, so on a shared phone user A's
+	 * reminders (with medication names) stop reaching user B. Other devices
+	 * of the same user keep their own rows.
+	 */
 	async addFcmToken(dto: CreatePushDto, user: IUserPayload) {
-		// Matched on (userId, fcmToken), not userId alone — registering a new
-		// device's token must add a row, not overwrite another device's.
 		await this.userTokenModel.updateOne(
-			{ userId: user.sub, fcmToken: dto.fcmToken },
-			{ ...dto, userId: user.sub, userType: user.aud },
+			{ fcmToken: dto.fcmToken },
+			{ $set: { ...dto, userId: user.sub, userType: user.aud } },
 			{ upsert: true },
 		);
 		return;
+	}
+
+	/**
+	 * Collapses rows left over from the old (userId, fcmToken) keying, where a
+	 * token could belong to several users, keeping the most recently
+	 * registered owner; then builds the unique fcmToken index that depends
+	 * on it. Idempotent, and never fails startup.
+	 */
+	async onModuleInit() {
+		try {
+			const shared = await this.userTokenModel.aggregate<{
+				_id: string;
+				ids: Types.ObjectId[];
+			}>([
+				{ $sort: { updatedAt: -1, _id: -1 } },
+				{ $group: { _id: '$fcmToken', ids: { $push: '$_id' } } },
+				{ $match: { 'ids.1': { $exists: true } } },
+			]);
+			const stale = shared.flatMap(({ ids }) => ids.slice(1));
+			if (stale.length > 0) {
+				await this.userTokenModel.deleteMany({ _id: { $in: stale } });
+				this.logger.log(
+					`Removed ${stale.length} FCM token row(s) registered to more than one user`,
+				);
+			}
+			await this.userTokenModel.createIndexes();
+		} catch (error) {
+			this.logger.error('FCM token de-duplication failed', error);
+		}
+	}
+
+	async removeAllForUser(userId: string) {
+		const { deletedCount } = await this.userTokenModel.deleteMany({ userId });
+		return deletedCount;
 	}
 
 	async sendAugurNotification(dto: AugurSendNotificationDto) {
@@ -213,14 +252,13 @@ export class PushService {
 	async removeFcmToken(dto: CreatePushDto, userId: string) {
 		// Both must match — signing out on one device must only remove that
 		// device's token, not every token belonging to the user.
-		const userToken = await this.userTokenModel.findOneAndDelete({
+		// Unknown tokens are not an error: logout must never get stuck on a
+		// token that was already removed or moved to another user.
+		const { deletedCount } = await this.userTokenModel.deleteOne({
 			userId,
 			fcmToken: dto.fcmToken,
 		});
-		if (!userToken) {
-			throw new NotFoundException('FCM token not found');
-		}
-		return;
+		return deletedCount > 0;
 	}
 
 	async sendNotification(

@@ -154,15 +154,13 @@ describe('NotificationsService', () => {
 	});
 
 	describe('remove', () => {
-		it('should remove notification and cancel BullMQ job scheduler', async () => {
-			const mockNotification = {
+		it('should cancel the BullMQ job scheduler before deleting the row', async () => {
+			const deleteOne = vi.fn().mockResolvedValue({});
+			notificationModel.findById.mockResolvedValue({
 				_id: 'notif-1',
 				queueJobId: 'job-123',
-			};
-
-			notificationModel.findByIdAndDelete.mockResolvedValue(
-				mockNotification as any,
-			);
+				deleteOne,
+			} as any);
 			notificationQueue.getJob.mockResolvedValue(null as any);
 			notificationQueue.getJobScheduler.mockResolvedValue({
 				key: 'job-123',
@@ -171,35 +169,65 @@ describe('NotificationsService', () => {
 
 			await service.remove('notif-1');
 
-			expect(notificationModel.findByIdAndDelete).toHaveBeenCalledWith(
-				'notif-1',
-			);
+			expect(notificationModel.findById).toHaveBeenCalledWith('notif-1');
 			expect(notificationQueue.removeJobScheduler).toHaveBeenCalledWith(
 				'job-123',
 			);
+			expect(
+				notificationQueue.removeJobScheduler.mock.invocationCallOrder[0],
+			).toBeLessThan(deleteOne.mock.invocationCallOrder[0]);
+		});
+
+		it('keeps the row when the scheduler cannot be removed', async () => {
+			const deleteOne = vi.fn();
+			notificationModel.findById.mockResolvedValue({
+				_id: 'notif-1',
+				queueJobId: 'job-123',
+				deleteOne,
+			} as any);
+			notificationQueue.getJob.mockRejectedValue(new Error('redis down'));
+
+			await expect(service.remove('notif-1')).rejects.toThrow('redis down');
+			expect(deleteOne).not.toHaveBeenCalled();
 		});
 	});
 
 	describe('purgeNotifications', () => {
-		it('should purge all notifications for a patientId', async () => {
-			const mockNotifications = [{ _id: 'notif-1' }, { _id: 'notif-2' }];
-			const mockQueryChain = {
-				select: vi.fn().mockResolvedValue(mockNotifications),
-			};
-			notificationModel.find.mockReturnValue(mockQueryChain as any);
+		const rows = (ids: string[]) =>
+			({
+				select: vi.fn().mockResolvedValue(ids.map((_id) => ({ _id }))),
+			}) as any;
 
-			notificationModel.findByIdAndDelete.mockResolvedValue({
+		it("purges the user's reminders by userId or patient and counts them", async () => {
+			notificationModel.find.mockReturnValue(rows(['notif-1', 'notif-2']));
+			notificationModel.findById.mockResolvedValue({
 				queueJobId: 'job-1',
+				deleteOne: vi.fn(),
 			} as any);
 			notificationQueue.getJob.mockResolvedValue(null as any);
 			notificationQueue.getJobScheduler.mockResolvedValue(null as any);
 
-			await service.purgeNotifications('patient-123');
+			await expect(
+				service.purgeNotifications('user-1', 'patient-123'),
+			).resolves.toBe(2);
 
 			expect(notificationModel.find).toHaveBeenCalledWith({
-				patient: 'patient-123',
+				$or: [{ userId: 'user-1' }, { patient: 'patient-123' }],
 			});
-			expect(notificationModel.findByIdAndDelete).toHaveBeenCalledTimes(2);
+			expect(notificationModel.findById).toHaveBeenCalledTimes(2);
+		});
+
+		it('throws when any reminder could not be removed', async () => {
+			notificationModel.find.mockReturnValue(rows(['notif-1']));
+			notificationModel.findById.mockResolvedValue({
+				queueJobId: 'job-1',
+				deleteOne: vi.fn(),
+			} as any);
+			notificationQueue.getJob.mockRejectedValue(new Error('redis down'));
+
+			await expect(service.purgeNotifications('user-1')).rejects.toThrow(
+				'1 of 1 reminders could not be removed',
+			);
 		});
 	});
 

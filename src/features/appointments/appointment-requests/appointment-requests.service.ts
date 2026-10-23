@@ -80,7 +80,10 @@ export class AppointmentRequestsService {
 	}
 
 	async removeByPatientId(patientId: string) {
-		return this.appointmentRequestModel.deleteMany({ patient: patientId });
+		const { deletedCount } = await this.appointmentRequestModel.deleteMany({
+			patient: patientId,
+		});
+		return deletedCount;
 	}
 
 	remove(id: string) {

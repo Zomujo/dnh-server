@@ -10,8 +10,10 @@ import {
 	Patch,
 	Post,
 	Query,
+	Res,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiNoContentResponse, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { CustomApiResponse, GetUser } from '@/common/decorators';
 import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import {
@@ -61,10 +63,25 @@ export class NotificationsController {
 	@CustomApiResponse(['successNull', 'authorize'], {
 		message: 'FCM token removed succesffully',
 	})
+	@ApiNoContentResponse({
+		description: 'Token was not registered to this user',
+	})
 	@Delete('fcm-tokens')
-	async removeFcm(@Body() dto: CreatePushDto, @GetUser('sub') userId: string) {
+	async removeFcm(
+		@Body() dto: CreatePushDto,
+		@GetUser('sub') userId: string,
+		@Res({ passthrough: true }) res: Response,
+	) {
 		try {
-			await this.notificationsService.removeFcmToken(dto, userId);
+			// 204 for an unknown token so logout never gets stuck on a 404.
+			const removed = await this.notificationsService.removeFcmToken(
+				dto,
+				userId,
+			);
+			if (!removed) {
+				res.status(HttpStatus.NO_CONTENT);
+				return;
+			}
 			return new ApiSuccessResponseNoData(
 				HttpStatus.OK,
 				'FCM token removed succesffully',
@@ -97,13 +114,25 @@ export class NotificationsController {
 	@CustomApiResponse(['successNull', 'authorizeChronicCare'], {
 		message: 'Personnel FCM token removed succesffully',
 	})
+	@ApiNoContentResponse({
+		description: 'Token was not registered to this user',
+	})
 	@Delete('hcp/fcm-tokens')
 	async removePersonnelFcm(
 		@Body() dto: CreatePushDto,
 		@GetUser('sub') personnelId: string,
+		@Res({ passthrough: true }) res: Response,
 	) {
 		try {
-			await this.notificationsService.removeFcmToken(dto, personnelId);
+			// 204 for an unknown token so logout never gets stuck on a 404.
+			const removed = await this.notificationsService.removeFcmToken(
+				dto,
+				personnelId,
+			);
+			if (!removed) {
+				res.status(HttpStatus.NO_CONTENT);
+				return;
+			}
 			return new ApiSuccessResponseNoData(
 				HttpStatus.OK,
 				'Personnel FCM token removed succesffully',

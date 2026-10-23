@@ -64,10 +64,13 @@ describe('AuthService', () => {
 	describe('onboarding', () => {
 		it('should create patient profile with calculated age from dateOfBirth', async () => {
 			const mockId = new Types.ObjectId('64b1f2a7a2b3c9d5f8e2a111');
-			patientsService.create.mockResolvedValue(mockId);
+			patientsService.create.mockResolvedValue({
+				patientId: mockId,
+				created: true,
+			});
 
 			const dob = new Date('1990-01-01');
-			const patientId = await service.onboarding('user-123', {
+			const result = await service.onboarding('user-123', {
 				firstname: 'John',
 				lastname: 'Doe',
 				dateOfBirth: dob,
@@ -82,7 +85,7 @@ describe('AuthService', () => {
 					age: expect.any(Number),
 				}),
 			);
-			expect(patientId).toEqual(mockId);
+			expect(result).toEqual({ patientId: mockId, created: true });
 		});
 	});
 

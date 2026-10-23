@@ -41,7 +41,7 @@ export class NotificationsService {
 	}
 
 	async removeFcmToken(dto: CreatePushDto, userId: string) {
-		await this.pushService.removeFcmToken(dto, userId);
+		return this.pushService.removeFcmToken(dto, userId);
 	}
 
 	async create(dto: CreateNotificationDto) {
@@ -194,11 +194,15 @@ export class NotificationsService {
 	}
 
 	async remove(id: string) {
-		const notification = await this.notificationModel.findByIdAndDelete(id);
+		const notification = await this.notificationModel.findById(id);
 		if (!notification) {
 			throw new NotFoundException('Notification not found');
 		}
+		// Scheduler first: if removing it fails the row survives, so a retry
+		// can still find the job id. The other order left reminders firing
+		// with nothing pointing at them.
 		await this.removeNotificationJob(notification.queueJobId);
+		await notification.deleteOne();
 
 		return;
 	}
@@ -379,16 +383,34 @@ export class NotificationsService {
 		};
 	}
 
-	async purgeNotifications(patientId: string) {
+	/**
+	 * Removes every reminder (row and BullMQ scheduler) belonging to a user,
+	 * matched by userId or patient. Returns how many were removed; throws if
+	 * any could not be, so account deletion can be retried.
+	 */
+	async purgeNotifications(userId: string, patientId?: string) {
 		const notifications = await this.notificationModel
-			.find({ patient: patientId })
+			.find(
+				patientId ? { $or: [{ userId }, { patient: patientId }] } : { userId },
+			)
 			.select('_id');
 
-		await Promise.allSettled(
+		const results = await Promise.allSettled(
 			notifications.map((notification) =>
 				this.remove(notification._id.toString()),
 			),
 		);
+		const failed = results.filter(
+			(result) =>
+				result.status === 'rejected' &&
+				!(result.reason instanceof NotFoundException),
+		);
+		if (failed.length > 0) {
+			throw new Error(
+				`${failed.length} of ${notifications.length} reminders could not be removed`,
+			);
+		}
+		return notifications.length;
 	}
 
 	private getCron(

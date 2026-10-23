@@ -222,14 +222,41 @@ export class ChatService {
 		return { rows, count };
 	}
 
-	@OnEvent('patient.purge.chat')
+	// Awaited via emitAsync by account deletion; errors must reach it so the
+	// deletion fails (and can be retried) instead of silently leaving data.
+	@OnEvent('patient.purge.chat', { suppressErrors: false })
 	private async handlePurgePatient(payload: { userId: string }) {
-		await this.removeByUserId(payload.userId);
+		return this.removeByUserId(payload.userId);
 	}
 
+	/**
+	 * Deletes every room the user is in, with all of its messages (both
+	 * sides) and stored media. Rooms go last, so a partial failure can be
+	 * retried: the room ids are still there to find what's left.
+	 */
 	async removeByUserId(userId: string) {
-		await this.roomModel.deleteMany({ participants: userId });
-		await this.messageModel.deleteMany({ senderId: userId });
+		const rooms = await this.roomModel
+			.find({ participants: userId })
+			.select('_id')
+			.lean();
+		const roomIds = rooms.map((room) => room._id.toString());
+
+		await Promise.all(
+			roomIds.map((roomId) =>
+				this.firebaseService.deleteFolder(`hcp_chats/${roomId}`),
+			),
+		);
+		const messages = await this.messageModel.deleteMany({
+			$or: [{ roomId: { $in: roomIds } }, { senderId: userId }],
+		});
+		const deletedRooms = await this.roomModel.deleteMany({
+			_id: { $in: roomIds },
+		});
+
+		return {
+			chatRooms: deletedRooms.deletedCount,
+			chatMessages: messages.deletedCount,
+		};
 	}
 
 	async findRoomById(roomId: string) {

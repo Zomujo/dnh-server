@@ -272,17 +272,27 @@ describe('AppointmentsService', () => {
 	});
 
 	describe('removeByPatientId', () => {
-		it('should delete all appointments for a patientId', async () => {
+		it("cancels queued reminders, then deletes the patient's appointments", async () => {
+			const remove = vi.fn().mockResolvedValue(undefined);
+			appointmentModel.find.mockReturnValue({
+				select: () => ({
+					lean: vi.fn().mockResolvedValue([{ _id: 'app-1' }, { _id: 'app-2' }]),
+				}),
+			} as any);
+			reminderQueue.getJob.mockResolvedValue({ remove } as any);
 			appointmentModel.deleteMany.mockResolvedValue({
-				deletedCount: 3,
+				deletedCount: 2,
 			} as any);
 
 			const result = await service.removeByPatientId('patient-123');
 
+			expect(reminderQueue.getJob).toHaveBeenCalledWith('app-1');
+			expect(reminderQueue.getJob).toHaveBeenCalledWith('app-2');
+			expect(remove).toHaveBeenCalledTimes(2);
 			expect(appointmentModel.deleteMany).toHaveBeenCalledWith({
 				patient: 'patient-123',
 			});
-			expect(result).toEqual({ deletedCount: 3 });
+			expect(result).toBe(2);
 		});
 	});
 });

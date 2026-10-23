@@ -11,6 +11,8 @@ import {
 	IsOptional,
 	IsPhoneNumber,
 	IsString,
+	Max,
+	MaxDate,
 	Min,
 	MinLength,
 	Validate,
@@ -18,6 +20,7 @@ import {
 	ValidatorConstraint,
 	ValidatorConstraintInterface,
 } from 'class-validator';
+import { differenceInYears } from 'date-fns';
 import { GenderEnum } from '@/features/patients/entities/patient.entity';
 
 @ValidatorConstraint({ name: 'ageOrDateOfBirth', async: false })
@@ -31,6 +34,21 @@ export class AgeOrDateOfBirthConstraint
 
 	defaultMessage() {
 		return 'Either age or dateOfBirth must be provided';
+	}
+}
+
+/** Self-onboarding is adults-only; minors must be registered by an HCP. */
+export const MINIMUM_PATIENT_AGE = 18;
+
+@ValidatorConstraint({ name: 'minimumAge', async: false })
+export class MinimumAgeConstraint implements ValidatorConstraintInterface {
+	validate(value: unknown) {
+		if (!(value instanceof Date) || Number.isNaN(value.getTime())) return true; // IsDate reports it
+		return differenceInYears(new Date(), value) >= MINIMUM_PATIENT_AGE;
+	}
+
+	defaultMessage() {
+		return `Patients must be at least ${MINIMUM_PATIENT_AGE} years old`;
 	}
 }
 
@@ -82,6 +100,8 @@ export class OnboardDto {
 	@IsOptional()
 	@IsDate()
 	@Type(() => Date)
+	@MaxDate(() => new Date(), { message: 'dateOfBirth cannot be in the future' })
+	@Validate(MinimumAgeConstraint)
 	dateOfBirth?: Date;
 
 	@ApiPropertyOptional({
@@ -91,7 +111,10 @@ export class OnboardDto {
 	})
 	@IsOptional()
 	@IsNumber()
-	@Min(0)
+	@Min(MINIMUM_PATIENT_AGE, {
+		message: `Patients must be at least ${MINIMUM_PATIENT_AGE} years old`,
+	})
+	@Max(130)
 	@Validate(AgeOrDateOfBirthConstraint)
 	age?: number;
 

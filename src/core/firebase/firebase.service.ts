@@ -235,7 +235,7 @@ export class FirebaseService {
 	 * In Google Cloud Storage, folders are virtual. This method deletes all objects
 	 * that start with the provided path string.
 	 * @param folderPath - The path to the folder to delete (e.g., 'users/uploads').
-	 * @returns A promise that resolves when all files are deleted.
+	 * @returns How many files were deleted.
 	 * @throws Throws an error if the bucket is inaccessible or deletion fails.
 	 * @example
 	 * // Deleting a specific session's audio folder
@@ -245,13 +245,51 @@ export class FirebaseService {
 		// Ensure the path ends with a forward slash to avoid
 		// accidentally deleting "folder_backup" when you mean "folder/"
 		const prefix = folderPath.endsWith('/') ? folderPath : `${folderPath}/`;
+		const bucket = this.firebaseStorage.bucket(this.storageBucket);
 
-		await this.firebaseStorage.bucket(this.storageBucket).deleteFiles({
-			prefix: prefix,
-			// Optional: set 'force' to true to ignore errors if the folder is empty
-			force: true,
-		});
+		const [files] = await bucket.getFiles({ prefix });
+		if (files.length === 0) return 0;
 
-		console.log(`Successfully deleted all contents in: ${prefix}`);
+		// force: keep going past individual failures, then reject with them
+		await bucket.deleteFiles({ prefix, force: true });
+
+		this.logger.log(`Deleted ${files.length} file(s) under ${prefix}`);
+		return files.length;
+	}
+
+	/**
+	 * Deletes a patient's Firestore records: `clients/{uid}` with all of its
+	 * subcollections (e.g. `notifications`) and `users/{uid}`. Returns how
+	 * many documents existed. Safe to repeat.
+	 */
+	async deleteClientRecords(uid: string) {
+		const clientRef = this.db.collection('clients').doc(uid);
+		const userRef = this.db.collection('users').doc(uid);
+
+		const [client, user, notifications] = await Promise.all([
+			clientRef.get(),
+			userRef.get(),
+			clientRef.collection('notifications').count().get(),
+		]);
+
+		await this.db.recursiveDelete(clientRef);
+		await this.db.recursiveDelete(userRef);
+
+		return (
+			Number(client.exists) + Number(user.exists) + notifications.data().count
+		);
+	}
+
+	/** Deletes the Firebase Auth user; false if it was already gone. */
+	async deleteAuthUser(uid: string) {
+		try {
+			await this.auth.deleteUser(uid);
+			return true;
+		} catch (error) {
+			if ((error as { code?: string }).code === 'auth/user-not-found') {
+				return false;
+			}
+			throw error;
+		}
 	}
 }

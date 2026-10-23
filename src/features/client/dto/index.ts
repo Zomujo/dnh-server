@@ -7,6 +7,7 @@ export {
 	type UserPayload,
 } from './create.dto';
 export {
+	AccountDeletionResponseDto,
 	ChronicCareChatMessageDto,
 	ChronicCareQueryDto,
 	ChronicChatMessagesQueryDto,
