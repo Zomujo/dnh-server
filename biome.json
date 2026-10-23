@@ -6,7 +6,8 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"ignoreUnknown": false
+		"ignoreUnknown": false,
+		"includes": ["**", "!**/*.md", "!**/*.yaml"]
 	},
 	"formatter": {
 		"enabled": true,
@@ -102,7 +103,7 @@
 				"useNamespaceKeyword": "error"
 			}
 		},
-		"includes": ["**", "!eslint.config.mjs", "**", "!eslint.config.mjs"]
+		"includes": ["**", "!eslint.config.mjs"]
 	},
 	"javascript": {
 		"formatter": {
