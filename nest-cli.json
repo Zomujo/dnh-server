@@ -6,7 +6,7 @@
 		"assets": [
 			{
 				"include": "**/*.pug",
-				"outDir": "./dist/src",
+				"outDir": "./dist",
 				"watchAssets": true
 			}
 		],
