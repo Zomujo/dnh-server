@@ -1,6 +1,7 @@
 import { getModelToken } from '@nestjs/mongoose';
 import { type Mocked, TestBed } from '@suites/unit';
 import { Model } from 'mongoose';
+import { FirebaseService } from '@/core/firebase/firebase.service';
 import { Personnel } from '@/features/doctors/entities/personnel.entity';
 import { PushService } from '@/features/notifications/push/push.service';
 import { Patient } from '@/features/patients/entities/patient.entity';
@@ -15,6 +16,7 @@ describe('ChatService', () => {
 	let personnelModel: Mocked<Model<Personnel>>;
 	let _patientModel: Mocked<Model<Patient>>;
 	let pushService: Mocked<PushService>;
+	let firebaseService: Mocked<FirebaseService>;
 
 	beforeAll(async () => {
 		const { unit, unitRef } = await TestBed.solitary(ChatService).compile();
@@ -25,6 +27,7 @@ describe('ChatService', () => {
 		personnelModel = unitRef.get(getModelToken(Personnel.name));
 		_patientModel = unitRef.get(getModelToken(Patient.name));
 		pushService = unitRef.get(PushService);
+		firebaseService = unitRef.get(FirebaseService);
 	});
 
 	beforeEach(() => {
@@ -33,6 +36,48 @@ describe('ChatService', () => {
 
 	it('should be defined', () => {
 		expect(service).toBeDefined();
+	});
+
+	describe('withSignedMedia', () => {
+		const media = (path: string) => ({
+			roomId: 'room-1',
+			messageType: MessageType.AUDIO,
+			content: `stored-url:${path}`,
+		});
+
+		beforeEach(() => {
+			firebaseService.objectPathFromUrl.mockImplementation((url: string) =>
+				url.startsWith('stored-url:') ? url.slice('stored-url:'.length) : null,
+			);
+			firebaseService.signedUrlFor.mockResolvedValue('signed-url');
+		});
+
+		it("signs media stored under the message's own room", async () => {
+			const result = await service.withSignedMedia(
+				media('hcp_chats/room-1/audios/a.m4a'),
+			);
+			expect(result.content).toBe('signed-url');
+		});
+
+		it("does not sign another room's or user's object", async () => {
+			for (const path of [
+				'hcp_chats/room-2/audios/a.m4a',
+				'chronic_care_chat_audios/someone/a.m4a',
+			]) {
+				const result = await service.withSignedMedia(media(path));
+				expect(result.content).toBe(`stored-url:${path}`);
+			}
+			expect(firebaseService.signedUrlFor).not.toHaveBeenCalled();
+		});
+
+		it('leaves text content alone', async () => {
+			const result = await service.withSignedMedia({
+				roomId: 'room-1',
+				messageType: MessageType.TEXT,
+				content: 'hello',
+			});
+			expect(result.content).toBe('hello');
+		});
 	});
 
 	describe('getOrCreateRoom', () => {

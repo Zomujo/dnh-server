@@ -37,6 +37,14 @@ export class ChatService {
 		) {
 			return message;
 		}
+		// content can be sender-supplied (sendMessage accepts a media
+		// messageType), so only sign objects stored under this message's own
+		// room. Otherwise a participant could post another room's object URL
+		// and read back a working signed link to it.
+		const objectPath = this.firebaseService.objectPathFromUrl(message.content);
+		if (!objectPath?.startsWith(`hcp_chats/${String(message.roomId)}/`)) {
+			return message;
+		}
 		return {
 			...message,
 			content: await this.firebaseService.signedUrlFor(message.content),

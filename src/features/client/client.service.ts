@@ -231,7 +231,12 @@ export class ClientService {
 		const rows = await Promise.all(
 			messages.map(async (message) => {
 				const row = message.toJSON();
-				if (row.type === 'audio') {
+				// Only this user's own voice-note folder is ever signed.
+				const objectPath =
+					row.type === 'audio'
+						? this.firebaseService.objectPathFromUrl(row.content)
+						: null;
+				if (objectPath?.startsWith(`chronic_care_chat_audios/${userId}/`)) {
 					row.content = await this.firebaseService.signedUrlFor(row.content);
 				}
 				return row;

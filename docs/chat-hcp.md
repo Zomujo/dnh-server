@@ -38,7 +38,7 @@ socket.on('connect', () => console.log('connected'));
 | Server → Client | `userConnected` | `{ id: string, role: string, email?: string }` | Emitted after successful auth handshake. Store `id` as the current user's ID. |
 | Client → Server | `joinPrivateChat` | `{ recipientId: string }` | `recipientId` = Patient's Firebase UID (`user_xxx`). Server returns the room. |
 | Server → Client | `roomJoined` | `{ roomId: string }` | Room was created/found; you've joined it. |
-| Client → Server | `sendMessage` | `{ roomId: string, content: string, messageType?: string, parentMessageId?: string }` | Default `messageType` is `'text'`. Include `parentMessageId` to reply. |
+| Client → Server | `sendMessage` | `{ roomId: string, content: string, messageType?: string, parentMessageId?: string }` | Default `messageType` is `'text'`. Include `parentMessageId` to reply. Send media through the media upload endpoint: a media `content` URL that isn't stored under this room is returned unsigned (unreadable). |
 | Server → Client | `newMessage` | `ChatMessage` object | Broadcast to all room participants. Contains `id`, `senderId`, `roomId`, `messageType`, `content`, `isRead`, `parentMessageId` (populated or null), `edited`, `createdAt`. |
 | Client → Server | `editMessage` | `{ roomId: string, messageId: string, content: string }` | Edit your own text message. |
 | Server → Client | `messageEdited` | `{ id: string, content: string, edited: true }` | Broadcast to the room after edit; update the message in-place. |
