@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { FirebaseService } from '@/core/firebase/firebase.service';
@@ -6,6 +6,8 @@ import { AIMessageRole, ClientAIChat } from './entities/ai-chat.entity';
 
 @Injectable()
 export class ClientAIChatService {
+	private readonly logger = new Logger(ClientAIChatService.name);
+
 	constructor(
 		@InjectModel(ClientAIChat.name)
 		private readonly clientAIChatModel: Model<ClientAIChat>,
@@ -65,7 +67,15 @@ export class ClientAIChatService {
 		}
 
 		if (message.type === 'audio') {
-			await this.firebaseService.deleteFile(message.content);
+			// The chat row is already gone; a missing or legacy-format file must
+			// not turn a successful delete into an error for the client.
+			await this.firebaseService
+				.deleteFile(message.content)
+				.catch((error) =>
+					this.logger.warn(
+						`Voice note file not deleted for chat ${message.id}: ${error?.message}`,
+					),
+				);
 		}
 	}
 

@@ -226,7 +226,24 @@ export class ClientService {
 
 		const count = await this.clientAIChatService.countByUserId(userId);
 
-		return { rows: messages, count };
+		// Voice notes are stored without an access token; each history read
+		// hands out a short-lived signed URL instead of a permanent link.
+		const rows = await Promise.all(
+			messages.map(async (message) => {
+				const row = message.toJSON();
+				// Only this user's own voice-note folder is ever signed.
+				const objectPath =
+					row.type === 'audio'
+						? this.firebaseService.objectPathFromUrl(row.content)
+						: null;
+				if (objectPath?.startsWith(`chronic_care_chat_audios/${userId}/`)) {
+					row.content = await this.firebaseService.signedUrlFor(row.content);
+				}
+				return row;
+			}),
+		);
+
+		return { rows, count };
 	}
 
 	async removeChatMessages(chatmessageId: string, userId: string) {

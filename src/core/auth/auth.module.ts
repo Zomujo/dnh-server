@@ -5,7 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PatientsModule } from '@/features/patients/patients.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { AuthGuard, RolesGuard } from './guards';
+import { AuthGuard, RolesGuard, UserThrottlerGuard } from './guards';
 
 @Global()
 @Module({
@@ -31,6 +31,11 @@ import { AuthGuard, RolesGuard } from './guards';
 		{
 			provide: APP_GUARD,
 			useClass: RolesGuard,
+		},
+		// Must come after AuthGuard so it can key the limit on req.user.
+		{
+			provide: APP_GUARD,
+			useClass: UserThrottlerGuard,
 		},
 	],
 	exports: [AuthService],

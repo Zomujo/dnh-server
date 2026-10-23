@@ -1,6 +1,20 @@
+import { createHash } from 'node:crypto';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as admin from 'firebase-admin';
+import type { DecodedIdToken } from 'firebase-admin/auth';
+import { extname } from 'path';
+import { CacheService } from '@/core/caching/caching.service';
+
+const FIREBASE_STORAGE_HOST = 'https://firebasestorage.googleapis.com';
+const SIGNED_URL_TTL_MS = 15 * 60 * 1000;
+const REVOCATION_CHECK_TTL_MS = 5 * 60 * 1000;
+
+/** `.m4a`-style extension from a client filename, or '' if it isn't one. */
+function safeExtension(originalname: string | undefined) {
+	const ext = extname(originalname ?? '').toLowerCase();
+	return /^\.[a-z0-9]{1,8}$/.test(ext) ? ext : '';
+}
 
 @Injectable()
 export class FirebaseService {
@@ -8,7 +22,10 @@ export class FirebaseService {
 	private baseApp: admin.app.App;
 	private storageBucket: string;
 
-	constructor(private configService: ConfigService) {
+	constructor(
+		private configService: ConfigService,
+		private readonly verifiedTokenCache: CacheService<DecodedIdToken>,
+	) {
 		const baseServiceAccount = {
 			type: 'service_account',
 			project_id: this.configService.get<string>('FIREBASE_BASE_PROJECT_ID'),
@@ -60,9 +77,34 @@ export class FirebaseService {
 		return this.baseApp.storage();
 	}
 
+	/**
+	 * Verifies a Firebase ID token, including that the user still exists, is
+	 * enabled, and hasn't had their tokens revoked. That check costs a
+	 * Firebase round-trip, so a successful result is cached per token for at
+	 * most REVOCATION_CHECK_TTL_MS: a deleted/disabled user loses access
+	 * within that window instead of keeping it until the token's 1h expiry.
+	 */
 	async verifyAsync(token: string) {
 		try {
-			const user = await this.auth.verifyIdToken(token);
+			const cacheKey = `auth:firebase-verified:${createHash('sha256').update(token).digest('hex')}`;
+			const cached = await this.verifiedTokenCache
+				.get(cacheKey)
+				.catch(() => null);
+			if (cached) return cached;
+
+			const user = await this.auth.verifyIdToken(token, true);
+
+			const ttl = Math.min(
+				REVOCATION_CHECK_TTL_MS,
+				user.exp * 1000 - Date.now(),
+			);
+			if (ttl > 0) {
+				await this.verifiedTokenCache
+					.set(cacheKey, user, ttl)
+					.catch((error) =>
+						this.logger.warn(`Token cache write failed: ${error?.message}`),
+					);
+			}
 			return user;
 		} catch (error) {
 			const name = error instanceof Error ? error.name : String(error);
@@ -92,54 +134,92 @@ export class FirebaseService {
 		}
 	}
 
-	async uploadFile(
-		file: Express.Multer.File,
-		path: string,
-		uuidToken?: string,
-	) {
-		const fileUpload = this.firebaseStorage
-			.bucket(this.storageBucket)
-			.file(`${path}/${file.originalname}`);
-		uuidToken = uuidToken ?? crypto.randomUUID();
+	/**
+	 * A fresh object path under `folder`. Server-generated, so two uploads
+	 * that share an original filename can't overwrite each other, and the
+	 * client filename never reaches the bucket path.
+	 */
+	newObjectPath(folder: string, originalname?: string) {
+		return `${folder}/${crypto.randomUUID()}${safeExtension(originalname)}`;
+	}
 
-		await fileUpload.save(file.buffer, {
-			metadata: {
-				contentType: file.mimetype,
-				contentDisposition: 'attachment',
+	/**
+	 * Uploads to `objectPath` (see `newObjectPath`). No Firebase download
+	 * token is attached: the object is only readable through short-lived
+	 * signed URLs (see `signedUrlFor`).
+	 * @returns the stored object's reference URL (not publicly readable).
+	 */
+	async uploadFile(file: Express.Multer.File, objectPath: string) {
+		await this.firebaseStorage
+			.bucket(this.storageBucket)
+			.file(objectPath)
+			.save(file.buffer, {
 				metadata: {
-					firebaseStorageDownloadTokens: uuidToken,
+					contentType: file.mimetype,
+					contentDisposition: 'attachment',
 				},
-			},
-		});
+			});
+		return this.objectUrl(objectPath);
+	}
+
+	/** Reference URL for an object in our bucket, without any access token. */
+	objectUrl(objectPath: string) {
+		return `${FIREBASE_STORAGE_HOST}/v0/b/${this.storageBucket}/o/${encodeURIComponent(objectPath)}`;
+	}
+
+	/**
+	 * Object path for a Firebase Storage URL in our bucket, with or without a
+	 * legacy `?alt=media&token=` suffix. Null for anything else.
+	 */
+	objectPathFromUrl(url: string): string | null {
+		const prefix = `${FIREBASE_STORAGE_HOST}/v0/b/${this.storageBucket}/o/`;
+		if (typeof url !== 'string' || !url.startsWith(prefix)) return null;
+		const encoded = url.slice(prefix.length).split('?')[0];
+		return encoded ? decodeURIComponent(encoded) : null;
+	}
+
+	/**
+	 * A V4 signed read URL for a stored media URL, valid for
+	 * SIGNED_URL_TTL_MS. Values that aren't objects in our bucket (e.g. text
+	 * content) are returned unchanged.
+	 */
+	async signedUrlFor(url: string): Promise<string> {
+		const objectPath = this.objectPathFromUrl(url);
+		if (!objectPath) return url;
+		try {
+			const [signed] = await this.firebaseStorage
+				.bucket(this.storageBucket)
+				.file(objectPath)
+				.getSignedUrl({
+					version: 'v4',
+					action: 'read',
+					expires: Date.now() + SIGNED_URL_TTL_MS,
+				});
+			return signed;
+		} catch (error) {
+			this.logger.error(`Failed to sign URL for ${objectPath}`, error);
+			return url;
+		}
 	}
 
 	/**
 	 * Deletes a file from Firebase Storage.
-	 * @param url - The URL of the file to delete.
+	 * @param url - The stored URL of the file (with or without a legacy token).
 	 * @returns a promise that resolves when file is deleted.
 	 * @throws {Error} if file is not found or api fails.
-	 * @example
-	 * // Deleting a specific file
-	 * await this.firebaseService.deleteFile('https://firebasestorage.googleapis.com/v0/b/dh-base.appspot.com/o/chronic_care_chat_audios%2Fsession_123%2F2023-01-01T12:00:00.000Z.mp3?alt=media&token=123456789');
 	 */
-
 	async deleteFile(url: string) {
+		const fullPath = this.objectPathFromUrl(url);
+		if (!fullPath) {
+			throw new Error('Not a file in this storage bucket.');
+		}
 		try {
-			const baseUrl = '/o/';
-			const pathStart = url.indexOf(baseUrl) + baseUrl.length;
-			const pathEnd = url.indexOf('?');
-
-			const fullPath = decodeURIComponent(url.substring(pathStart, pathEnd));
-
-			// Target the file in the bucket using the parsed path
-			// this.configService.get<string>('BASE_STORAGE_BUCKET'),
-			const file = this.firebaseStorage
+			await this.firebaseStorage
 				.bucket(this.storageBucket)
-				.file(fullPath);
+				.file(fullPath)
+				.delete();
 
-			await file.delete();
-
-			console.log(`Successfully deleted: ${fullPath}`);
+			this.logger.log(`Successfully deleted: ${fullPath}`);
 		} catch (error: any) {
 			if (error.code === 404) {
 				throw new Error('File already deleted or does not exist.');

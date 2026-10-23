@@ -43,7 +43,7 @@ socket.onDisconnect((_) => print('disconnected'));
 | Server → Client | `userConnected` | `{ id: string, role: string, email?: string }` | Emitted after successful auth handshake. Store `id` as the current user's ID. |
 | Client → Server | `joinPrivateChat` | `{ recipientId: string }` | `recipientId` = HCP's MongoDB ObjectId string. Server returns the room. |
 | Server → Client | `roomJoined` | `{ roomId: string }` | Room was created/found; you've joined it. |
-| Client → Server | `sendMessage` | `{ roomId: string, content: string, messageType?: 'text' \| 'image' \| 'video' \| 'audio', parentMessageId?: string }` | Default `messageType` is `'text'`. Include `parentMessageId` to reply. |
+| Client → Server | `sendMessage` | `{ roomId: string, content: string, messageType?: 'text' \| 'image' \| 'video' \| 'audio', parentMessageId?: string }` | Default `messageType` is `'text'`. Include `parentMessageId` to reply. Send media through the media upload endpoint: a media `content` URL that isn't stored under this room is returned unsigned (unreadable). |
 | Server → Client | `newMessage` | `ChatMessage` object | Emitted to everyone in the room. Contains `id`, `senderId`, `roomId`, `messageType`, `content`, `isRead`, `parentMessageId` (populated object or null), `edited`, `createdAt`. |
 | Client → Server | `editMessage` | `{ roomId: string, messageId: string, content: string }` | Edit your own text message. Only text messages can be edited. |
 | Server → Client | `messageEdited` | `{ id: string, content: string, edited: true }` | Broadcast to the room after a message is edited; update the message in-place. |
@@ -279,4 +279,4 @@ parentMessageId: <optional - string>
 | `file` | file | yes | Max 50 MB — jpeg, jpg, png, gif, mp4, mpeg, m4a, mp3, quicktime, webm |
 | `parentMessageId` | query | no | If this media is a reply to another message |
 
-Returns the saved `ChatMessage` with the Firebase Storage URL in `content`.
+Returns the saved `ChatMessage` with a signed Firebase Storage URL in `content`. Media URLs (here and in history) **expire after 15 minutes** — re-fetch history rather than caching them. Files over 50 MB are rejected with `413`.

@@ -1,6 +1,7 @@
 export { generateAnotherCode, generateCode } from './code-generator.helper';
 export { getExamplesFromDto } from './example_extractor.helper';
 export { getAllIANATimezones } from './iana-timezones.helper';
+export { resolveCorsOrigins, resolveTrustProxy } from './network.helper';
 export {
 	escapeRegExp,
 	resolveSearchableFields,

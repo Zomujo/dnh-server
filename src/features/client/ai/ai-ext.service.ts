@@ -1,9 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { OpenAIWhisperAudio } from '@langchain/community/document_loaders/fs/openai_whisper_audio';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { END, START, StateGraph } from '@langchain/langgraph';
 import { MongoDBSaver } from '@langchain/langgraph-checkpoint-mongodb';
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import * as fs from 'fs/promises';
@@ -31,7 +31,6 @@ export class ExtClientAIService {
 		private connection: Connection,
 		private eventEmitter: EventEmitter2,
 		private firebaseService: FirebaseService,
-		private configService: ConfigService,
 	) {
 		this.checkpointer = new MongoDBSaver({
 			client: this.connection.getClient() as any,
@@ -64,8 +63,14 @@ export class ExtClientAIService {
 		audioMongoId: Types.ObjectId,
 		question?: string,
 	) {
-		const tempDir = os.tmpdir();
-		const tempFilePath = path.join(tempDir, `${file.originalname}`);
+		// Server-generated temp name: the client's filename is neither unique
+		// (two users uploading "audio.m4a" at once would read — and unlink —
+		// each other's file) nor safe to join into a path.
+		const extension = path.extname(path.basename(file.originalname ?? ''));
+		const tempFilePath = path.join(
+			os.tmpdir(),
+			`chat-audio-${randomUUID()}${/^\.[a-zA-Z0-9]{1,8}$/.test(extension) ? extension : '.m4a'}`,
+		);
 		const medicalPrompt =
 			`Transcribe in context to the question. if the response doesn't correlate to the question, transcribe anyway. Question: ${question}
        Glossary: Gender -> male,female,etc. 
@@ -81,18 +86,16 @@ export class ExtClientAIService {
 			});
 
 			const docs = await loader.load();
-			const uuidToken = crypto.randomUUID();
+			const objectPath = this.firebaseService.newObjectPath(
+				`chronic_care_chat_audios/${userId}`,
+				file.originalname,
+			);
 
-			this.eventEmitter.emit('audio.firebase.push', {
-				file,
-				uuidToken,
-				userId,
-			});
+			this.eventEmitter.emit('audio.firebase.push', { file, objectPath });
 
 			this.eventEmitter.emit('audio.state.persist', {
-				fileName: file.originalname,
+				objectPath,
 				userId,
-				uuidToken,
 				audioId,
 				audioMongoId,
 			});
@@ -112,34 +115,34 @@ export class ExtClientAIService {
 	@OnEvent('audio.firebase.push')
 	async pushToFirebase(payload: {
 		file: Express.Multer.File;
-		uuidToken: string;
-		userId: string;
+		objectPath: string;
 	}) {
-		const response = await this.firebaseService.uploadFile(
-			payload.file,
-			'chronic_care_chat_audios/' + payload.userId,
-			payload.uuidToken,
-		);
-		return response;
+		try {
+			await this.firebaseService.uploadFile(payload.file, payload.objectPath);
+		} catch (error) {
+			this.logger.error(
+				`Voice note upload failed for ${payload.objectPath}`,
+				error,
+			);
+		}
 	}
 
 	@OnEvent('audio.state.persist')
 	async persistAudioMessage(payload: {
-		fileName: string;
+		objectPath: string;
 		userId: string;
-		uuidToken: string;
 		audioId: string;
 		audioMongoId: Types.ObjectId;
 	}) {
 		const timestamp = new Date();
-		const fileName = `chronic_care_chat_audios/${payload.userId}/${payload.fileName}`;
-		const bucket = this.configService.get<string>('BASE_STORAGE_BUCKET');
 
+		// Stored without an access token; history reads hand out short-lived
+		// signed URLs for it (ClientService.retrieveChatMessages).
 		await this.clientAIChatModel.create({
 			_id: payload.audioMongoId,
 			userId: payload.userId,
 			role: AIMessageRole.USER,
-			content: `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(fileName)}?alt=media&token=${payload.uuidToken}`,
+			content: this.firebaseService.objectUrl(payload.objectPath),
 			type: 'audio',
 			localChatId: payload.audioId,
 			createdAt: timestamp,

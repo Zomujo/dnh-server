@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import { generateFilter } from '@/common/factory';
+import { FirebaseService } from '@/core/firebase/firebase.service';
 import { Personnel } from '@/features/doctors/entities/personnel.entity';
 import { PushService } from '@/features/notifications/push/push.service';
 import { Patient } from '@/features/patients/entities/patient.entity';
@@ -20,7 +21,51 @@ export class ChatService {
 		@InjectModel(Personnel.name) private personnelModel: Model<Personnel>,
 		@InjectModel(Patient.name) private patientModel: Model<Patient>,
 		private readonly pushService: PushService,
+		private readonly firebaseService: FirebaseService,
 	) {}
+
+	private static readonly MEDIA_TYPES: ReadonlySet<string> = new Set([
+		MessageType.IMAGE,
+		MessageType.VIDEO,
+		MessageType.AUDIO,
+	]);
+
+	private async signContent<T extends Record<string, any>>(message: T) {
+		if (
+			!ChatService.MEDIA_TYPES.has(message.messageType) ||
+			message.deletedForEveryone
+		) {
+			return message;
+		}
+		// content can be sender-supplied (sendMessage accepts a media
+		// messageType), so only sign objects stored under this message's own
+		// room. Otherwise a participant could post another room's object URL
+		// and read back a working signed link to it.
+		const objectPath = this.firebaseService.objectPathFromUrl(message.content);
+		if (!objectPath?.startsWith(`hcp_chats/${String(message.roomId)}/`)) {
+			return message;
+		}
+		return {
+			...message,
+			content: await this.firebaseService.signedUrlFor(message.content),
+		};
+	}
+
+	/**
+	 * Plain copy of a message with media content (and a populated media
+	 * parent) swapped for short-lived signed URLs. Stored media URLs carry
+	 * no access token, so this is the only way clients can read them.
+	 */
+	async withSignedMedia(message: any) {
+		const plain =
+			typeof message?.toJSON === 'function' ? message.toJSON() : message;
+		const signed = await this.signContent(plain);
+		const parent = signed.parentMessageId;
+		if (parent && typeof parent === 'object' && 'content' in parent) {
+			return { ...signed, parentMessageId: await this.signContent(parent) };
+		}
+		return signed;
+	}
 
 	async getOrCreateRoom(userA: string, userB: string) {
 		let room = await this.roomModel.findOne({
@@ -156,7 +201,7 @@ export class ChatService {
 			})
 			.lean();
 
-		const rows = messages.map((msg: any) => {
+		const plainRows = messages.map((msg: any) => {
 			const row: any = {
 				id: msg._id?.toString(),
 				...msg,
@@ -168,6 +213,9 @@ export class ChatService {
 			}
 			return row;
 		});
+		const rows = await Promise.all(
+			plainRows.map((row) => this.withSignedMedia(row)),
+		);
 
 		const count = await this.messageModel.countDocuments(filter);
 
@@ -320,7 +368,7 @@ export class ChatService {
 					latestMessage: latestMessage
 						? {
 								id: (latestMessage as any)._id?.toString(),
-								content: latestMessage.content,
+								content: (await this.signContent(latestMessage)).content,
 								messageType: latestMessage.messageType,
 								senderId: latestMessage.senderId,
 								createdAt: latestMessage.createdAt,

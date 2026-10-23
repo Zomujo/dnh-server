@@ -3,8 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { CacheModule } from '@nestjs/cache-manager';
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
-import { seconds, ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { seconds, ThrottlerModule } from '@nestjs/throttler';
 import { CacheService } from './caching.service';
 import { RedisThrottlerStorage } from './throttler-redis.storage';
 import { RedisThrottlerStorageModule } from './throttler-redis-storage.module';
@@ -43,10 +42,9 @@ import { RedisThrottlerStorageModule } from './throttler-redis-storage.module';
 	],
 	providers: [
 		CacheService,
-		{
-			provide: APP_GUARD,
-			useClass: ThrottlerGuard,
-		},
+		// The ThrottlerGuard itself is registered in AuthModule (as
+		// UserThrottlerGuard) so it runs after AuthGuard and can rate-limit
+		// per user instead of per IP.
 		// CustomCacheInterceptor (src/core/caching/interceptors/caching.interceptor.ts)
 		// is intentionally NOT registered. It builds per-user, per-route cache
 		// keys (`token=<userId>:<path>...`) but was never actually wired up as

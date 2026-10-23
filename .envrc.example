@@ -101,3 +101,19 @@ export ATSK_SENDER=<atsk-sender>
 export ATSK_SHORT_CODE=<atsk-short-code>
 export ATSK_USERNAME=<atsk-username>
 
+# =========================
+# USSD callback verification
+# =========================
+# Register the Africa's Talking callback as .../api/v1/ussd?key=<secret>
+export USSD_CALLBACK_SECRET=<random-secret>
+# Optional comma-separated source IPs allowed to call POST /ussd
+export USSD_ALLOWED_IPS=
+
+# =========================
+# Network
+# =========================
+# Comma-separated browser origins allowed by CORS (e.g. the HCP web app).
+# Unset = any origin (a warning is logged in production).
+export CORS_ORIGINS=
+# Proxy hops in front of the app (Railway edge = 1). Unset = 1.
+export TRUST_PROXY=1
