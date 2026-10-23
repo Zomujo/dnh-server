@@ -9,6 +9,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Queue } from 'bullmq';
 import { Model, Types } from 'mongoose';
 import { generateFilter } from '@/common/factory';
+import { anyIdForm } from '@/common/utils/helpers';
 import { PushService } from '@/features/notifications/push/push.service';
 import { PatientsService } from '@/features/patients/patients.service';
 import { APPOINTMENT_REMINDER_QUEUE } from './appointments.constants';
@@ -310,8 +311,9 @@ export class AppointmentsService {
 	async removeByPatientId(patientId: string) {
 		// Queued reminders are keyed by appointment id; drop them first so a
 		// deleted patient's appointment can't still push a reminder.
+		const patient = anyIdForm(patientId);
 		const appointments = await this.appointmentModel
-			.find({ patient: patientId })
+			.find({ patient })
 			.select('_id')
 			.lean();
 		await Promise.all(
@@ -320,7 +322,7 @@ export class AppointmentsService {
 			),
 		);
 		const { deletedCount } = await this.appointmentModel.deleteMany({
-			patient: patientId,
+			patient,
 		});
 		return deletedCount;
 	}

@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { AppointmentRequestsService } from './appointment-requests.service';
 import { AppointmentRequest } from './entities/appointment-request.entity';
 
+const PATIENT_HEX = '6650a1b2c3d4e5f6a7b8c9d0';
 describe('AppointmentRequestsService', () => {
 	let service: AppointmentRequestsService;
 	let model: Mocked<Model<AppointmentRequest>>;
@@ -168,10 +169,10 @@ describe('AppointmentRequestsService', () => {
 		it('should delete all appointment requests matching patientId', async () => {
 			model.deleteMany.mockResolvedValue({ deletedCount: 2 } as any);
 
-			const result = await service.removeByPatientId('patient-123');
+			const result = await service.removeByPatientId(PATIENT_HEX);
 
 			expect(model.deleteMany).toHaveBeenCalledWith({
-				patient: 'patient-123',
+				patient: { $in: [PATIENT_HEX, new Types.ObjectId(PATIENT_HEX)] },
 			});
 			expect(result).toBe(2);
 		});
