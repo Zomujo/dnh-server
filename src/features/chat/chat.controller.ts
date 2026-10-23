@@ -65,7 +65,7 @@ export class ChatController {
 	})
 	@UseInterceptors(FileInterceptor('file'))
 	async uploadMedia(
-		@Param('roomId') roomId: string,
+		@Param('roomId', ParseMongoIdPipe) roomId: string,
 		@UploadedFile(
 			new ParseFilePipeBuilder()
 				.addMaxSizeValidator({ maxSize: 50 * 1024 * 1024 })
@@ -109,7 +109,7 @@ export class ChatController {
 	})
 	@UseInterceptors(FileInterceptor('file'))
 	async uploadMediaClient(
-		@Param('roomId') roomId: string,
+		@Param('roomId', ParseMongoIdPipe) roomId: string,
 		@UploadedFile(
 			new ParseFilePipeBuilder()
 				.addMaxSizeValidator({ maxSize: 50 * 1024 * 1024 })
@@ -141,11 +141,13 @@ export class ChatController {
 	@Get('hcp/rooms/:roomId/messages')
 	async getHistory(
 		@Param('roomId', ParseMongoIdPipe) roomId: string,
+		@GetUser('sub') personnelId: string,
 		@Query() query: ChatPaginationQueryDto,
 	) {
 		try {
 			const response = await this.chatService.getPaginatedMessages(
 				roomId,
+				personnelId,
 				query,
 			);
 			const paginated = new PaginatedDataResponseDto(
@@ -171,11 +173,13 @@ export class ChatController {
 	@Get('client/rooms/:roomId/messages')
 	async getHistoryClient(
 		@Param('roomId', ParseMongoIdPipe) roomId: string,
+		@GetUser('uid') patientId: string,
 		@Query() query: ChatPaginationQueryDto,
 	) {
 		try {
 			const response = await this.chatService.getPaginatedMessages(
 				roomId,
+				patientId,
 				query,
 			);
 			const paginated = new PaginatedDataResponseDto(
@@ -262,6 +266,10 @@ export class ChatController {
 		parentMessageId?: string,
 		userId?: string,
 	) {
+		// Before touching Storage: a non-participant must not be able to
+		// write files under the room's path or inject a message into it.
+		await this.chatService.assertParticipant(roomId, userId);
+
 		const uuidToken = crypto.randomUUID();
 		const mime = file.mimetype;
 
@@ -286,7 +294,7 @@ export class ChatController {
 		const fileUrl = `https://firebasestorage.googleapis.com/v0/b/${this.storageBucket}/o/${encodeURIComponent(storagePath + '/' + file.originalname)}?alt=media&token=${uuidToken}`;
 
 		const savedMsg = await this.chatService.saveMessage(
-			userId ?? 'system',
+			userId!,
 			roomId,
 			fileUrl,
 			messageType,

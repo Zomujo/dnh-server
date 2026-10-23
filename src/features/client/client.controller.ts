@@ -25,6 +25,7 @@ import {
 	ApiTags,
 } from '@nestjs/swagger';
 import { CustomApiResponse, GetUser } from '@/common/decorators';
+import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import { generateFilter } from '@/common/factory';
 import {
 	ApiSuccessResponseDto,
@@ -173,40 +174,6 @@ export class ClientController {
 				audioId,
 			);
 			this.logger.log('ai audio response', response);
-			return new ApiSuccessResponseDto(
-				response,
-				HttpStatus.OK,
-				'Chat audio received successfully',
-			);
-		} catch (error) {
-			throwError(this.logger, error);
-		}
-	}
-
-	@CustomApiResponse(['success'], {
-		type: ChronicCareConversationResponseDto,
-		message: 'Chat audio received successfully',
-	})
-	@Post('chat/test-audio')
-	@HttpCode(HttpStatus.OK)
-	@UseInterceptors(FileInterceptor('file'))
-	@ApiConsumes('multipart/form-data')
-	@ApiBody({
-		description: 'Audio file to be uploaded',
-		type: AudioUploadDto,
-	})
-	@ApiQuery({ name: 'question', type: String, required: true })
-	async testAudioTranscription(
-		@UploadedFile(
-			new ParseFilePipeBuilder()
-				.addFileTypeValidator({ fileType: /m(?:4a|peg|p4)$/i })
-				.build({ errorHttpStatusCode: HttpStatus.BAD_REQUEST }),
-		)
-		file: Express.Multer.File,
-		@Query('question') question: string,
-	) {
-		try {
-			const response = await this.clientService.testChatAudio(file, question);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,
@@ -442,7 +409,7 @@ export class ClientController {
 	})
 	@Put('medications/:medicationId/confirm')
 	async confirmMedication(
-		@Param('medicationId') medicationId: string,
+		@Param('medicationId', ParseMongoIdPipe) medicationId: string,
 		@Query() query: TodaysMedicationsQueryDto,
 		@GetUser('sub') userId: string,
 	) {
@@ -468,7 +435,7 @@ export class ClientController {
 	})
 	@Get('medications/:medicationId/adherence')
 	async fetchMedicationAdherenceLogs(
-		@Param('medicationId') medicationId: string,
+		@Param('medicationId', ParseMongoIdPipe) medicationId: string,
 		@Query() query: AdherenceLogsQueryDto,
 		@GetUser('sub') userId: string,
 	) {
@@ -822,14 +789,17 @@ export class ClientController {
 		}
 	}
 
-	@CustomApiResponse(['success', 'authorize'], {
+	@CustomApiResponse(['success', 'authorize', 'notfound'], {
 		type: MedicationDetailDto,
 		message: 'Medication fetched successfully',
 	})
 	@Get('medications/:id')
-	async fetchMedicationById(@Param('id') id: string) {
+	async fetchMedicationById(
+		@Param('id', ParseMongoIdPipe) id: string,
+		@GetUser('sub') userId: string,
+	) {
 		try {
-			const response = await this.clientService.fetchMedicationById(id);
+			const response = await this.clientService.fetchMedicationById(id, userId);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,

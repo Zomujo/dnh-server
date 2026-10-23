@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { type Mocked, TestBed } from '@suites/unit';
 import { Types } from 'mongoose';
 import { AdherencesService } from '@/features/adherences/adherences.service';
@@ -79,7 +80,7 @@ describe('ClientService', () => {
 			const pastTime = new Date();
 			pastTime.setHours(pastTime.getHours() - 1);
 
-			medicationsService.findById.mockResolvedValue({
+			medicationsService.findOwnedById.mockResolvedValue({
 				_id: validMedId,
 				patient: new Types.ObjectId().toString(),
 				frequency: { repeatEvery: 1, repetitionType: 'daily' },
@@ -101,8 +102,28 @@ describe('ClientService', () => {
 				MedicationSection.MORNING,
 			);
 
+			expect(medicationsService.findOwnedById).toHaveBeenCalledWith(
+				validMedId,
+				'user-1',
+			);
 			expect(adherencesService.upsertAdherenceLog).toHaveBeenCalled();
 			expect(result).toBeDefined();
+		});
+
+		it("should 404 on another user's medication without writing a log", async () => {
+			const otherUsersMedId = new Types.ObjectId().toString();
+			medicationsService.findOwnedById.mockRejectedValue(
+				new NotFoundException('Medication not found'),
+			);
+
+			await expect(
+				service.confirmMedication(
+					otherUsersMedId,
+					'user-1',
+					MedicationSection.MORNING,
+				),
+			).rejects.toBeInstanceOf(NotFoundException);
+			expect(adherencesService.upsertAdherenceLog).not.toHaveBeenCalled();
 		});
 	});
 });

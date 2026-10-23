@@ -129,6 +129,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 	) {
 		try {
 			const userId = client.data.user.id;
+			await this.chatService.assertParticipant(payload.roomId, userId);
 			const savedMsg = await this.chatService.saveMessage(
 				userId,
 				payload.roomId,
@@ -164,7 +165,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 				userId,
 				payload.content,
 			);
-			this.server.to(payload.roomId).emit('messageEdited', {
+			// Broadcast to the room the message actually lives in, not the
+			// client-supplied roomId, so an edit can't be pushed elsewhere.
+			this.server.to(updated.roomId).emit('messageEdited', {
 				id: (updated as any)._id?.toString(),
 				content: updated.content,
 				edited: true,
@@ -193,10 +196,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 				payload.deleteFor,
 			);
 
-			if (result.deletedForEveryone) {
-				this.server.to(payload.roomId).emit('messageDeleted', {
+			if (result.deletedForEveryone && result.message) {
+				this.server.to(result.message.roomId).emit('messageDeleted', {
 					id: (result.message as any)._id?.toString(),
-					roomId: payload.roomId,
+					roomId: result.message.roomId,
 					content: 'This message was deleted',
 					deletedForEveryone: true,
 					deletedBy: userId,
@@ -219,6 +222,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 		@ConnectedSocket() client: Socket,
 		@MessageBody() payload: { roomId: string; isTyping: boolean },
 	) {
+		// Only sockets that joined the room via joinPrivateChat (which is
+		// participant-scoped) may signal into it.
+		if (!client.rooms.has(payload.roomId)) return;
 		const userId = client.data.user.id;
 		client.to(payload.roomId).emit('userTyping', {
 			userId,
@@ -231,6 +237,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 		@ConnectedSocket() client: Socket,
 		@MessageBody() payload: { roomId: string; isRecording: boolean },
 	) {
+		// Only sockets that joined the room via joinPrivateChat (which is
+		// participant-scoped) may signal into it.
+		if (!client.rooms.has(payload.roomId)) return;
 		const userId = client.data.user.id;
 		client.to(payload.roomId).emit('userAudioRecording', {
 			userId,
@@ -245,6 +254,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 	) {
 		try {
 			const userId = client.data.user.id;
+			await this.chatService.assertParticipant(payload.roomId, userId);
 			await this.chatService.markAsRead(payload.roomId, userId);
 			this.server
 				.to(payload.roomId)

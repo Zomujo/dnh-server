@@ -85,6 +85,23 @@ describe('AppointmentsService', () => {
 				} as any),
 			).rejects.toThrow(NotFoundException);
 		});
+
+		it('should store hostPersonnel as an ObjectId', async () => {
+			const personnelId = new Types.ObjectId().toString();
+			appointmentModel.create.mockResolvedValue({
+				_id: new Types.ObjectId(),
+				appointmentDate: new Date(Date.now() + 60_000),
+			} as any);
+
+			await service.create({
+				title: 'Checkup',
+				hostPersonnel: personnelId,
+			} as any);
+
+			const payload = appointmentModel.create.mock.calls[0][0] as any;
+			expect(payload.hostPersonnel).toBeInstanceOf(Types.ObjectId);
+			expect(payload.hostPersonnel.toString()).toBe(personnelId);
+		});
 	});
 
 	describe('createPatientAppointment', () => {

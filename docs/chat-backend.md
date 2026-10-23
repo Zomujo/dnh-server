@@ -22,6 +22,12 @@ The chat module (`src/features/chat/`) provides real-time messaging between pati
 - **Client endpoints** (`/chat/client/*`) — `@Authorize(UserType.DH_CLIENTS)` → Firebase `verifyIdToken`
 - **HCP endpoints** (`/chat/hcp/*`) — `@CustomApiResponse` includes `'authorizeChronicCare'` variant + `@Roles(PersonnelRoles.CLINICIAN)` → JWT verification
 
+### Room membership
+Every room-scoped operation checks that the caller is one of the room's `participants` (`ChatService.assertParticipant`). A room the caller isn't in returns **404 `Room not found`**, the same as a nonexistent room.
+- REST: `GET .../rooms/:roomId/messages` and `POST .../rooms/:roomId/media`
+- WebSocket: `sendMessage` and `markRead` (DB check); `typing` and `audioRecording` are dropped unless the socket joined the room via `joinPrivateChat`
+- `editMessage` / `deleteMessage` broadcast to the message's own `roomId`, not the one in the payload
+
 ### WebSocket Auth (`WsAuthVerifier`)
 - Extracts `token` and `clientType` from `socket.handshake.auth`
 - `clientType === 'patient'` → `FirebaseService.verifyAsync(token)` → `{ uid, ... }`

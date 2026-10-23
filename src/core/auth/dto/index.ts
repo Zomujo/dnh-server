@@ -3,7 +3,6 @@ export {
 	CreateAuthDto,
 	GoogleLoginDto,
 	OnboardDto,
-	TestNotificationDto,
 	UserPayload,
 } from './create.dto';
 export type { LocalAuthUserPayload } from './get.dto';

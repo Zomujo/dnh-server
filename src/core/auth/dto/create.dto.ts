@@ -34,23 +34,6 @@ export class AgeOrDateOfBirthConstraint
 	}
 }
 
-export class TestNotificationDto {
-	@ApiProperty({
-		example:
-			'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiI0Yzc5ZDc0My0xZDc1LTQ0ZDAtOTc4OC1mZTA',
-	})
-	@IsNotEmpty()
-	fcmToken: string;
-
-	@ApiProperty({ example: 'dh_ai' })
-	@IsNotEmpty()
-	notificationType: string;
-
-	@ApiProperty({ example: '81a05870-393d-44dc-b272-2c314478e06d' })
-	@IsNotEmpty()
-	chatId: string;
-}
-
 export class CreateAuthDto {
 	@ApiProperty({ example: 'user@email.com' })
 	@IsNotEmpty()
