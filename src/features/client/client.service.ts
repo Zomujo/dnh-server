@@ -1,4 +1,3 @@
-import { OpenAIWhisperAudio } from '@langchain/community/document_loaders/fs/openai_whisper_audio';
 import {
 	BadRequestException,
 	Injectable,
@@ -18,11 +17,8 @@ import {
 	startOfDay,
 	startOfMonth,
 } from 'date-fns';
-import * as fs from 'fs/promises';
 import { toHeaderCase } from 'js-convert-case';
 import { Collection, Connection, isValidObjectId, Types } from 'mongoose';
-import * as os from 'os';
-import * as path from 'path';
 import { v7 as uuidv7 } from 'uuid';
 import { generateFilter } from '@/common/factory';
 import { escapeRegExp } from '@/common/utils/helpers';
@@ -151,46 +147,19 @@ export class ClientService {
 		return response;
 	}
 
-	async testChatAudio(file: Express.Multer.File, question: string) {
-		const tempDir = os.tmpdir();
-		const tempFilePath = path.join(tempDir, `${file.originalname}`);
-		const medicalPrompt =
-			`Transcribe in context to the question. if the response doesn't correlate to the question, transcribe anyway. Question: ${question}
-       Glossary: Gender -> male,female,etc. 
-			`.trim();
-
-		try {
-			await fs.writeFile(tempFilePath, file.buffer);
-
-			const loader = new OpenAIWhisperAudio(tempFilePath, {
-				transcriptionCreateParams: {
-					prompt: medicalPrompt,
-				},
-			});
-
-			const docs = await loader.load();
-
-			return { transcript: docs[0].pageContent };
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			throw new NotFoundException(message);
-		} finally {
-			try {
-				await fs.unlink(tempFilePath);
-			} catch (cleanupError) {
-				console.warn('Failed to clean up temporary file:', cleanupError);
-			}
-		}
-	}
-
 	async chatAudio(
 		file: Express.Multer.File,
 		userId: string,
 		language: SupportedLanguages,
 		audioId: string,
 	) {
-		const audioIdPresent =
-			await this.clientAIChatService.findByLocalChatId(audioId);
+		// Scoped to the caller: localChatId is client-generated, so an
+		// unscoped lookup let one user's retry match (and delete, below)
+		// another user's chat record.
+		const audioIdPresent = await this.clientAIChatService.findByLocalChatId(
+			userId,
+			audioId,
+		);
 		if (audioIdPresent) {
 			const response = await this.clientAIChatService.findNextAssistantMessage(
 				userId,
@@ -212,7 +181,10 @@ export class ClientService {
 				};
 			}
 
-			await this.clientAIChatService.deleteById(audioIdPresent._id.toString());
+			await this.clientAIChatService.deleteById(
+				audioIdPresent._id.toString(),
+				userId,
+			);
 		}
 
 		const prevMessage =
@@ -470,7 +442,10 @@ export class ClientService {
 		userId: string,
 		section: MedicationSection,
 	) {
-		const medication = await this.medicationsService.findById(medicationId);
+		const medication = await this.medicationsService.findOwnedById(
+			medicationId,
+			userId,
+		);
 
 		if (!medication.frequency || !medication.startDate) {
 			throw new NotFoundException('Medication has no frequency or start date');
@@ -668,7 +643,10 @@ export class ClientService {
 		userId: string,
 		date: Date,
 	) {
-		const medication = await this.medicationsService.findById(medicationId);
+		const medication = await this.medicationsService.findOwnedById(
+			medicationId,
+			userId,
+		);
 
 		const logs = await this.adherencesService.findAdherenceLogsByTarget(
 			userId,
@@ -869,8 +847,8 @@ export class ClientService {
 		return this.medicationsService.update(id, dto, userId);
 	}
 
-	async fetchMedicationById(id: string) {
-		return this.medicationsService.findById(id);
+	async fetchMedicationById(id: string, userId: string) {
+		return this.medicationsService.findOwnedById(id, userId);
 	}
 
 	async fetchPreloadedMeds(query: PreloadedMedsQueryDto) {

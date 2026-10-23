@@ -16,8 +16,8 @@ export class ClientAIChatService {
 		return this.clientAIChatModel.countDocuments({ userId });
 	}
 
-	async findByLocalChatId(localChatId: string) {
-		return this.clientAIChatModel.findOne({ localChatId });
+	async findByLocalChatId(userId: string, localChatId: string) {
+		return this.clientAIChatModel.findOne({ userId, localChatId });
 	}
 
 	async findNextAssistantMessage(userId: string, afterDate: Date) {
@@ -31,8 +31,8 @@ export class ClientAIChatService {
 			.sort({ createdAt: 1 });
 	}
 
-	async deleteById(id: string) {
-		return this.clientAIChatModel.findByIdAndDelete(id);
+	async deleteById(id: string, userId: string) {
+		return this.clientAIChatModel.findOneAndDelete({ _id: id, userId });
 	}
 
 	async findLastAssistantMessage(userId: string) {

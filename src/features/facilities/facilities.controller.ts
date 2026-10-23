@@ -11,7 +11,7 @@ import {
 	Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { CustomApiResponse } from '@/common/decorators';
+import { CustomApiResponse, Roles } from '@/common/decorators';
 import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import {
 	ApiSuccessResponseDto,
@@ -19,6 +19,7 @@ import {
 	PaginatedDataResponseDto,
 	throwError,
 } from '@/common/utils/responses';
+import { PersonnelRoles } from '@/core/auth/enums';
 import {
 	CreateFacilityDto,
 	GetFacilitiesQueryDto,
@@ -27,6 +28,9 @@ import {
 } from './dto';
 import { FacilitiesService } from './facilities.service';
 
+// Reads stay public: personnel onboarding (POST /personnel/auth/onboard)
+// runs before the caller has a token and needs the facility list to pick
+// from. Facility names/addresses aren't patient data. Writes are HCP-only.
 @ApiTags('Facilities')
 @Controller('facilities')
 export class FacilitiesController {
@@ -34,10 +38,11 @@ export class FacilitiesController {
 
 	constructor(private readonly facilitiesService: FacilitiesService) {}
 
-	@CustomApiResponse(['created'], {
+	@CustomApiResponse(['created', 'authorizeChronicCare'], {
 		type: GetFacilityDto,
 		message: 'Facility created successfully',
 	})
+	@Roles(PersonnelRoles.CLINICIAN)
 	@Post()
 	async create(@Body() dto: CreateFacilityDto) {
 		try {
@@ -94,9 +99,10 @@ export class FacilitiesController {
 		}
 	}
 
-	@CustomApiResponse(['updated'], {
+	@CustomApiResponse(['updated', 'authorizeChronicCare'], {
 		message: 'Facility updated successfully',
 	})
+	@Roles(PersonnelRoles.CLINICIAN)
 	@Patch(':id')
 	async update(
 		@Param('id', ParseMongoIdPipe) id: string,
@@ -114,10 +120,11 @@ export class FacilitiesController {
 		}
 	}
 
-	@CustomApiResponse(['successNull'], {
+	@CustomApiResponse(['successNull', 'authorizeChronicCare'], {
 		type: ApiSuccessResponseNoData,
 		message: 'Facility deleted successfully',
 	})
+	@Roles(PersonnelRoles.CLINICIAN)
 	@Delete(':id')
 	async remove(@Param('id', ParseMongoIdPipe) id: string) {
 		try {

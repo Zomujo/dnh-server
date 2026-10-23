@@ -1,23 +1,12 @@
-import {
-	Injectable,
-	InternalServerErrorException,
-	Logger,
-	UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { differenceInYears } from 'date-fns';
-import { Message } from 'firebase-admin/messaging';
 import { OAuth2Client } from 'google-auth-library';
 import { CacheService } from '@/core/caching/caching.service';
 import { PatientsService } from '@/features/patients/patients.service';
 import { FirebaseService } from '../firebase/firebase.service';
-import {
-	CreateAuthDto,
-	LocalAuthUserPayload,
-	OnboardDto,
-	TestNotificationDto,
-} from './dto';
+import { CreateAuthDto, LocalAuthUserPayload, OnboardDto } from './dto';
 import { UserType } from './enums';
 
 // Chronic-care tokens are signed with a 1d lifetime (see JwtModule config in
@@ -80,69 +69,6 @@ export class AuthService {
 		// nhisNumber: dto.nhisNumber,
 
 		return patientId;
-	}
-
-	async testNotification(dto: TestNotificationDto) {
-		// const topic = 'peerCounselling';
-		// const token =
-		// 'dFla11QPBkadqAREv0DMRa:APA91bH7o6RJfOZBKZq-vnM-odTmGdICz9G-VuFeu78HGnXhMtuCV-6ueb3kkkUcLlbL-Q5H8JLgVHqaOxJjcCemShNyziCwnl-ukvR6cl0Yart5jbV9S6w';
-		const token = dto.fcmToken;
-		// const message = {
-		// 	notification: {
-		// 		title: 'DH AI',
-		// 		body: 'Hellooo. How are you doing today',
-		// 	},
-		// 	data: {
-		// 		notification_type: 'dh_ai',
-		// 	},
-		// };
-		// data: {
-		//   notification_type: 'alert',
-		// },
-
-		// notification: {
-		// },
-
-		const message: Partial<Message> = {
-			notification: {
-				title: 'DH AI',
-				body: 'Hellooo. How are you doing today',
-			},
-			data: {
-				chat_id: dto.chatId,
-				notification_type: dto.notificationType,
-				click_action: 'FLUTTER_NOTIFICATION_CLICK',
-			},
-			android: {
-				priority: 'high',
-				notification: {
-					channelId: 'high_importance_channel',
-				},
-			},
-			apns: {
-				payload: {
-					aps: {
-						sound: 'default',
-						badge: 1,
-						contentAvailable: true,
-					},
-				},
-			},
-		};
-
-		try {
-			const notification = await this.firebaseService.messaging.send({
-				...message,
-				token,
-			});
-			this.logger.log(`notification sent to token: ${token}`, notification);
-			return { notification: message };
-		} catch (error) {
-			this.logger.log('Error sending message:', error);
-			const message =
-				error?.errorInfo?.message || error?.message || 'Internal server error';
-			throw new InternalServerErrorException(message);
-		}
 	}
 
 	async verifyChronicCareToken(token: string) {
@@ -219,19 +145,5 @@ export class AuthService {
 			this.logger.error('Google ID Token verification failed', stack);
 			throw new UnauthorizedException('Token verification failed.');
 		}
-	}
-
-	async test() {
-		await this.firebaseService.updateDoc(
-			'leaderboard_stats',
-			'domeyeben4@gmail.com',
-			{
-				'points.day': 10,
-			},
-		);
-	}
-
-	remove(id: string) {
-		return `This action removes a #${id} auth`;
 	}
 }

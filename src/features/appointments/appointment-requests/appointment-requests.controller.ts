@@ -11,7 +11,7 @@ import {
 	Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { CustomApiResponse } from '@/common/decorators';
+import { Authorize, CustomApiResponse, Roles } from '@/common/decorators';
 import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import {
 	ApiSuccessResponseDto,
@@ -19,6 +19,7 @@ import {
 	PaginatedDataResponseDto,
 	throwError,
 } from '@/common/utils/responses';
+import { PersonnelRoles, UserType } from '@/core/auth/enums';
 import { AppointmentRequestsService } from './appointment-requests.service';
 import {
 	CreateAppointmentRequestDto,
@@ -28,6 +29,8 @@ import {
 } from './dto';
 
 @ApiTags('Appointment Requests')
+@Authorize(UserType.CHRONIC_CARE)
+@Roles(PersonnelRoles.CLINICIAN)
 @Controller('appointment-requests')
 export class AppointmentRequestsController {
 	private readonly logger = new Logger(AppointmentRequestsController.name);

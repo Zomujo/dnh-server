@@ -391,6 +391,19 @@ export class MedicationsService {
 		return medication;
 	}
 
+	/**
+	 * Patient-facing lookup: only matches a medication owned by `userId`.
+	 * Another user's id is indistinguishable from a nonexistent one (404),
+	 * so the route can't be used to probe which ids exist.
+	 */
+	async findOwnedById(id: string, userId: string) {
+		const medication = await this.medicationModel.findOne({ _id: id, userId });
+		if (!medication) {
+			throw new NotFoundException('Medication not found');
+		}
+		return medication;
+	}
+
 	async findAllByUserId(userId: string) {
 		return this.medicationModel
 			.find({ userId })

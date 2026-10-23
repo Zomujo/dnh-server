@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { isValidObjectId, Model, Types } from 'mongoose';
 import { generateFilter } from '@/common/factory';
 import { Personnel } from '@/features/doctors/entities/personnel.entity';
 import { PushService } from '@/features/notifications/push/push.service';
@@ -34,6 +34,24 @@ export class ChatService {
 		}
 
 		return room;
+	}
+
+	/**
+	 * Throws 404 unless `userId` is one of the room's participants. A room the
+	 * caller isn't in is reported exactly like a nonexistent one, so room ids
+	 * can't be probed.
+	 */
+	async assertParticipant(roomId: string, userId: string | undefined) {
+		if (!userId || !isValidObjectId(roomId)) {
+			throw new NotFoundException('Room not found');
+		}
+		const isParticipant = await this.roomModel.exists({
+			_id: roomId,
+			participants: userId,
+		});
+		if (!isParticipant) {
+			throw new NotFoundException('Room not found');
+		}
 	}
 
 	async saveMessage(
@@ -117,11 +135,18 @@ export class ChatService {
 		return { deletedForEveryone: false };
 	}
 
-	async getPaginatedMessages(roomId: string, query: ChatPaginationQueryDto) {
+	async getPaginatedMessages(
+		roomId: string,
+		userId: string,
+		query: ChatPaginationQueryDto,
+	) {
+		await this.assertParticipant(roomId, userId);
 		const { pageFilter } = generateFilter(query);
+		// Messages the caller deleted "for me" are hidden from their history.
+		const filter = { roomId, deletedFor: { $ne: userId } };
 
 		const messages = await this.messageModel
-			.find({ roomId })
+			.find(filter)
 			.sort({ createdAt: -1 })
 			.skip(pageFilter.offset)
 			.limit(pageFilter.limit)
@@ -144,7 +169,7 @@ export class ChatService {
 			return row;
 		});
 
-		const count = await this.messageModel.countDocuments({ roomId });
+		const count = await this.messageModel.countDocuments(filter);
 
 		return { rows, count };
 	}
