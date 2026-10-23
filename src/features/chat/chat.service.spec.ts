@@ -214,18 +214,48 @@ describe('ChatService', () => {
 	});
 
 	describe('removeByUserId', () => {
-		it('should remove user rooms and messages', async () => {
-			roomModel.deleteMany.mockResolvedValue({ deletedCount: 1 } as any);
+		it("removes the user's rooms with both sides' messages and media", async () => {
+			roomModel.find.mockReturnValue({
+				select: () => ({
+					lean: vi
+						.fn()
+						.mockResolvedValue([{ _id: 'room-1' }, { _id: 'room-2' }]),
+				}),
+			} as any);
+			firebaseService.deleteFolder.mockResolvedValue(2);
+			roomModel.deleteMany.mockResolvedValue({ deletedCount: 2 } as any);
 			messageModel.deleteMany.mockResolvedValue({ deletedCount: 5 } as any);
 
-			await service.removeByUserId('userA');
+			const result = await service.removeByUserId('userA');
 
-			expect(roomModel.deleteMany).toHaveBeenCalledWith({
-				participants: 'userA',
-			});
+			expect(roomModel.find).toHaveBeenCalledWith({ participants: 'userA' });
+			expect(firebaseService.deleteFolder).toHaveBeenCalledWith(
+				'hcp_chats/room-1',
+			);
+			expect(firebaseService.deleteFolder).toHaveBeenCalledWith(
+				'hcp_chats/room-2',
+			);
 			expect(messageModel.deleteMany).toHaveBeenCalledWith({
-				senderId: 'userA',
+				$or: [{ roomId: { $in: ['room-1', 'room-2'] } }, { senderId: 'userA' }],
 			});
+			expect(roomModel.deleteMany).toHaveBeenCalledWith({
+				_id: { $in: ['room-1', 'room-2'] },
+			});
+			expect(result).toEqual({ chatRooms: 2, chatMessages: 5 });
+		});
+
+		it('keeps the rooms when media deletion fails, so a retry can finish', async () => {
+			roomModel.find.mockReturnValue({
+				select: () => ({
+					lean: vi.fn().mockResolvedValue([{ _id: 'room-1' }]),
+				}),
+			} as any);
+			firebaseService.deleteFolder.mockRejectedValue(new Error('storage down'));
+
+			await expect(service.removeByUserId('userA')).rejects.toThrow(
+				'storage down',
+			);
+			expect(roomModel.deleteMany).not.toHaveBeenCalled();
 		});
 	});
 });

@@ -47,8 +47,11 @@ export class Patient extends BaseDH {
 	@Prop({ unique: true, description: 'Unique patient code for identification' })
 	patientCode: string;
 
+	// One patient per account: onboarding and the lazy create in
+	// ClientService.retrievePatient both rely on this to stay idempotent.
 	@Prop({
 		required: true,
+		unique: true,
 		description: 'The ID of the user associated with the patient',
 	})
 	userId: string;

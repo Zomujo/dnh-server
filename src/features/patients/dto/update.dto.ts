@@ -13,7 +13,7 @@ import {
 	Min,
 	Validate,
 } from 'class-validator';
-import { AgeOrDateOfBirthConstraint } from '@/core/auth/dto';
+import { AgeOrDateOfBirthConstraint } from '@/core/auth/dto/age.validators';
 import { PatientDto } from './patient.dto';
 
 export class UpdatePatientDto extends PartialType(

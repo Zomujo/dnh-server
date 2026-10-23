@@ -4,7 +4,7 @@ import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { differenceInYears } from 'date-fns';
-import { Model, Types } from 'mongoose';
+import { HydratedDocument, Model, Types } from 'mongoose';
 import {
 	concatWith,
 	defer,
@@ -161,28 +161,64 @@ export class PatientsService {
 		);
 	}
 
-	async create(dto: CreatePatientDto) {
-		dto.patientCode = await this.generateUniquePatientCode();
-		const patient = await this.patientModel.create({ ...dto } as any);
+	/**
+	 * Onboards the account's patient. Idempotent: if this userId already has
+	 * a patient (a retry, or a concurrent request winning the unique index),
+	 * that patient is returned with `created: false` and its profile fields
+	 * are left alone. The chronic conditions are re-applied (the upsert is
+	 * idempotent) so a retry finishes an onboarding that failed after the
+	 * patient row was written.
+	 */
+	async create(
+		dto: CreatePatientDto,
+	): Promise<{ patientId: Types.ObjectId; created: boolean }> {
+		const existing = await this.patientModel
+			.findOne({ userId: dto.userId })
+			.select('_id');
+		if (existing) {
+			await this.upsertChronicConditions(dto, existing._id);
+			return { patientId: existing._id, created: false };
+		}
 
+		dto.patientCode = await this.generateUniquePatientCode();
+		let patient: HydratedDocument<Patient>;
+		try {
+			patient = await this.patientModel.create({ ...dto } as any);
+		} catch (error) {
+			// Lost a race on the unique userId index; the winner saves the
+			// conditions.
+			const raced = isDuplicateUserIdError(error)
+				? await this.patientModel.findOne({ userId: dto.userId }).select('_id')
+				: null;
+			if (raced) return { patientId: raced._id, created: false };
+			throw error;
+		}
+
+		await this.upsertChronicConditions(dto, patient._id);
+
+		return { patientId: patient._id, created: true };
+	}
+
+	private async upsertChronicConditions(
+		dto: CreatePatientDto,
+		patientId: Types.ObjectId,
+	) {
 		await Promise.all(
 			dto.chronicConditions.map((conditionName) =>
 				this.chronicConditionsService.upsertChronicCondition(
 					{
 						userId: dto.userId,
-						patient: patient._id.toString(),
+						patient: patientId.toString(),
 						conditionName,
 					},
 					{
 						userId: dto.userId,
-						patient: patient._id.toString(),
+						patient: patientId.toString(),
 						conditionName,
 					},
 				),
 			),
 		);
-
-		return patient._id;
 	}
 
 	async createByPersonnel(
@@ -481,10 +517,21 @@ export class PatientsService {
 	}
 
 	async createPatient(data: Partial<Patient>): Promise<Patient> {
-		return this.patientModel.create({
-			...data,
-			patientCode: data.patientCode ?? (await this.generateUniquePatientCode()),
-		});
+		try {
+			return await this.patientModel.create({
+				...data,
+				patientCode:
+					data.patientCode ?? (await this.generateUniquePatientCode()),
+			});
+		} catch (error) {
+			// A concurrent request created this user's patient first.
+			const existing =
+				data.userId && isDuplicateUserIdError(error)
+					? await this.patientModel.findOne({ userId: data.userId })
+					: null;
+			if (existing) return existing;
+			throw error;
+		}
 	}
 
 	async removePatientsByUserId(userId: string) {
@@ -492,11 +539,12 @@ export class PatientsService {
 	}
 
 	async removeSummariesByUserId(userId: string) {
+		await this.summaryCacheService.delete(summaryCacheKey(userId));
 		return this.summaryModel.deleteMany({ userId });
 	}
 
 	async generateSummary(userId: string): Promise<Observable<MessageEvent>> {
-		const cacheKey = `chronic-care:doctors:patients:summary:${userId}`;
+		const cacheKey = summaryCacheKey(userId);
 		const cachedSummary = await this.summaryCacheService.get(cacheKey);
 
 		if (cachedSummary) {
@@ -550,4 +598,13 @@ export class PatientsService {
 			concatWith(of(new MessageEvent('message', { data: '\n' }))),
 		);
 	}
+}
+
+function isDuplicateUserIdError(error: unknown) {
+	const e = error as { code?: number; keyPattern?: Record<string, unknown> };
+	return e?.code === 11000 && !!e.keyPattern && 'userId' in e.keyPattern;
+}
+
+function summaryCacheKey(userId: string) {
+	return `chronic-care:doctors:patients:summary:${userId}`;
 }

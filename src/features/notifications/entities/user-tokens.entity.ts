@@ -26,6 +26,8 @@ export class UserToken extends BaseEntity {
 
 export const UserTokenSchema = SchemaFactory.createForClass(UserToken);
 
-// One row per (userId, fcmToken) pair, not per userId — a user may be
-// signed in on multiple devices at once, each with its own token.
-UserTokenSchema.index({ userId: 1, fcmToken: 1 }, { unique: true });
+// A token is one device, owned by one user (whoever registered it last);
+// a user may still have several rows, one per device. PushService
+// de-duplicates legacy rows at startup before this index is built.
+UserTokenSchema.index({ fcmToken: 1 }, { unique: true });
+UserTokenSchema.index({ userId: 1, updatedAt: -1 });

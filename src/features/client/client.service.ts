@@ -813,39 +813,106 @@ export class ClientService {
 		return { concerns, count };
 	}
 
+	/**
+	 * Deletes everything held for this account and reports how much of each
+	 * kind was removed.
+	 *
+	 * Resumable: every step is a no-op once done, and the steps run so that a
+	 * failure leaves what a retry needs. Anything that can still act on the
+	 * user (reminders, push tokens) goes first; the patient row goes late
+	 * because its id finds the patient-keyed rows; the Firebase Auth user goes
+	 * last because deleting it invalidates the token a retry would use.
+	 */
 	async purgePatient(userId: string) {
+		const count = (result: { deletedCount?: number }) =>
+			result.deletedCount ?? 0;
+
 		const patient = await this.patientsService.findPatientByUserId(
 			userId,
 			'_id',
 		);
 		const patientId = patient?._id?.toString();
 
-		await this.checkpointModel.deleteMany({
-			thread_id: userId,
+		const reminders = await this.doctorNotificationsService.purgeNotifications(
+			userId,
+			patientId,
+		);
+		const fcmTokens = await this.pushService.removeAllForUser(userId);
+		const appointments = patientId
+			? await this.appointmentsService.removeByPatientId(patientId)
+			: 0;
+		const appointmentRequests = patientId
+			? await this.appointmentRequestsService.removeByPatientId(patientId)
+			: 0;
+
+		const [chat] = await this.eventEmitter.emitAsync('patient.purge.chat', {
+			userId,
 		});
-		await this.checkpointWritesModel.deleteMany({
-			thread_id: userId,
-		});
-		await this.patientsService.removePatientsByUserId(userId);
-		await this.chronicConditionsService.removeByUserId(userId);
-		await this.medicationsService.removeByUserId(userId);
-		await this.vitalHistoryService.removeByUserId(userId);
-		await this.adherencesService.removeLogsByUserId(userId);
-		await this.adherencesService.removePatternsByUserId(userId);
-		await this.concernsService.removeByUserId(userId);
-		await this.clientAIChatService.removeByUserId(userId);
-		await this.patientsService.removeSummariesByUserId(userId);
-		await this.firebaseService.deleteFolder(
-			'chronic_care_chat_audios/' + userId,
+
+		const aiChatMessages = count(
+			await this.clientAIChatService.removeByUserId(userId),
+		);
+		const aiConversationState =
+			count(await this.checkpointModel.deleteMany({ thread_id: userId })) +
+			count(await this.checkpointWritesModel.deleteMany({ thread_id: userId }));
+		const voiceNoteFiles = await this.firebaseService.deleteFolder(
+			`chronic_care_chat_audios/${userId}`,
 		);
 
-		if (patientId) {
-			await this.doctorNotificationsService.purgeNotifications(patientId);
-			await this.appointmentsService.removeByPatientId(patientId);
-			await this.appointmentRequestsService.removeByPatientId(patientId);
-		}
-		this.eventEmitter.emit('patient.purge.chat', { userId });
+		const medications = count(
+			await this.medicationsService.removeByUserId(userId),
+		);
+		const adherenceLogs = count(
+			await this.adherencesService.removeLogsByUserId(userId),
+		);
+		const adherencePatterns = count(
+			await this.adherencesService.removePatternsByUserId(userId),
+		);
+		const vitals = count(await this.vitalHistoryService.removeByUserId(userId));
+		const symptoms = count(await this.concernsService.removeByUserId(userId));
+		const chronicConditions = count(
+			await this.chronicConditionsService.removeByUserId(userId),
+		);
+		const summaries = count(
+			await this.patientsService.removeSummariesByUserId(userId),
+		);
 		await this.dhVectorsService.cleanOrphans(userId);
+
+		await Promise.all([
+			this.userCacheService.delete(userId),
+			this.chronicConditionsCacheService.delete(`chronic-conditions:${userId}`),
+		]);
+		const firestoreDocuments =
+			await this.firebaseService.deleteClientRecords(userId);
+
+		const patientRecords = count(
+			await this.patientsService.removePatientsByUserId(userId),
+		);
+		const authUser = Number(await this.firebaseService.deleteAuthUser(userId));
+
+		return {
+			deleted: {
+				patient: patientRecords,
+				medications,
+				adherenceLogs,
+				adherencePatterns,
+				vitals,
+				symptoms,
+				chronicConditions,
+				summaries,
+				reminders,
+				appointments,
+				appointmentRequests,
+				chatRooms: chat?.chatRooms ?? 0,
+				chatMessages: chat?.chatMessages ?? 0,
+				aiChatMessages,
+				aiConversationState,
+				voiceNoteFiles,
+				fcmTokens,
+				firestoreDocuments,
+				authUser,
+			},
+		};
 	}
 
 	async createMedication(dto: CreateMedicationDto, userId: string) {

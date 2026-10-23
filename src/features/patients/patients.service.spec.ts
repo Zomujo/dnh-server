@@ -54,8 +54,12 @@ describe('PatientsService', () => {
 	});
 
 	describe('create', () => {
+		const noPatient = () =>
+			({ select: vi.fn().mockResolvedValue(null) }) as any;
+
 		it('should generate patient code and upsert chronic conditions', async () => {
 			patientModel.exists.mockResolvedValue(null as any);
+			patientModel.findOne.mockReturnValue(noPatient());
 
 			const mockId = new Types.ObjectId();
 			patientModel.create.mockResolvedValue({
@@ -96,7 +100,58 @@ describe('PatientsService', () => {
 					conditionName: 'Hypertension',
 				},
 			);
-			expect(result).toEqual(mockId);
+			expect(result).toEqual({ patientId: mockId, created: true });
+		});
+
+		it('returns the existing patient on a repeat, re-applying its conditions', async () => {
+			const existingId = new Types.ObjectId();
+			patientModel.findOne.mockReturnValue({
+				select: vi.fn().mockResolvedValue({ _id: existingId }),
+			} as any);
+			chronicConditionsService.upsertChronicCondition.mockResolvedValue(
+				{} as any,
+			);
+
+			const result = await service.create({
+				userId: 'user-1',
+				chronicConditions: ['Hypertension'],
+			} as any);
+
+			expect(result).toEqual({ patientId: existingId, created: false });
+			expect(patientModel.create).not.toHaveBeenCalled();
+			// A retry after a half-finished onboarding still saves the conditions.
+			expect(
+				chronicConditionsService.upsertChronicCondition,
+			).toHaveBeenCalledWith(
+				expect.objectContaining({ patient: existingId.toString() }),
+				expect.anything(),
+			);
+		});
+
+		it('returns the winner when a concurrent onboard hits the unique index', async () => {
+			const winnerId = new Types.ObjectId();
+			patientModel.exists.mockResolvedValue(null as any);
+			patientModel.findOne
+				.mockReturnValueOnce(noPatient())
+				.mockReturnValueOnce({
+					select: vi.fn().mockResolvedValue({ _id: winnerId }),
+				} as any);
+			patientModel.create.mockRejectedValue(
+				Object.assign(new Error('E11000'), {
+					code: 11000,
+					keyPattern: { userId: 1 },
+				}),
+			);
+
+			const result = await service.create({
+				userId: 'user-1',
+				chronicConditions: ['Hypertension'],
+			} as any);
+
+			expect(result).toEqual({ patientId: winnerId, created: false });
+			expect(
+				chronicConditionsService.upsertChronicCondition,
+			).not.toHaveBeenCalled();
 		});
 	});
 

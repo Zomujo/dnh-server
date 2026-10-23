@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { generateFilter } from '@/common/factory';
+import { anyIdForm } from '@/common/utils/helpers';
 import {
 	CreateAppointmentRequestDto,
 	GetAppointmentRequestsQueryDto,
@@ -80,7 +81,10 @@ export class AppointmentRequestsService {
 	}
 
 	async removeByPatientId(patientId: string) {
-		return this.appointmentRequestModel.deleteMany({ patient: patientId });
+		const { deletedCount } = await this.appointmentRequestModel.deleteMany({
+			patient: anyIdForm(patientId),
+		});
+		return deletedCount;
 	}
 
 	remove(id: string) {

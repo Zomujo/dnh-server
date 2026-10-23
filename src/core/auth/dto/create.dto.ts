@@ -11,28 +11,24 @@ import {
 	IsOptional,
 	IsPhoneNumber,
 	IsString,
+	Max,
+	MaxDate,
 	Min,
 	MinLength,
 	Validate,
-	ValidationArguments,
-	ValidatorConstraint,
-	ValidatorConstraintInterface,
 } from 'class-validator';
 import { GenderEnum } from '@/features/patients/entities/patient.entity';
+import {
+	AgeOrDateOfBirthConstraint,
+	MINIMUM_PATIENT_AGE,
+	MinimumAgeConstraint,
+} from './age.validators';
 
-@ValidatorConstraint({ name: 'ageOrDateOfBirth', async: false })
-export class AgeOrDateOfBirthConstraint
-	implements ValidatorConstraintInterface
-{
-	validate(_value: any, args: ValidationArguments) {
-		const dto = args.object as any;
-		return !!(dto.age || dto.dateOfBirth);
-	}
-
-	defaultMessage() {
-		return 'Either age or dateOfBirth must be provided';
-	}
-}
+export {
+	AgeOrDateOfBirthConstraint,
+	MINIMUM_PATIENT_AGE,
+	MinimumAgeConstraint,
+} from './age.validators';
 
 export class CreateAuthDto {
 	@ApiProperty({ example: 'user@email.com' })
@@ -82,6 +78,8 @@ export class OnboardDto {
 	@IsOptional()
 	@IsDate()
 	@Type(() => Date)
+	@MaxDate(() => new Date(), { message: 'dateOfBirth cannot be in the future' })
+	@Validate(MinimumAgeConstraint)
 	dateOfBirth?: Date;
 
 	@ApiPropertyOptional({
@@ -91,7 +89,10 @@ export class OnboardDto {
 	})
 	@IsOptional()
 	@IsNumber()
-	@Min(0)
+	@Min(MINIMUM_PATIENT_AGE, {
+		message: `Patients must be at least ${MINIMUM_PATIENT_AGE} years old`,
+	})
+	@Max(130)
 	@Validate(AgeOrDateOfBirthConstraint)
 	age?: number;
 

@@ -54,7 +54,7 @@ export class AuthService {
 			age = differenceInYears(new Date(), dateOfBirth);
 		}
 
-		const patientId = await this.patientsService.create({
+		return this.patientsService.create({
 			userId: userId,
 			name: `${dto.firstname} ${dto.lastname}`,
 			gender: dto.gender,
@@ -67,8 +67,6 @@ export class AuthService {
 		// yearOfBirth: dto.yearOfBirth,
 		// ghanaCardNumber: dto.ghanaCardNumber,
 		// nhisNumber: dto.nhisNumber,
-
-		return patientId;
 	}
 
 	async verifyChronicCareToken(token: string) {

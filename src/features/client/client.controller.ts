@@ -78,6 +78,7 @@ import {
 import { SupportedLanguages } from './ai/states';
 import { ClientService } from './client.service';
 import {
+	AccountDeletionResponseDto,
 	AudioUploadDto,
 	ChronicCareChatMessageDto,
 	ChronicCareConversationResponseDto,
@@ -608,15 +609,19 @@ export class ClientController {
 		}
 	}
 
-	@CustomApiResponse(['successNull', 'authorize'], {
+	@CustomApiResponse(['success', 'authorize'], {
+		type: AccountDeletionResponseDto,
 		message: 'Patient data cleaned successfully',
 	})
 	@Delete('clean')
 	async purgePatient(@GetUser('sub') userId: string) {
 		try {
-			await this.clientService.purgePatient(userId);
+			// Deletes the Firebase Auth user too (last). Safe to call again
+			// after a failure: it picks up whatever is left.
+			const response = await this.clientService.purgePatient(userId);
 
-			return new ApiSuccessResponseNoData(
+			return new ApiSuccessResponseDto(
+				response,
 				HttpStatus.OK,
 				'Patient data cleaned successfully',
 			);

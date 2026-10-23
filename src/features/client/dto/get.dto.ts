@@ -88,6 +88,71 @@ export class MedicationAdherenceDto {
 	days?: MedicationAdherenceDayDto[];
 }
 
+/** Per-kind counts of what DELETE /client/clean removed; all 0 on a repeat. */
+export class AccountDeletionCountsDto {
+	@ApiResponseProperty({ example: 1 })
+	patient: number;
+
+	@ApiResponseProperty({ example: 3 })
+	medications: number;
+
+	@ApiResponseProperty({ example: 0 })
+	adherenceLogs: number;
+
+	@ApiResponseProperty({ example: 0 })
+	adherencePatterns: number;
+
+	@ApiResponseProperty({ example: 42 })
+	vitals: number;
+
+	@ApiResponseProperty({ example: 0 })
+	symptoms: number;
+
+	@ApiResponseProperty({ example: 0 })
+	chronicConditions: number;
+
+	@ApiResponseProperty({ example: 0 })
+	summaries: number;
+
+	@ApiResponseProperty({ example: 0 })
+	reminders: number;
+
+	@ApiResponseProperty({ example: 0 })
+	appointments: number;
+
+	@ApiResponseProperty({ example: 0 })
+	appointmentRequests: number;
+
+	@ApiResponseProperty({ example: 0 })
+	chatRooms: number;
+
+	@ApiResponseProperty({ example: 0 })
+	chatMessages: number;
+
+	@ApiResponseProperty({ example: 0 })
+	aiChatMessages: number;
+
+	@ApiResponseProperty({ example: 0 })
+	aiConversationState: number;
+
+	@ApiResponseProperty({ example: 0 })
+	voiceNoteFiles: number;
+
+	@ApiResponseProperty({ example: 0 })
+	fcmTokens: number;
+
+	@ApiResponseProperty({ example: 0 })
+	firestoreDocuments: number;
+
+	@ApiResponseProperty({ example: 1 })
+	authUser: number;
+}
+
+export class AccountDeletionResponseDto {
+	@ApiResponseProperty({ type: AccountDeletionCountsDto })
+	deleted: AccountDeletionCountsDto;
+}
+
 export class MessagesPayload {
 	@ApiPropertyOptional({ example: ['hi'] })
 	@IsOptional()
