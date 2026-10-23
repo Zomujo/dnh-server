@@ -21,6 +21,8 @@ export {
 	MedicationUpsertSchema,
 } from './medication.schema';
 export {
+	ConfirmMedicationQueryDto,
+	MAX_DOSE_CONFIRM_BACKDATE_HOURS,
 	MedicationSection,
 	TodaysMedicationCountDto,
 	TodaysMedicationDto,

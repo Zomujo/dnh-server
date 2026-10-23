@@ -9,7 +9,10 @@ import {
 	IsOptional,
 	IsString,
 	Length,
+	MaxLength,
 } from 'class-validator';
+
+export const MAX_CONCERN_DESCRIPTION_LENGTH = 1000;
 
 export enum ConcernTypes {
 	Symptom = 'symptom',
@@ -51,9 +54,11 @@ export class ConcernDto {
 	@ApiProperty({
 		description: 'Description of the concern',
 		example: 'Headache',
+		maxLength: MAX_CONCERN_DESCRIPTION_LENGTH,
 	})
 	@IsString()
 	@IsNotEmpty()
+	@MaxLength(MAX_CONCERN_DESCRIPTION_LENGTH)
 	description: string;
 
 	@ApiProperty({

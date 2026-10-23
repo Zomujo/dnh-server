@@ -5,7 +5,11 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { useContainer } from 'class-validator';
 import { AppModule } from './app.module';
 import { NodeEnvs } from './common/enums';
-import { resolveCorsOrigins, resolveTrustProxy } from './common/utils/helpers';
+import {
+	resolveCorsOrigins,
+	resolveForbidUnknownFields,
+	resolveTrustProxy,
+} from './common/utils/helpers';
 import { DomainLogger } from './core/logging/logging.service';
 
 async function bootstrap() {
@@ -20,6 +24,14 @@ async function bootstrap() {
 	if (environment !== NodeEnvs.DEVELOPMENT) {
 		app.useLogger(app.get(DomainLogger));
 	}
+
+	// Last line of defence for fire-and-forget work (event handlers, LLM
+	// calls after the response): log a stray rejection rather than letting
+	// Node end the process and drop every in-flight request and socket.
+	const processLogger = new Logger('Process');
+	process.on('unhandledRejection', (reason) => {
+		processLogger.error('Unhandled promise rejection', reason as Error);
+	});
 
 	// Behind Railway's proxy every request arrives from the proxy's address;
 	// without this, req.ip (rate limiting, logs) is the same for everyone.
@@ -39,6 +51,8 @@ async function bootstrap() {
 	app.useGlobalPipes(
 		new ValidationPipe({
 			whitelist: true,
+			// Staging: unknown fields are a 400 rather than silently dropped.
+			forbidNonWhitelisted: resolveForbidUnknownFields(environment),
 			transform: true,
 		}),
 	);

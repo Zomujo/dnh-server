@@ -64,6 +64,7 @@ import {
 } from '@/features/facilities/dto';
 import {
 	AdherenceLogsQueryDto,
+	ConfirmMedicationQueryDto,
 	CreateMedicationDto,
 	GetMedicationDto,
 	MedicationAdherenceLogsDto,
@@ -80,9 +81,11 @@ import {
 	BpTrendsResponseDto,
 	GetVitalHistoryDto,
 	LoadVitalHistoryDto,
+	SeverityThresholdsDto,
 	VitalHistoryTrendsQueryDto,
 	VitalHistoryTrendsResponseDto,
 } from '@/features/vital-histories/dto';
+import { SEVERITY_THRESHOLDS } from '@/features/vital-histories/severity-thresholds';
 import { SupportedLanguages } from './ai/states';
 import { ClientService } from './client.service';
 import {
@@ -427,7 +430,7 @@ export class ClientController {
 	@Put('medications/:medicationId/confirm')
 	async confirmMedication(
 		@Param('medicationId', ParseMongoIdPipe) medicationId: string,
-		@Query() query: TodaysMedicationsQueryDto,
+		@Query() query: ConfirmMedicationQueryDto,
 		@GetUser('sub') userId: string,
 	) {
 		try {
@@ -435,6 +438,7 @@ export class ClientController {
 				medicationId,
 				userId,
 				query.section,
+				query.scheduledFor ? new Date(query.scheduledFor) : undefined,
 			);
 			return new ApiSuccessResponseDto(
 				response,
@@ -542,6 +546,19 @@ export class ClientController {
 		} catch (error) {
 			throwError(this.logger, error);
 		}
+	}
+
+	@CustomApiResponse(['success', 'authorize'], {
+		type: SeverityThresholdsDto,
+		message: 'Severity thresholds fetched successfully',
+	})
+	@Get('severity-thresholds')
+	fetchSeverityThresholds() {
+		return new ApiSuccessResponseDto(
+			SEVERITY_THRESHOLDS,
+			HttpStatus.OK,
+			'Severity thresholds fetched successfully',
+		);
 	}
 
 	@CustomApiResponse(['success', 'authorize', 'notfound'], {

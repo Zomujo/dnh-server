@@ -15,6 +15,9 @@ export {
 	GetVitalHistoriesPersonnelDto,
 	GetVitalHistoryDto,
 	GetVitalHistoryPersonnelDto,
+	MAX_TREND_WINDOW_DAYS,
+	resolveTrendWindow,
+	SeverityThresholdsDto,
 	VitalHistoryTrendsQueryDto,
 	VitalHistoryTrendsResponseDto,
 } from './get.dto';

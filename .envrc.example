@@ -117,3 +117,10 @@ export USSD_ALLOWED_IPS=
 export CORS_ORIGINS=
 # Proxy hops in front of the app (Railway edge = 1). Unset = 1.
 export TRUST_PROXY=1
+
+# =========================
+# Validation
+# =========================
+# true = unknown request fields are a 400 instead of being dropped.
+# Unset = on for NODE_ENV=staging only.
+export FORBID_UNKNOWN_FIELDS=

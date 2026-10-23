@@ -35,7 +35,7 @@ export class ConcernsService {
 			patient: patient._id,
 			host: patient.facility as any,
 			concernType: ConcernTypeEnum.SYMPTOMS,
-			onsetDate: new Date(),
+			onsetDate: addSymptomsDto.onsetDate ?? new Date(),
 			description: addSymptomsDto.description,
 		});
 

@@ -15,8 +15,8 @@ import {
 	BpTrendsQueryDto,
 	CreateVitalHistoryDto,
 	FilterVitalHistoriesDto,
-	getDateRangeFilter,
 	LoadVitalHistoryDto,
+	resolveTrendWindow,
 	UpdateVitalHistoryDto,
 	UpdateVitalLogDto,
 	VitalHistoryQueryFilter,
@@ -29,6 +29,7 @@ import {
 	VitalHistory,
 	VitalSeverityEnum,
 } from './entities/vital-history.entity';
+import { determineSeverity } from './severity-thresholds';
 
 @Injectable()
 export class VitalHistoriesService {
@@ -44,7 +45,7 @@ export class VitalHistoriesService {
 		userId: string,
 		facilityId?: string,
 	) {
-		const severity = this.determineSeverity(dto.vitalType, dto.value);
+		const severity = determineSeverity(dto.vitalType, dto.value);
 		const unit =
 			dto.vitalType === 'bloodPressure'
 				? 'mmHg'
@@ -88,72 +89,6 @@ export class VitalHistoriesService {
 		});
 
 		return vitalHistory._id;
-	}
-
-	private determineSeverity(
-		vitalType: string,
-		value: string,
-	): VitalSeverityEnum {
-		if (vitalType === 'bloodPressure') {
-			const parts = value.split('/');
-			if (parts.length !== 2) {
-				return VitalSeverityEnum.NORMAL;
-			}
-
-			const systolic = Number.parseFloat(parts[0]);
-			const diastolic = Number.parseFloat(parts[1]);
-
-			if (Number.isNaN(systolic) || Number.isNaN(diastolic)) {
-				return VitalSeverityEnum.NORMAL;
-			}
-
-			// AHA thresholds (mmHg): Normal <120/<80, Elevated 120-129/<80,
-			// Stage 1 130-139/80-89, Stage 2 >=140/>=90 (both stages folded into
-			// HYPERTENSIVE below — this system only needs "needs attention" vs
-			// "needs urgent care", not the stage distinction), Hypertensive
-			// Crisis >180/>120 (checked as >=180/>=120 to catch the boundary).
-			// AHA doesn't define hypotension (it's hypertension-focused
-			// guidance); <90/<60 and a conservative <80/<50 "severe" cutoff
-			// are the commonly cited clinical thresholds.
-			if (systolic >= 180 || diastolic >= 120) {
-				return VitalSeverityEnum.HYPERTENSIVE_CRISIS;
-			}
-			if (systolic < 80 || diastolic < 50) {
-				return VitalSeverityEnum.SEVERE_HYPOTENSION;
-			}
-			if (systolic >= 130 || diastolic >= 80) {
-				return VitalSeverityEnum.HYPERTENSIVE;
-			}
-			if (systolic < 90 || diastolic < 60) {
-				return VitalSeverityEnum.HYPOTENSIVE;
-			}
-			if (systolic >= 120) {
-				return VitalSeverityEnum.ELEVATED;
-			}
-			return VitalSeverityEnum.NORMAL;
-		}
-
-		if (vitalType === 'bloodSugar') {
-			const val = Number.parseFloat(value);
-
-			if (Number.isNaN(val)) {
-				return VitalSeverityEnum.NORMAL;
-			}
-
-			// ADA thresholds (mmol/L): Level 2 hypoglycemia <3.0, Level 1
-			// hypoglycemia 3.0-<3.9, in-target 3.9-<7.3, elevated 7.3-<11.1
-			// (11.1 mmol/L / 200mg/dL is a commonly used "significant
-			// hyperglycemia" marker), high 11.1-<13.9, critically high >=13.9
-			// (250mg/dL — the diagnostic DKA-risk threshold).
-			if (val < 3.0) return VitalSeverityEnum.CRITICALLY_LOW;
-			if (val < 3.9) return VitalSeverityEnum.LOW;
-			if (val < 7.3) return VitalSeverityEnum.NORMAL;
-			if (val < 11.1) return VitalSeverityEnum.ELEVATED;
-			if (val < 13.9) return VitalSeverityEnum.HIGH;
-			return VitalSeverityEnum.CRITICALLY_HIGH;
-		}
-
-		return VitalSeverityEnum.NORMAL;
 	}
 
 	private buildVitalNotificationBody(
@@ -221,7 +156,7 @@ export class VitalHistoriesService {
 				// optionally submitted, with no independent verification (3.1)
 				// and no critical-alert path at all for personnel-entered
 				// readings (unlike loadVitalHistory()).
-				const severity = this.determineSeverity(vital.vitalType, vital.value);
+				const severity = determineSeverity(vital.vitalType, vital.value);
 
 				if (CRITICAL_VITAL_SEVERITIES.includes(severity) && facilityId) {
 					const [, personnelBody] = this.buildVitalNotificationBody(
@@ -581,7 +516,7 @@ export class VitalHistoriesService {
 				vitals.map((vital) => {
 					// Server-computed, not trusted from the client — same
 					// rationale as create() (3.1).
-					const severity = this.determineSeverity(vital.vitalType, vital.value);
+					const severity = determineSeverity(vital.vitalType, vital.value);
 					return this.vitalHistoryModel.updateOne(
 						{ clusterId: id, vitalType: vital.vitalType },
 						{
@@ -706,6 +641,9 @@ export class VitalHistoriesService {
 						value: 1,
 						unit: 1,
 						severity: 1,
+						vitalSubType: 1,
+						recordedAt: 1,
+						createdAt: 1,
 					},
 				},
 			],
@@ -781,6 +719,9 @@ export class VitalHistoriesService {
 					value: 1,
 					unit: 1,
 					severity: 1,
+					vitalSubType: 1,
+					recordedAt: 1,
+					createdAt: 1,
 				},
 			},
 		]);
@@ -847,6 +788,9 @@ export class VitalHistoriesService {
 					value: 1,
 					unit: 1,
 					severity: 1,
+					vitalSubType: 1,
+					recordedAt: 1,
+					createdAt: 1,
 				},
 			},
 		]);
@@ -887,8 +831,7 @@ export class VitalHistoriesService {
 	}
 
 	async fetchBPTrend(userId: string, query: BpTrendsQueryDto) {
-		const { dateRange } = query;
-		const { timestamp } = getDateRangeFilter(dateRange)!;
+		const timestamp = resolveTrendWindow(query);
 
 		const match = {
 			userId,
@@ -963,8 +906,8 @@ export class VitalHistoriesService {
 	}
 
 	async fetchVitalTrend(userId: string, query: VitalHistoryTrendsQueryDto) {
-		const { vitalType, dateRange } = query;
-		const { timestamp } = getDateRangeFilter(dateRange)!;
+		const { vitalType } = query;
+		const timestamp = resolveTrendWindow(query);
 
 		const matchRecord: Record<string, any> = {
 			vitalType,

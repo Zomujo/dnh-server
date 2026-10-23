@@ -11,7 +11,7 @@ import {
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
-import { escapeRegExp } from '../../common/utils/helpers';
+import { anyIdForm, escapeRegExp } from '../../common/utils/helpers';
 import { AdherenceStatus } from '../../features/patients/dto';
 import { Patient } from '../../features/patients/entities/patient.entity';
 import { Medication } from '../medications/entities/medication.entity';
@@ -479,20 +479,44 @@ export class AdherencesService {
 		return this.adherenceLogModel.deleteMany({ userId });
 	}
 
-	async removeLogsByTargetName(userId: string, targetName: string) {
-		return this.adherenceLogModel.deleteMany({
-			userId,
-			targetType: TargetType.MEDICATION,
-			targetName,
-		});
-	}
+	/**
+	 * Removes a deleted medication's adherence history. Logs linked to the
+	 * medication go by id. Patterns, and older logs that only carry the name,
+	 * are kept per medication *name*, so they go only once no other medication
+	 * of this user shares it; otherwise they still belong to that one.
+	 */
+	async removeMedicationHistory(
+		userId: string,
+		medicationId: Types.ObjectId | string,
+		name: string,
+		nameStillInUse: boolean,
+	) {
+		const { deletedCount: linkedLogs } =
+			await this.adherenceLogModel.deleteMany({
+				userId,
+				// Mixed field: older rows may hold the id as a string.
+				medication: anyIdForm(medicationId),
+			});
+		if (nameStillInUse) {
+			return { logs: linkedLogs, patterns: 0 };
+		}
 
-	async removePatternsByTargetName(userId: string, targetName: string) {
-		return this.adherencePatternModel.deleteMany({
-			userId,
-			targetType: PatternTargetType.MEDICATION,
-			targetName,
-		});
+		const sameName = new RegExp(`^${escapeRegExp(name)}$`, 'i');
+		const [{ deletedCount: unlinkedLogs }, { deletedCount: patterns }] =
+			await Promise.all([
+				this.adherenceLogModel.deleteMany({
+					userId,
+					targetType: TargetType.MEDICATION,
+					targetName: sameName,
+					medication: { $exists: false },
+				}),
+				this.adherencePatternModel.deleteMany({
+					userId,
+					targetType: PatternTargetType.MEDICATION,
+					targetName: sameName,
+				}),
+			]);
+		return { logs: linkedLogs + unlinkedLogs, patterns };
 	}
 
 	async removePatternsByUserId(userId: string) {
