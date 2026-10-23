@@ -6,5 +6,6 @@ export {
 	escapeRegExp,
 	resolveSearchableFields,
 } from './regex.helper';
+export { resolveForbidUnknownFields } from './validation.helper';
 export { getStartOfWeek, isNewWeek } from './week-determinant.helper';
 export { zip } from './zip.helper';

@@ -110,6 +110,90 @@ describe('ClientService', () => {
 			expect(result).toBeDefined();
 		});
 
+		describe('back-dated (scheduledFor)', () => {
+			const medId = new Types.ObjectId().toString();
+			const eightAm = { hour: 8, minutes: 0, timeDesignators: 'AM' };
+
+			beforeEach(() => {
+				vi.useFakeTimers();
+				vi.setSystemTime(new Date(2026, 9, 23, 10, 0));
+				medicationsService.findOwnedById.mockResolvedValue({
+					_id: medId,
+					name: 'Metformin',
+					patient: new Types.ObjectId().toString(),
+					frequency: { repeatEvery: 1, repetitionType: 'daily' },
+					startDate: new Date(2026, 9, 1),
+					morning: { time: eightAm },
+				} as any);
+				adherencesService.upsertAdherenceLog.mockResolvedValue('log-1' as any);
+			});
+
+			afterEach(() => {
+				vi.useRealTimers();
+			});
+
+			it("confirms yesterday's dose at its own time, flagged PARTIAL past 4 h", async () => {
+				const result = await service.confirmMedication(
+					medId,
+					'user-1',
+					MedicationSection.MORNING,
+					new Date(2026, 9, 22),
+				);
+
+				const yesterdayEight = new Date(2026, 9, 22, 8, 0);
+				expect(result.scheduledFor).toEqual(yesterdayEight);
+				expect(adherencesService.upsertAdherenceLog).toHaveBeenCalledWith(
+					expect.objectContaining({ scheduledFor: yesterdayEight }),
+					expect.objectContaining({
+						scheduledFor: yesterdayEight,
+						status: 'partial',
+					}),
+				);
+			});
+
+			it('rejects a dose more than 48 h old', async () => {
+				await expect(
+					service.confirmMedication(
+						medId,
+						'user-1',
+						MedicationSection.MORNING,
+						new Date(2026, 9, 21),
+					),
+				).rejects.toThrow(/48 hours/);
+				expect(adherencesService.upsertAdherenceLog).not.toHaveBeenCalled();
+			});
+
+			it('rejects a dose from before the medication started', async () => {
+				medicationsService.findOwnedById.mockResolvedValue({
+					_id: medId,
+					patient: 'p1',
+					frequency: { repeatEvery: 1, repetitionType: 'daily' },
+					startDate: new Date(2026, 9, 23, 9, 0),
+					morning: { time: eightAm },
+				} as any);
+
+				await expect(
+					service.confirmMedication(
+						medId,
+						'user-1',
+						MedicationSection.MORNING,
+						new Date(2026, 9, 22),
+					),
+				).rejects.toThrow(/before the medication started/);
+			});
+
+			it('still refuses a dose that is not due yet', async () => {
+				await expect(
+					service.confirmMedication(
+						medId,
+						'user-1',
+						MedicationSection.MORNING,
+						new Date(2026, 9, 24),
+					),
+				).rejects.toThrow(/not yet time/);
+			});
+		});
+
 		it("should 404 on another user's medication without writing a log", async () => {
 			const otherUsersMedId = new Types.ObjectId().toString();
 			medicationsService.findOwnedById.mockRejectedValue(

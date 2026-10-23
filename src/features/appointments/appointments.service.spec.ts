@@ -153,6 +153,31 @@ describe('AppointmentsService', () => {
 		});
 	});
 
+	describe('findNearestAppointment', () => {
+		it('skips cancelled and completed visits and returns the status', async () => {
+			const chain = {
+				select: vi.fn().mockReturnThis(),
+				populate: vi.fn().mockReturnThis(),
+				sort: vi.fn().mockResolvedValue({ title: 'Review' }),
+			};
+			appointmentModel.findOne.mockReturnValue(chain as any);
+
+			await service.findNearestAppointment('user-1');
+
+			expect(appointmentModel.findOne).toHaveBeenCalledWith({
+				userId: 'user-1',
+				appointmentDate: { $gte: expect.any(Date) },
+				status: {
+					$nin: [AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED],
+				},
+			});
+			expect(chain.select).toHaveBeenCalledWith(
+				expect.stringContaining('status'),
+			);
+			expect(chain.sort).toHaveBeenCalledWith({ appointmentDate: 1 });
+		});
+	});
+
 	describe('cancelAppointment', () => {
 		it('should cancel appointment when requested by owner personnel', async () => {
 			const personnelId = new Types.ObjectId().toString();

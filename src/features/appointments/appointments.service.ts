@@ -163,8 +163,15 @@ export class AppointmentsService {
 
 	findNearestAppointment(userId: string) {
 		return this.appointmentModel
-			.findOne({ userId, appointmentDate: { $gte: new Date() } })
-			.select('title appointmentDate hostPersonnel')
+			.findOne({
+				userId,
+				appointmentDate: { $gte: new Date() },
+				// A cancelled or already-completed visit is not "upcoming".
+				status: {
+					$nin: [AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED],
+				},
+			})
+			.select('title appointmentDate status hostPersonnel')
 			.populate({
 				path: 'hostPersonnel',
 				select: 'userName facility',

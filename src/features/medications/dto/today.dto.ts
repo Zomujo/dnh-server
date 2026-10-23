@@ -1,5 +1,5 @@
 import { ApiProperty, ApiResponseProperty } from '@nestjs/swagger';
-import { IsEnum } from 'class-validator';
+import { IsEnum, IsISO8601, IsOptional } from 'class-validator';
 
 export enum MedicationSection {
 	MORNING = 'MORNING',
@@ -15,6 +15,22 @@ export class TodaysMedicationsQueryDto {
 	})
 	@IsEnum(MedicationSection)
 	section: MedicationSection;
+}
+
+/** How far back a dose can be confirmed (e.g. one taken while offline). */
+export const MAX_DOSE_CONFIRM_BACKDATE_HOURS = 48;
+
+export class ConfirmMedicationQueryDto extends TodaysMedicationsQueryDto {
+	@ApiProperty({
+		description:
+			'Day of the dose being confirmed (ISO date or datetime). Defaults to today. ' +
+			`The dose time on that day must be at most ${MAX_DOSE_CONFIRM_BACKDATE_HOURS} h ago.`,
+		required: false,
+		example: '2026-10-22',
+	})
+	@IsOptional()
+	@IsISO8601()
+	scheduledFor?: string;
 }
 
 export class TodaysMedicationCountDto {

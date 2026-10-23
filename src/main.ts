@@ -5,7 +5,11 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { useContainer } from 'class-validator';
 import { AppModule } from './app.module';
 import { NodeEnvs } from './common/enums';
-import { resolveCorsOrigins, resolveTrustProxy } from './common/utils/helpers';
+import {
+	resolveCorsOrigins,
+	resolveForbidUnknownFields,
+	resolveTrustProxy,
+} from './common/utils/helpers';
 import { DomainLogger } from './core/logging/logging.service';
 
 async function bootstrap() {
@@ -39,6 +43,8 @@ async function bootstrap() {
 	app.useGlobalPipes(
 		new ValidationPipe({
 			whitelist: true,
+			// Staging: unknown fields are a 400 rather than silently dropped.
+			forbidNonWhitelisted: resolveForbidUnknownFields(environment),
 			transform: true,
 		}),
 	);

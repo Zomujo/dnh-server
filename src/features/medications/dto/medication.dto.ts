@@ -60,8 +60,9 @@ export class DosingSchedule {
 	@IsNotEmpty()
 	quantity: DosingQuantityDto;
 
+	// Server-managed reminder id; not accepted from the request.
 	@ApiResponseProperty({ example: '678fa53f3a0ba70822aa3555' })
-	notification?: string;
+	declare notification?: string;
 }
 
 export class MedicationDto {
@@ -198,7 +199,8 @@ export class MedicationDto {
 	notes?: string;
 
 	@ApiPropertyOptional({
-		description: 'Morning dosing schedule',
+		description: 'Morning dosing schedule. On update, null removes it.',
+		nullable: true,
 		type: DosingSchedule,
 	})
 	@IsOptional()
@@ -207,7 +209,8 @@ export class MedicationDto {
 	morning?: DosingSchedule;
 
 	@ApiPropertyOptional({
-		description: 'Afternoon dosing schedule',
+		description: 'Afternoon dosing schedule. On update, null removes it.',
+		nullable: true,
 		type: DosingSchedule,
 	})
 	@IsOptional()
@@ -216,7 +219,8 @@ export class MedicationDto {
 	afternoon?: DosingSchedule;
 
 	@ApiPropertyOptional({
-		description: 'Evening dosing schedule',
+		description: 'Evening dosing schedule. On update, null removes it.',
+		nullable: true,
 		type: DosingSchedule,
 	})
 	@IsOptional()

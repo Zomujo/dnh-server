@@ -41,6 +41,7 @@ import { GetFacilitiesQueryDto } from '@/features/facilities/dto';
 import { FacilitiesService } from '@/features/facilities/facilities.service';
 import {
 	CreateMedicationDto,
+	MAX_DOSE_CONFIRM_BACKDATE_HOURS,
 	MedicationSection,
 	UpdateMedicationDto,
 } from '@/features/medications/dto';
@@ -491,6 +492,7 @@ export class ClientService {
 		medicationId: string,
 		userId: string,
 		section: MedicationSection,
+		day: Date = new Date(),
 	) {
 		const medication = await this.medicationsService.findOwnedById(
 			medicationId,
@@ -513,7 +515,24 @@ export class ClientService {
 		// The scheduled dose datetime — the stable identity of "which dose" is
 		// being confirmed (used for the unique index below), not when the
 		// patient actually tapped confirm. See takenAt below for that.
-		const scheduledFor = this.doseTimeOn(schedule.time);
+		const scheduledFor = this.doseTimeOn(schedule.time, day);
+
+		// Back-dated confirmations (a dose taken while offline) are allowed for
+		// a short window only, and never before the course started. The 4 h
+		// PARTIAL rule below still applies relative to this dose time.
+		if (
+			differenceInHours(new Date(), scheduledFor) >
+			MAX_DOSE_CONFIRM_BACKDATE_HOURS
+		) {
+			throw new BadRequestException(
+				`Doses can only be confirmed up to ${MAX_DOSE_CONFIRM_BACKDATE_HOURS} hours after they were due`,
+			);
+		}
+		if (scheduledFor < startOfDay(medication.startDate)) {
+			throw new BadRequestException(
+				'Cannot confirm a dose from before the medication started',
+			);
+		}
 
 		if (new Date() < scheduledFor) {
 			const { hour, minutes, timeDesignators } = schedule.time;

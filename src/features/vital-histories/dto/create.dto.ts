@@ -12,6 +12,7 @@ import {
 	subHours,
 	subMonths,
 } from 'date-fns';
+import { fromZonedTime, toZonedTime } from 'date-fns-tz';
 import { VitalHistoryDto } from './vital-history.dto';
 
 export const shortenedDay: Record<string, string> = {
@@ -63,7 +64,8 @@ export class LoadVitalHistoryDto extends PickType(VitalHistoryDto, [
 	'value',
 	'recordedAt',
 ]) {
-	patient: string;
+	// Set by the server from the caller's account.
+	declare patient: string;
 }
 
 export class CreateVitalHistoryDto extends PickType(VitalHistoryDto, [
@@ -98,11 +100,32 @@ export enum QueryDateRange {
 	THIS_YEAR = 'thisYear',
 }
 
+/**
+ * Window for a preset range. With `tz` (IANA, e.g. Africa/Accra) the day,
+ * month and year boundaries are that zone's; otherwise the server's.
+ */
 export const getDateRangeFilter = (
 	dateRange: DateRange | QueryDateRange,
-): { timestamp: { $gte: Date; $lte: Date }; groupby?: string } | undefined => {
-	const now = new Date();
+	tz?: string,
+): { timestamp: { $gte: Date; $lte: Date } } | undefined => {
+	const window = presetWindow(
+		dateRange,
+		tz ? toZonedTime(new Date(), tz) : new Date(),
+	);
+	if (!window || !tz) return window;
+	return {
+		timestamp: {
+			$gte: fromZonedTime(window.timestamp.$gte, tz),
+			$lte: fromZonedTime(window.timestamp.$lte, tz),
+		},
+	};
+};
 
+// `now` is wall-clock time in the zone the boundaries are taken in.
+const presetWindow = (
+	dateRange: DateRange | QueryDateRange,
+	now: Date,
+): { timestamp: { $gte: Date; $lte: Date } } | undefined => {
 	switch (dateRange) {
 		case DateRange.TODAY:
 			return {
@@ -110,7 +133,6 @@ export const getDateRangeFilter = (
 					$gte: startOfDay(subHours(now, 24)),
 					$lte: endOfDay(now),
 				},
-				groupby: 'hour',
 			};
 
 		case DateRange.THIS_WEEK:
@@ -119,7 +141,6 @@ export const getDateRangeFilter = (
 					$gte: startOfDay(subDays(now, 7)),
 					$lte: endOfDay(now),
 				},
-				groupby: 'day',
 			};
 
 		case DateRange.THIS_MONTH:
@@ -128,7 +149,6 @@ export const getDateRangeFilter = (
 					$gte: startOfDay(subMonths(now, 1)),
 					$lte: endOfDay(now),
 				},
-				groupby: 'week',
 			};
 
 		case QueryDateRange.LAST_30_DAYS:
@@ -137,7 +157,6 @@ export const getDateRangeFilter = (
 					$gte: startOfDay(subMonths(now, 1)),
 					$lte: endOfDay(now),
 				},
-				groupby: 'week',
 			};
 
 		case DateRange.LAST_MONTH: {
@@ -147,7 +166,6 @@ export const getDateRangeFilter = (
 					$gte: startOfMonth(lastMonth),
 					$lte: endOfMonth(lastMonth),
 				},
-				groupby: 'day',
 			};
 		}
 
@@ -158,7 +176,6 @@ export const getDateRangeFilter = (
 					$gte: startOfMonth(lastThreeMonths),
 					$lte: endOfMonth(now),
 				},
-				groupby: 'week',
 			};
 		}
 
@@ -168,7 +185,6 @@ export const getDateRangeFilter = (
 					$gte: startOfYear(now),
 					$lte: endOfYear(now),
 				},
-				groupby: 'month',
 			};
 
 		default:

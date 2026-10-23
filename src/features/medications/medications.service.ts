@@ -260,24 +260,37 @@ export class MedicationsService {
 		if (dto.notes !== undefined) medication.notes = dto.notes;
 
 		const scheduleKeys = ['morning', 'afternoon', 'evening'] as const;
-		const updatedSchedules: Array<{
-			key: (typeof scheduleKeys)[number];
-			schedule: NonNullable<UpdateMedicationDto['morning']>;
-		}> = [];
 
 		for (const key of scheduleKeys) {
-			const dtoSchedule = dto[key];
-			if (!dtoSchedule) continue;
+			// undefined: leave the section as is. null: remove it.
+			const dtoSchedule = dto[key] as
+				| NonNullable<UpdateMedicationDto['morning']>
+				| null
+				| undefined;
+			if (dtoSchedule === undefined) continue;
 
 			const existingSchedule = (medication as any)[key];
+			const existingNotification = existingSchedule?.notification?.toString();
 
-			if (existingSchedule?.notification) {
-				await this.notificationsService.update(
-					existingSchedule.notification.toString(),
-					{
-						startDate: this.buildScheduleTime(dtoSchedule.time),
-					},
-				);
+			if (dtoSchedule === null) {
+				if (existingNotification) {
+					try {
+						await this.notificationsService.remove(existingNotification);
+					} catch {
+						// reminder may already be gone
+					}
+				}
+				medication.set(key, undefined);
+				continue;
+			}
+
+			if (existingNotification) {
+				await this.notificationsService.update(existingNotification, {
+					startDate: this.buildScheduleTime(dtoSchedule.time),
+				});
+				// Keep the link to the existing reminder; the incoming schedule
+				// doesn't carry it.
+				(dtoSchedule as any).notification = existingNotification;
 			} else {
 				const notificationId = await this.notificationsService.create({
 					userId: medication.userId,
@@ -300,19 +313,18 @@ export class MedicationsService {
 				(dtoSchedule as any).notification = notificationId.toString();
 			}
 
-			updatedSchedules.push({ key, schedule: dtoSchedule });
+			medication.set(key, dtoSchedule);
 		}
 
-		if (updatedSchedules.length > 0) {
-			medication.frequency = {
-				repeatEvery: updatedSchedules.length,
-				repetitionType: RepetitionType.DAILY,
-			};
-		}
-
-		for (const { key, schedule } of updatedSchedules) {
-			(medication as any)[key] = schedule;
-		}
+		// Doses per day, from every section the medication now has, not just
+		// the ones in this request (as in create()).
+		const remainingSections = scheduleKeys.filter(
+			(key) => (medication as any)[key]?.time,
+		).length;
+		medication.frequency = {
+			repeatEvery: remainingSections || 1,
+			repetitionType: RepetitionType.DAILY,
+		};
 
 		await medication.save();
 
@@ -352,13 +364,16 @@ export class MedicationsService {
 			}
 		}
 
-		await this.adherencesService.removeLogsByTargetName(
+		const nameStillInUse = await this.medicationModel.exists({
+			userId,
+			_id: { $ne: medication._id },
+			name: new RegExp(`^${escapeRegExp(medication.name)}$`, 'i'),
+		});
+		await this.adherencesService.removeMedicationHistory(
 			medication.userId,
+			medication._id,
 			medication.name,
-		);
-		await this.adherencesService.removePatternsByTargetName(
-			medication.userId,
-			medication.name,
+			Boolean(nameStillInUse),
 		);
 
 		await this.dhVectorsService.deleteByDocumentId(medication._id.toString());

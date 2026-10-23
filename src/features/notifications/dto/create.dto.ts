@@ -6,7 +6,7 @@ import { NotificationDto } from './notification.dto';
 export class CreateNotificationDto extends OmitType(NotificationDto, [
 	'patient',
 ]) {
-	userId: string;
+	declare userId: string;
 	@ApiProperty({
 		example: 'some-mongo-id',
 		description: 'ID of the patient',

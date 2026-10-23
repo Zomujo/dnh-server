@@ -88,7 +88,8 @@ export class PaginationRequestDto {
 	@Type(() => Date)
 	endDate?: Date;
 
-	searchQueries?: object[] = [];
+	// Built by the server from the filters; never read from the request.
+	declare searchQueries?: object[];
 }
 
 export class GetOneRequestDto extends PickType(PaginationRequestDto, [

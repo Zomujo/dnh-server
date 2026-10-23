@@ -23,9 +23,10 @@ export class LoginPersonnelDto {
 	@IsNotEmpty()
 	password: string;
 
-	role?: PersonnelRoles;
+	// Filled in by the server, not read from the request.
+	declare role?: PersonnelRoles;
 
-	provider?: PersonnelProviders;
+	declare provider?: PersonnelProviders;
 
-	providerUserId?: string;
+	declare providerUserId?: string;
 }

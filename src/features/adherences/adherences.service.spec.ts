@@ -6,7 +6,10 @@ import { Patient } from '@/features/patients/entities/patient.entity';
 import { Medication } from '../medications/entities/medication.entity';
 import { AdherencesService } from './adherences.service';
 import { AdherenceLog, TargetType } from './entities/adherence-log.entity';
-import { AdherencePattern } from './entities/adherence-pattern.entity';
+import {
+	AdherencePattern,
+	PatternTargetType,
+} from './entities/adherence-pattern.entity';
 
 describe('AdherencesService', () => {
 	let service: AdherencesService;
@@ -147,19 +150,62 @@ describe('AdherencesService', () => {
 	});
 
 	describe('remove functions', () => {
-		it('removeLogsByTargetName should delete medication logs matching targetName', async () => {
-			adherenceLogModel.deleteMany.mockResolvedValue({
-				deletedCount: 2,
-			} as any);
+		describe('removeMedicationHistory', () => {
+			const medicationId = new Types.ObjectId();
 
-			const result = await service.removeLogsByTargetName('u1', 'Aspirin');
+			it('deletes logs by medication id and, when the name is free, name-level data', async () => {
+				adherenceLogModel.deleteMany
+					.mockResolvedValueOnce({ deletedCount: 3 } as any)
+					.mockResolvedValueOnce({ deletedCount: 1 } as any);
+				adherencePatternModel.deleteMany.mockResolvedValue({
+					deletedCount: 1,
+				} as any);
 
-			expect(adherenceLogModel.deleteMany).toHaveBeenCalledWith({
-				userId: 'u1',
-				targetType: TargetType.MEDICATION,
-				targetName: 'Aspirin',
+				const result = await service.removeMedicationHistory(
+					'u1',
+					medicationId,
+					'Aspirin',
+					false,
+				);
+
+				expect(adherenceLogModel.deleteMany).toHaveBeenNthCalledWith(1, {
+					userId: 'u1',
+					medication: medicationId,
+				});
+				expect(adherenceLogModel.deleteMany).toHaveBeenNthCalledWith(2, {
+					userId: 'u1',
+					targetType: TargetType.MEDICATION,
+					targetName: /^Aspirin$/i,
+					medication: { $exists: false },
+				});
+				expect(adherencePatternModel.deleteMany).toHaveBeenCalledWith({
+					userId: 'u1',
+					targetType: PatternTargetType.MEDICATION,
+					targetName: /^Aspirin$/i,
+				});
+				expect(result).toEqual({ logs: 4, patterns: 1 });
 			});
-			expect(result).toEqual({ deletedCount: 2 });
+
+			it('keeps name-level data while another medication has the same name', async () => {
+				adherenceLogModel.deleteMany.mockResolvedValue({
+					deletedCount: 2,
+				} as any);
+
+				const result = await service.removeMedicationHistory(
+					'u1',
+					medicationId,
+					'Aspirin',
+					true,
+				);
+
+				expect(adherenceLogModel.deleteMany).toHaveBeenCalledTimes(1);
+				expect(adherenceLogModel.deleteMany).toHaveBeenCalledWith({
+					userId: 'u1',
+					medication: medicationId,
+				});
+				expect(adherencePatternModel.deleteMany).not.toHaveBeenCalled();
+				expect(result).toEqual({ logs: 2, patterns: 0 });
+			});
 		});
 
 		it('removeLogsByUserId should delete all adherence logs for a user', async () => {

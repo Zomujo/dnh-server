@@ -25,9 +25,10 @@ export class CreatePersonnelDto {
 		typeof value === 'string' ? value.toLowerCase().trim() : value,
 	)
 	email?: string;
-	provider?: PersonnelProviders;
+	// Filled in by the server, not read from the request.
+	declare provider?: PersonnelProviders;
 
-	providerUserId?: string;
+	declare providerUserId?: string;
 
 	@ApiPropertyOptional({
 		description: 'Personnel ID (MongoDB ObjectId) to update',

@@ -7,5 +7,5 @@ export class CreatePersonnelAccountDto extends PickType(PersonnelAccountDto, [
 	'email',
 	'password',
 ]) {
-	personnel: string;
+	declare personnel: string;
 }

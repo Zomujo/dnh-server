@@ -153,6 +153,9 @@ describe('MedicationsService', () => {
 				name: 'Am萨洛平',
 				morning: { notification: 'notif-1' },
 				save: vi.fn().mockResolvedValue(true),
+				set(key: string, value: unknown) {
+					(this as any)[key] = value;
+				},
 			};
 
 			medicationModel.findOne.mockResolvedValue(mockMedication as any);
@@ -173,6 +176,78 @@ describe('MedicationsService', () => {
 			});
 			expect(mockMedication.save).toHaveBeenCalled();
 			expect(result).toBe(mockMedId);
+		});
+
+		const time = (hour: number, timeDesignators: 'AM' | 'PM') => ({
+			time: { hour, minutes: 0, timeDesignators },
+		});
+		const fakeMedication = (fields: Record<string, unknown>) => ({
+			_id: new Types.ObjectId().toString(),
+			userId: 'u1',
+			patient: 'p1',
+			name: 'Metformin',
+			frequency: { repeatEvery: 3, repetitionType: 'daily' },
+			save: vi.fn().mockResolvedValue(true),
+			set(key: string, value: unknown) {
+				(this as any)[key] = value;
+			},
+			...fields,
+		});
+
+		it('removes a section sent as null, cancels its reminder and recounts doses', async () => {
+			const medication = fakeMedication({
+				morning: { ...time(8, 'AM'), notification: 'n-morning' },
+				afternoon: { ...time(1, 'PM'), notification: 'n-afternoon' },
+				evening: { ...time(8, 'PM'), notification: 'n-evening' },
+			});
+			medicationModel.findOne.mockResolvedValue(medication as any);
+			notificationsService.remove.mockResolvedValue({} as any);
+			dhVectorsService.create.mockResolvedValue({} as any);
+
+			await service.update(medication._id, { afternoon: null } as any, 'u1');
+
+			expect(notificationsService.remove).toHaveBeenCalledWith('n-afternoon');
+			expect((medication as any).afternoon).toBeUndefined();
+			expect((medication as any).morning.notification).toBe('n-morning');
+			expect(medication.frequency.repeatEvery).toBe(2);
+		});
+
+		it('counts every remaining section, not just the edited one', async () => {
+			const medication = fakeMedication({
+				morning: { ...time(8, 'AM'), notification: 'n-morning' },
+				evening: { ...time(8, 'PM'), notification: 'n-evening' },
+			});
+			medicationModel.findOne.mockResolvedValue(medication as any);
+			notificationsService.update.mockResolvedValue({} as any);
+			dhVectorsService.create.mockResolvedValue({} as any);
+
+			await service.update(
+				medication._id,
+				{ morning: time(9, 'AM') } as any,
+				'u1',
+			);
+
+			expect(medication.frequency.repeatEvery).toBe(2);
+			// The edited section keeps its link to the existing reminder.
+			expect((medication as any).morning).toMatchObject({
+				time: { hour: 9 },
+				notification: 'n-morning',
+			});
+		});
+
+		it('leaves sections that are absent from the request untouched', async () => {
+			const medication = fakeMedication({
+				morning: { ...time(8, 'AM'), notification: 'n-morning' },
+			});
+			medicationModel.findOne.mockResolvedValue(medication as any);
+			dhVectorsService.create.mockResolvedValue({} as any);
+
+			await service.update(medication._id, { dosage: '1g' } as any, 'u1');
+
+			expect(notificationsService.remove).not.toHaveBeenCalled();
+			expect(notificationsService.update).not.toHaveBeenCalled();
+			expect((medication as any).morning.notification).toBe('n-morning');
+			expect(medication.frequency.repeatEvery).toBe(1);
 		});
 
 		it('should throw NotFoundException if medication to update does not exist', async () => {
@@ -196,26 +271,52 @@ describe('MedicationsService', () => {
 
 			medicationModel.findOne.mockResolvedValue(mockMedication as any);
 			notificationsService.remove.mockResolvedValue({} as any);
-			adherencesService.removeLogsByTargetName.mockResolvedValue({} as any);
-			adherencesService.removePatternsByTargetName.mockResolvedValue({} as any);
+			medicationModel.exists.mockResolvedValue(null);
+			adherencesService.removeMedicationHistory.mockResolvedValue({} as any);
 			dhVectorsService.deleteByDocumentId.mockResolvedValue({} as any);
 			medicationModel.findByIdAndDelete.mockResolvedValue({} as any);
 
 			await service.remove(mockMedId, 'u1');
 
 			expect(notificationsService.remove).toHaveBeenCalledWith('notif-99');
-			expect(adherencesService.removeLogsByTargetName).toHaveBeenCalledWith(
+			expect(adherencesService.removeMedicationHistory).toHaveBeenCalledWith(
 				'u1',
+				mockMedId,
 				'Aspirin',
-			);
-			expect(adherencesService.removePatternsByTargetName).toHaveBeenCalledWith(
-				'u1',
-				'Aspirin',
+				false,
 			);
 			expect(dhVectorsService.deleteByDocumentId).toHaveBeenCalledWith(
 				mockMedId,
 			);
 			expect(medicationModel.findByIdAndDelete).toHaveBeenCalledWith(mockMedId);
+		});
+	});
+
+	describe("remove keeps another same-named medication's history", () => {
+		it('tells adherences the name is still in use', async () => {
+			const id = new Types.ObjectId().toString();
+			medicationModel.findOne.mockResolvedValue({
+				_id: id,
+				userId: 'u1',
+				name: 'Aspirin',
+			} as any);
+			medicationModel.exists.mockResolvedValue({ _id: 'other' } as any);
+			dhVectorsService.deleteByDocumentId.mockResolvedValue({} as any);
+			medicationModel.findByIdAndDelete.mockResolvedValue({} as any);
+
+			await service.remove(id, 'u1');
+
+			expect(medicationModel.exists).toHaveBeenCalledWith({
+				userId: 'u1',
+				_id: { $ne: id },
+				name: /^Aspirin$/i,
+			});
+			expect(adherencesService.removeMedicationHistory).toHaveBeenCalledWith(
+				'u1',
+				id,
+				'Aspirin',
+				true,
+			);
 		});
 	});
 
