@@ -1,8 +1,17 @@
-import { Body, Controller, Header, HttpCode, Post } from '@nestjs/common';
+import {
+	Body,
+	Controller,
+	Header,
+	HttpCode,
+	Post,
+	UseGuards,
+} from '@nestjs/common';
 import { seconds, Throttle } from '@nestjs/throttler';
 import { UssdSessionDto } from './dto/ussd-session.dto';
 import { UssdService } from './ussd.service';
+import { UssdCallbackGuard } from './ussd-callback.guard';
 
+@UseGuards(UssdCallbackGuard)
 @Controller('ussd')
 export class UssdController {
 	constructor(private readonly ussdService: UssdService) {}

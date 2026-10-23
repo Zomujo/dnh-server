@@ -279,4 +279,4 @@ parentMessageId: <optional - string>
 | `file` | file | yes | Max 50 MB — jpeg, jpg, png, gif, mp4, mpeg, m4a, mp3, quicktime, webm |
 | `parentMessageId` | query | no | If this media is a reply to another message |
 
-Returns the saved `ChatMessage` with the Firebase Storage URL in `content`.
+Returns the saved `ChatMessage` with a signed Firebase Storage URL in `content`. Media URLs (here and in history) **expire after 15 minutes** — re-fetch history rather than caching them. Files over 50 MB are rejected with `413`.

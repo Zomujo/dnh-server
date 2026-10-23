@@ -9,12 +9,13 @@ import {
 	WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { resolveCorsOrigins } from '@/common/utils/helpers';
 import { ChatService } from './chat.service';
 import { MessageType } from './entities/message.entity';
 import { WsAuthVerifier } from './ws-auth.verifier';
 
 @WebSocketGateway({
-	cors: { origin: '*' },
+	cors: { origin: resolveCorsOrigins() },
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 	private logger = new Logger(ChatGateway.name);

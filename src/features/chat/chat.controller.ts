@@ -1,4 +1,3 @@
-import * as crypto from 'node:crypto';
 import {
 	Controller,
 	Get,
@@ -11,7 +10,6 @@ import {
 	UploadedFile,
 	UseInterceptors,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBody, ApiConsumes, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { CustomApiResponse, GetUser } from '@/common/decorators';
@@ -32,20 +30,20 @@ import {
 } from './dto';
 import { MessageType } from './entities/message.entity';
 
+// Enforced by multer while streaming (413), so an oversized upload is never
+// fully buffered; the pipe's MaxSizeValidator alone ran only afterwards.
+const MAX_MEDIA_BYTES = 50 * 1024 * 1024;
+
 @ApiTags('Chat')
 @Controller('chat')
 export class ChatController {
 	private logger = new Logger(ChatController.name);
-	private storageBucket: string;
 
 	constructor(
 		private readonly chatService: ChatService,
 		private readonly firebaseService: FirebaseService,
 		private readonly chatGateway: ChatGateway,
-		private readonly configService: ConfigService,
-	) {
-		this.storageBucket = this.configService.get<string>('BASE_STORAGE_BUCKET')!;
-	}
+	) {}
 
 	@CustomApiResponse(['created', 'authorizeChronicCare'], {
 		type: ChatMessageResponseDto,
@@ -63,12 +61,14 @@ export class ChatController {
 		type: String,
 		description: 'Optional parent message ID if this media is a reply',
 	})
-	@UseInterceptors(FileInterceptor('file'))
+	@UseInterceptors(
+		FileInterceptor('file', { limits: { fileSize: MAX_MEDIA_BYTES } }),
+	)
 	async uploadMedia(
 		@Param('roomId', ParseMongoIdPipe) roomId: string,
 		@UploadedFile(
 			new ParseFilePipeBuilder()
-				.addMaxSizeValidator({ maxSize: 50 * 1024 * 1024 })
+				.addMaxSizeValidator({ maxSize: MAX_MEDIA_BYTES })
 				.addFileTypeValidator({
 					fileType: /(jpeg|jpg|png|gif|mp4|mpeg|m4a|mp3|quicktime|webm)$/i,
 					errorMessage: `Unsupported filetype. Supported filetypes are: jpeg, jpg, png, gif, mp4, mpeg, m4a, mp3, quicktime, webm`,
@@ -107,12 +107,14 @@ export class ChatController {
 		type: String,
 		description: 'Optional parent message ID if this media is a reply',
 	})
-	@UseInterceptors(FileInterceptor('file'))
+	@UseInterceptors(
+		FileInterceptor('file', { limits: { fileSize: MAX_MEDIA_BYTES } }),
+	)
 	async uploadMediaClient(
 		@Param('roomId', ParseMongoIdPipe) roomId: string,
 		@UploadedFile(
 			new ParseFilePipeBuilder()
-				.addMaxSizeValidator({ maxSize: 50 * 1024 * 1024 })
+				.addMaxSizeValidator({ maxSize: MAX_MEDIA_BYTES })
 				.addFileTypeValidator({
 					fileType: /(jpeg|jpg|png|gif|mp4|mpeg|m4a|mp3|quicktime|webm)$/i,
 				})
@@ -270,7 +272,6 @@ export class ChatController {
 		// write files under the room's path or inject a message into it.
 		await this.chatService.assertParticipant(roomId, userId);
 
-		const uuidToken = crypto.randomUUID();
 		const mime = file.mimetype;
 
 		let folder: string;
@@ -287,11 +288,13 @@ export class ChatController {
 			messageType = MessageType.AUDIO;
 		}
 
-		const storagePath = `hcp_chats/${roomId}/${folder}`;
-
-		await this.firebaseService.uploadFile(file, storagePath, uuidToken);
-
-		const fileUrl = `https://firebasestorage.googleapis.com/v0/b/${this.storageBucket}/o/${encodeURIComponent(storagePath + '/' + file.originalname)}?alt=media&token=${uuidToken}`;
+		const fileUrl = await this.firebaseService.uploadFile(
+			file,
+			this.firebaseService.newObjectPath(
+				`hcp_chats/${roomId}/${folder}`,
+				file.originalname,
+			),
+		);
 
 		const savedMsg = await this.chatService.saveMessage(
 			userId!,
@@ -301,10 +304,13 @@ export class ChatController {
 			parentMessageId,
 		);
 
-		this.chatGateway.server.to(roomId).emit('newMessage', savedMsg);
+		// The stored URL carries no access token; hand out a short-lived
+		// signed one, same as message history does.
+		const message = await this.chatService.withSignedMedia(savedMsg);
+		this.chatGateway.server.to(roomId).emit('newMessage', message);
 
 		return new ApiSuccessResponseDto(
-			savedMsg,
+			message,
 			HttpStatus.CREATED,
 			'Media uploaded successfully',
 		);

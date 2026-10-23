@@ -1,9 +1,11 @@
-import { RequestMethod, ValidationPipe } from '@nestjs/common';
+import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { useContainer } from 'class-validator';
 import { AppModule } from './app.module';
 import { NodeEnvs } from './common/enums';
+import { resolveCorsOrigins, resolveTrustProxy } from './common/utils/helpers';
 import { DomainLogger } from './core/logging/logging.service';
 
 async function bootstrap() {
@@ -11,7 +13,7 @@ async function bootstrap() {
 	const PORT = Number.isNaN(parsedPort) ? 4815 : parsedPort;
 	const environment = process.env.NODE_ENV as NodeEnvs;
 
-	const app = await NestFactory.create(AppModule, {
+	const app = await NestFactory.create<NestExpressApplication>(AppModule, {
 		bufferLogs: true,
 	});
 
@@ -19,7 +21,19 @@ async function bootstrap() {
 		app.useLogger(app.get(DomainLogger));
 	}
 
-	app.enableCors();
+	// Behind Railway's proxy every request arrives from the proxy's address;
+	// without this, req.ip (rate limiting, logs) is the same for everyone.
+	app.set('trust proxy', resolveTrustProxy());
+
+	// The mobile app isn't a browser and doesn't need CORS; only browser
+	// clients (the HCP web app) do, so production should list them.
+	const corsOrigins = resolveCorsOrigins();
+	if (corsOrigins === true && environment === NodeEnvs.PRODUCTION) {
+		new Logger('Bootstrap').warn(
+			'CORS_ORIGINS is not set: any browser origin may call this API.',
+		);
+	}
+	app.enableCors({ origin: corsOrigins });
 	useContainer(app.select(AppModule), { fallbackOnErrors: true });
 
 	app.useGlobalPipes(

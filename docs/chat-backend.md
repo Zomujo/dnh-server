@@ -155,11 +155,14 @@ Paginated message history for a room.
 ### POST `/chat/{hcp,client}/rooms/:roomId/media`
 Upload media file to a room.
 - Multipart form-data with `file` (required) and `parentMessageId` (optional query param)
-- Max 50 MB. Accepted types: jpeg, jpg, png, gif, mp4, mpeg, m4a, mp3, quicktime, webm
-- File uploaded to Firebase Storage; `ChatMessage` saved with the resulting URL in `content`
+- Max 50 MB, enforced by multer while streaming (`413` beyond it). Accepted types: jpeg, jpg, png, gif, mp4, mpeg, m4a, mp3, quicktime, webm
+- File uploaded to Firebase Storage at `hcp_chats/{roomId}/{images|videos|audios}/{uuid}{ext}` with **no download token**; `ChatMessage` stores the token-less object URL in `content`
 - `messageType` auto-detected from mime type (image/*, video/*, audio/*)
 - Sender: HCP uses `@GetUser('sub')`, client uses `@GetUser('uid')`
-- Returns the saved `ChatMessage` object
+- Returns the saved `ChatMessage` object, with `content` as a signed URL (see below)
+
+### Media URLs are short-lived
+Stored media URLs aren't publicly readable. Every read path — message history, session `latestMessage`, the media upload response and the `newMessage` broadcast for uploads — replaces media `content` with a **V4 signed URL valid for 15 minutes** (`ChatService.withSignedMedia` → `FirebaseService.signedUrlFor`). Clients must not cache these URLs; re-fetch history to get fresh ones. Legacy rows that still hold `?alt=media&token=` URLs are re-signed the same way.
 
 ---
 
@@ -204,7 +207,7 @@ All paginated endpoints use **page/limit offset-based pagination** (not cursor):
 ## Key Implementation Details & Gotchas
 
 ### 1. `latestMessage` in Sessions
-Raw content (including Firebase Storage URLs) is returned as-is. Friendly labels for media types (`🎤 Voice message`, `📷 Photo`, `🎬 Video`) are a **frontend concern** — the API does not transform session content.
+Content is returned as-is, except media URLs, which are signed (see *Media URLs are short-lived*). Friendly labels for media types (`🎤 Voice message`, `📷 Photo`, `🎬 Video`) are a **frontend concern** — the API does not transform session content.
 
 ### 2. Delete Behavior
 - **"Delete for me"**: Adds the requesting user's ID to `deletedFor: string[]` array. The `messageDeleted` event is emitted **only to the requester** with `deletedForEveryone: false`. The frontend should remove the message locally.

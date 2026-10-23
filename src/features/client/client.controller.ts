@@ -88,6 +88,9 @@ import {
 	PreloadedMedsQueryDto,
 } from './dto';
 
+// ~5 minutes of AAC voice note, with headroom.
+const MAX_VOICE_NOTE_BYTES = 10 * 1024 * 1024;
+
 @ApiTags('Client')
 @Controller('client')
 export class ClientController {
@@ -147,7 +150,10 @@ export class ClientController {
 	})
 	@Post('chat/audio')
 	@HttpCode(HttpStatus.OK)
-	@UseInterceptors(FileInterceptor('file'))
+	// multer enforces this while streaming (413), before the file is buffered
+	@UseInterceptors(
+		FileInterceptor('file', { limits: { fileSize: MAX_VOICE_NOTE_BYTES } }),
+	)
 	@ApiConsumes('multipart/form-data')
 	@ApiBody({
 		description: 'Audio file to be uploaded',
