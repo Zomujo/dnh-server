@@ -13,6 +13,7 @@ import { AppointmentsService } from './appointments.service';
 import { AppointmentStatus } from './dto';
 import { Appointment } from './entities/appointment.entity';
 
+const PATIENT_HEX = '6650a1b2c3d4e5f6a7b8c9d0';
 describe('AppointmentsService', () => {
 	let service: AppointmentsService;
 	let appointmentModel: Mocked<Model<Appointment>>;
@@ -309,13 +310,13 @@ describe('AppointmentsService', () => {
 				deletedCount: 2,
 			} as any);
 
-			const result = await service.removeByPatientId('patient-123');
+			const result = await service.removeByPatientId(PATIENT_HEX);
 
 			expect(reminderQueue.getJob).toHaveBeenCalledWith('app-1');
 			expect(reminderQueue.getJob).toHaveBeenCalledWith('app-2');
 			expect(remove).toHaveBeenCalledTimes(2);
 			expect(appointmentModel.deleteMany).toHaveBeenCalledWith({
-				patient: 'patient-123',
+				patient: { $in: [PATIENT_HEX, new Types.ObjectId(PATIENT_HEX)] },
 			});
 			expect(result).toBe(2);
 		});
