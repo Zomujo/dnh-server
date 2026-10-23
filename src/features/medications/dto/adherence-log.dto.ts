@@ -12,6 +12,20 @@ export class MedicationAdherenceDayDto {
 	id: string;
 }
 
+export class MedicationDoseDto {
+	@ApiResponseProperty({ example: '2026-10-22T08:00:00.000Z' })
+	scheduledFor: Date;
+
+	@ApiResponseProperty({ enum: ['morning', 'afternoon', 'evening'] })
+	section: 'morning' | 'afternoon' | 'evening';
+
+	@ApiResponseProperty({ enum: ['taken', 'partial', 'missed', 'pending'] })
+	status: 'taken' | 'partial' | 'missed' | 'pending';
+
+	@ApiResponseProperty({ example: '68e3ca3c2383b37fe4cb88a8' })
+	id?: string;
+}
+
 export class MedicationAdherenceLogsDto {
 	@ApiResponseProperty({ example: 'Metformin' })
 	medicationName: string;
@@ -21,6 +35,9 @@ export class MedicationAdherenceLogsDto {
 
 	@ApiResponseProperty({ type: [MedicationAdherenceDayDto] })
 	logs: MedicationAdherenceDayDto[];
+
+	@ApiResponseProperty({ type: [MedicationDoseDto] })
+	doses: MedicationDoseDto[];
 }
 
 export class AdherenceLogsQueryDto {

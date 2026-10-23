@@ -1,5 +1,6 @@
 import { getModelToken } from '@nestjs/mongoose';
 import { type Mocked, TestBed } from '@suites/unit';
+import { set, startOfDay, subDays } from 'date-fns';
 import { Model, Types } from 'mongoose';
 import { AdherenceStatus } from '@/features/patients/dto';
 import { Patient } from '@/features/patients/entities/patient.entity';
@@ -10,6 +11,37 @@ import {
 	AdherencePattern,
 	PatternTargetType,
 } from './entities/adherence-pattern.entity';
+
+const MORNING = { time: { hour: 8, minutes: 0, timeDesignators: 'AM' } };
+
+/** A morning-only medication, added long before any window under test. */
+const morningMedication = (id = new Types.ObjectId()) => ({
+	_id: id,
+	name: 'Metformin',
+	patient: 'p1',
+	startDate: new Date('2026-01-01T08:00:00'),
+	createdAt: new Date('2026-01-01T07:00:00'),
+	morning: MORNING,
+});
+
+/** A confirmed log for the morning dose `daysAgo` days before `now`. */
+const takenMorning = (
+	medication: Types.ObjectId,
+	now: Date,
+	daysAgo: number,
+) => ({
+	_id: new Types.ObjectId(),
+	medication,
+	scheduledFor: set(startOfDay(subDays(now, daysAgo)), { hours: 8 }),
+	taken: true,
+	status: 'taken',
+});
+
+const chain = (result: unknown) =>
+	({
+		select: vi.fn().mockReturnThis(),
+		lean: vi.fn().mockResolvedValue(result),
+	}) as any;
 
 describe('AdherencesService', () => {
 	let service: AdherencesService;
@@ -41,6 +73,10 @@ describe('AdherencesService', () => {
 		vi.clearAllMocks();
 	});
 
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it('should be defined', () => {
 		expect(service).toBeDefined();
 	});
@@ -51,19 +87,17 @@ describe('AdherencesService', () => {
 			const mockLog = { _id: mockId };
 			adherenceLogModel.findOneAndUpdate.mockResolvedValue(mockLog as any);
 
-			const startDate = new Date();
-			startDate.setDate(startDate.getDate() - 10);
-			medicationModel.find.mockReturnValue({
-				select: vi.fn().mockReturnThis(),
-				lean: vi.fn().mockResolvedValue([
-					{
-						startDate,
-						frequency: { repeatEvery: 1 },
-					},
-				]),
-			} as any);
-
-			adherenceLogModel.countDocuments.mockResolvedValue(10);
+			// Every morning dose of the last 30 days taken.
+			const now = new Date();
+			const medication = morningMedication();
+			medicationModel.find.mockReturnValue(chain([medication]));
+			adherenceLogModel.find.mockReturnValue(
+				chain(
+					Array.from({ length: 30 }, (_, i) =>
+						takenMorning(medication._id, now, i),
+					),
+				),
+			);
 			patientModel.findByIdAndUpdate.mockResolvedValue({} as any);
 
 			const filters = { userId: 'u1', patient: 'p1' };
@@ -119,33 +153,116 @@ describe('AdherencesService', () => {
 	});
 
 	describe('aggregateMedicationAdherence', () => {
-		it('should calculate 7-day adherence percentage', async () => {
-			adherenceLogModel.aggregate.mockResolvedValue([{ uniqueDays: 7 }] as any);
+		it('divides doses taken by doses settled over the last 7 days', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-06-10T12:00:00'));
+			const now = new Date();
+			const medication = morningMedication();
+			medicationModel.find.mockReturnValue(chain([medication]));
+			// Jun 4–7 taken. Jun 8 is past the 48 h window, so missed; Jun 9
+			// and 10 can still be confirmed, so they don't count yet.
+			adherenceLogModel.find.mockReturnValue(
+				chain([3, 4, 5, 6].map((d) => takenMorning(medication._id, now, d))),
+			);
 
 			const rate = await service.aggregateMedicationAdherence('u1');
 
-			expect(adherenceLogModel.aggregate).toHaveBeenCalled();
-			expect(rate).toBe(88); // 7 unique days out of 8-day inclusive window (7/8 * 100) = 87.5 -> 88
+			expect(rate).toBe(80); // 4 of 5 settled doses
 		});
 	});
 
 	describe('aggregateMedicationTakenByWeek', () => {
-		it('should return weekly breakdown of taken days', async () => {
+		it('counts doses per day and is taken only when all were', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-06-10T12:00:00')); // a Wednesday
 			const now = new Date();
-			adherenceLogModel.find.mockResolvedValue([
-				{ taken: true, takenAt: now },
-			] as any);
+			const medication = {
+				...morningMedication(),
+				evening: { time: { hour: 8, minutes: 0, timeDesignators: 'PM' } },
+			};
+			medicationModel.find.mockReturnValue(chain([medication]));
+			// Monday: both doses. Tuesday: morning only.
+			adherenceLogModel.find.mockReturnValue(
+				chain([
+					takenMorning(medication._id, now, 2),
+					{
+						...takenMorning(medication._id, now, 2),
+						_id: new Types.ObjectId(),
+						scheduledFor: new Date('2026-06-08T20:00:00'),
+					},
+					takenMorning(medication._id, now, 1),
+				]),
+			);
 
 			const days = await service.aggregateMedicationTakenByWeek('u1');
 
-			expect(days.length).toBe(7);
-			expect(days).toEqual(
-				expect.arrayContaining([
-					expect.objectContaining({
-						label: expect.any(String),
-					}),
-				]),
+			expect(days).toHaveLength(7);
+			expect(days[0]).toMatchObject({
+				label: 'M',
+				taken: true,
+				takenDoses: 2,
+				scheduledDoses: 2,
+			});
+			// Tuesday's evening dose can still be confirmed.
+			expect(days[1]).toMatchObject({
+				taken: null,
+				takenDoses: 1,
+				scheduledDoses: 2,
+			});
+			expect(days[6]).toMatchObject({ label: 'S', taken: null });
+		});
+	});
+
+	describe('recordMissedDoses', () => {
+		it('writes a missed log for each unconfirmed dose past its window', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-06-10T12:00:00'));
+			const now = new Date();
+			const medication = morningMedication();
+			medicationModel.distinct.mockResolvedValue(['u1'] as any);
+			medicationModel.find.mockReturnValue(chain([medication]));
+			// The window is the 72 h before now − 48 h: the mornings of Jun 6,
+			// 7 and 8. Jun 7 was confirmed.
+			adherenceLogModel.find.mockReturnValue(
+				chain([takenMorning(medication._id, now, 3)]),
 			);
+			adherenceLogModel.updateOne.mockResolvedValue({
+				upsertedId: new Types.ObjectId(),
+			} as any);
+			adherenceLogModel.findById.mockResolvedValue(null);
+			patientModel.findByIdAndUpdate.mockResolvedValue({} as any);
+
+			const recorded = await service.recordMissedDoses(now);
+
+			expect(recorded).toBe(2);
+			expect(adherenceLogModel.updateOne).toHaveBeenCalledWith(
+				{
+					userId: 'u1',
+					medication: medication._id,
+					scheduledFor: new Date('2026-06-08T08:00:00'),
+				},
+				{
+					$setOnInsert: expect.objectContaining({
+						taken: false,
+						status: 'missed',
+						section: 'morning',
+					}),
+				},
+				{ upsert: true },
+			);
+			expect(patientModel.findByIdAndUpdate).toHaveBeenCalledTimes(1);
+		});
+
+		it('does not count a dose another run already recorded', async () => {
+			medicationModel.distinct.mockResolvedValue(['u1'] as any);
+			medicationModel.find.mockReturnValue(chain([morningMedication()]));
+			adherenceLogModel.find.mockReturnValue(chain([]));
+			adherenceLogModel.updateOne.mockResolvedValue({
+				upsertedId: null,
+			} as any);
+
+			expect(await service.recordMissedDoses()).toBe(0);
+			expect(patientModel.findByIdAndUpdate).not.toHaveBeenCalled();
 		});
 	});
 

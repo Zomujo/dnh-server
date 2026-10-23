@@ -1,10 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ObjectId } from 'mongodb';
-import { Model, Types } from 'mongoose';
+import { HydratedDocument, Model, Types } from 'mongoose';
 import { BaseDH } from '../../../common/entities/base-dh.entity';
 import { Patient } from '../../patients/entities/patient.entity';
 import { myEmitter } from '../../patients/utils/summary.event';
-import { Sections } from '../../patients/utils/summary.util';
+import { Sections, upsertSummary } from '../../patients/utils/summary.util';
 import { upsertAdherencePattern } from '../utils/adherence.util';
 import { upsertOverallAdherencePattern } from '../utils/overview.util';
 import { AdherencePattern } from './adherence-pattern.entity';
@@ -83,6 +83,16 @@ export class AdherenceLog extends BaseDH {
 	})
 	scheduledFor?: Date;
 
+	@Prop({
+		type: String,
+		enum: ['morning', 'afternoon', 'evening'],
+		description:
+			"Which of the medication's daily doses this log settles. Kept so a " +
+			"later change to that dose's time still finds this log. Older logs " +
+			'without it are matched by time of day.',
+	})
+	section?: 'morning' | 'afternoon' | 'evening';
+
 	@Prop({ description: 'Whether the target was taken/adhered to' })
 	taken: boolean;
 
@@ -121,6 +131,33 @@ AdherenceLogSchema.index(
 	},
 );
 
+/** The 'upsertSummary' arguments that count one log in its patient's summary. */
+function summaryUpdateArgs(
+	doc: HydratedDocument<AdherenceLog>,
+): Parameters<typeof upsertSummary> {
+	return [
+		Sections.ADHERENCES,
+		{
+			[Sections.ADHERENCES]: {
+				data: doc,
+				model: doc.model('AdherenceLog'),
+			},
+		},
+		{ patientId: doc.patient, userId: doc.userId },
+		doc.model('Summary'),
+		doc.model('AugurNotification'),
+	] as unknown as Parameters<typeof upsertSummary>;
+}
+
+/**
+ * Counts a log written outside findOneAndUpdate (the missed-dose job) in
+ * the patient's summary. Awaited rather than emitted, so the job's logs
+ * for one patient update the summary one after another instead of racing.
+ */
+export async function recordInSummary(doc: HydratedDocument<AdherenceLog>) {
+	await upsertSummary(...summaryUpdateArgs(doc));
+}
+
 AdherenceLogSchema.post<AdherenceLog>(
 	'findOneAndUpdate',
 	async function (doc: AdherenceLog | null) {
@@ -139,16 +176,7 @@ AdherenceLogSchema.post<AdherenceLog>(
 			// );
 			myEmitter.emit(
 				'upsertSummary',
-				Sections.ADHERENCES,
-				{
-					[Sections.ADHERENCES]: {
-						data: doc,
-						model: doc.model('AdherenceLog'),
-					},
-				},
-				{ patientId: doc.patient, userId: doc.userId },
-				doc.model('Summary'),
-				doc.model('AugurNotification'),
+				...summaryUpdateArgs(doc as HydratedDocument<AdherenceLog>),
 			);
 			// await upsertAdherencePattern(
 			// 	doc,

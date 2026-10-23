@@ -1,12 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import {
-	differenceInCalendarDays,
+	eachDayOfInterval,
 	endOfMonth,
 	endOfWeek,
+	isSameDay,
+	startOfDay,
 	startOfMonth,
 	startOfWeek,
 	subDays,
+	subHours,
 } from 'date-fns';
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
@@ -14,6 +17,7 @@ import { flattenMeta } from '../../common/entities/base-dh.entity';
 import { anyIdForm, escapeRegExp } from '../../common/utils/helpers';
 import { AdherenceStatus } from '../../features/patients/dto';
 import { Patient } from '../../features/patients/entities/patient.entity';
+import { MAX_DOSE_CONFIRM_BACKDATE_HOURS } from '../medications/dto/today.dto';
 import { Medication } from '../medications/entities/medication.entity';
 import {
 	AdherenceLogQueryFilter,
@@ -21,11 +25,27 @@ import {
 	CreateAdherenceDto,
 	UpdateAdherenceDto,
 } from './dto';
-import { AdherenceLog, TargetType } from './entities/adherence-log.entity';
+import {
+	AdherenceLog,
+	recordInSummary,
+	Status,
+	TargetType,
+} from './entities/adherence-log.entity';
 import {
 	AdherencePattern,
 	PatternTargetType,
 } from './entities/adherence-pattern.entity';
+import {
+	adherenceRateOf,
+	type DoseLog,
+	type ResolvedDose,
+	resolveDoses,
+	type ScheduledMedication,
+} from './utils/dose-schedule';
+
+/** Doses whose confirm window closed this long ago are still checked, so
+ * the missed-dose job catches up after the server was down for a while. */
+const MISSED_DOSE_LOOKBACK_HOURS = 72;
 
 @Injectable()
 export class AdherencesService {
@@ -68,21 +88,30 @@ export class AdherencesService {
 		// 	summary,
 		// });
 
-		const adherenceRate = await this.estimateAdherenceRate(filters.userId);
-		const adherenceStatus = this.determineAdherenceStatus(adherenceRate);
-
 		const patientId = (dto as any).patient;
 		if (patientId) {
-			await this.patientModel.findByIdAndUpdate(patientId, {
-				$set: {
-					adherenceRate: adherenceRate ?? 0,
-					adherenceStatus,
-					lastCheckInDate: new Date(),
-				},
+			await this.refreshPatientAdherence(filters.userId, patientId, {
+				lastCheckInDate: new Date(),
 			});
 		}
 
 		return adherenceLog._id;
+	}
+
+	/** Recomputes the adherence rate and status shown to clinicians. */
+	private async refreshPatientAdherence(
+		userId: string,
+		patientId: unknown,
+		extra: Record<string, unknown> = {},
+	) {
+		const adherenceRate = await this.estimateAdherenceRate(userId);
+		await this.patientModel.findByIdAndUpdate(patientId, {
+			$set: {
+				adherenceRate: adherenceRate ?? 0,
+				adherenceStatus: this.determineAdherenceStatus(adherenceRate),
+				...extra,
+			},
+		});
 	}
 
 	/**
@@ -107,63 +136,163 @@ export class AdherencesService {
 	}
 
 	/**
-	 * Dose-based, medication-scoped adherence rate over a rolling 30-day
-	 * window. Expected doses are derived from each medication's own
-	 * doses/day (frequency.repeatEvery) and its actual tracked history
-	 * length (clamped to 30 days and to its start/end dates) — not a fixed
-	 * 30-day denominator, which previously produced >100% rates (the query
-	 * window spans 31 calendar days, not 30) and falsely CRITICAL rates for
-	 * newly-enrolled patients (a few days of perfect adherence divided by a
-	 * fixed 30 reads as ~10%). Returns null when there are no medications
-	 * with expected doses yet, so the caller can distinguish "no data" from
-	 * a genuine 0% rate.
+	 * Adherence over the last 30 days: doses taken ÷ doses settled, across
+	 * every medication and section. Null when no dose has settled yet, so
+	 * the caller can tell "no data" from a genuine 0%.
 	 */
 	private async estimateAdherenceRate(userId: string): Promise<number | null> {
 		const now = new Date();
-		const thirtyDaysAgo = subDays(now, 30);
-
-		const medications = await this.medicationModel
-			.find({ userId })
-			.select('startDate endDate frequency')
-			.lean();
-
-		let expectedDoses = 0;
-		for (const medication of medications) {
-			if (!medication.startDate) continue;
-
-			const dosesPerDay = medication.frequency?.repeatEvery || 1;
-			const windowStart =
-				medication.startDate > thirtyDaysAgo
-					? medication.startDate
-					: thirtyDaysAgo;
-			const windowEnd =
-				medication.endDate && medication.endDate < now
-					? medication.endDate
-					: now;
-
-			if (windowEnd < windowStart) continue;
-
-			const windowDays = differenceInCalendarDays(windowEnd, windowStart) + 1;
-			expectedDoses += windowDays * dosesPerDay;
-		}
-
-		if (expectedDoses === 0) {
-			return null;
-		}
-
-		// scheduledFor is the dose-instance identity for confirmations made via
-		// confirmMedication(); older/AI-inferred logs may only have takenAt.
-		const adherentDoses = await this.adherenceLogModel.countDocuments({
+		const perMedication = await this.resolveUserDoses(
 			userId,
-			targetType: TargetType.MEDICATION,
-			taken: true,
+			startOfDay(subDays(now, 29)),
+			now,
+		);
+		return adherenceRateOf(perMedication.flatMap(({ doses }) => doses));
+	}
+
+	/**
+	 * Every dose each of the user's medications expected within [from, to],
+	 * and what became of it. Logs are matched by medication id, or by name
+	 * for older logs that only carry the name.
+	 */
+	async resolveUserDoses(
+		userId: string,
+		from: Date,
+		to: Date,
+		medicationId?: string,
+	): Promise<{ medication: ScheduledMedication; doses: ResolvedDose[] }[]> {
+		const [medications, logs] = await Promise.all([
+			this.medicationModel
+				.find({ userId, ...(medicationId && { _id: medicationId }) })
+				.select(
+					'name patient startDate endDate createdAt morning afternoon evening',
+				)
+				.lean<ScheduledMedication[]>(),
+			this.adherenceLogModel
+				.find({
+					userId,
+					targetType: TargetType.MEDICATION,
+					$or: [
+						{ scheduledFor: { $gte: from, $lte: to } },
+						{
+							scheduledFor: { $exists: false },
+							takenAt: { $gte: from, $lte: to },
+						},
+					],
+				})
+				.select(
+					'medication targetName scheduledFor takenAt taken status section',
+				)
+				.lean(),
+		]);
+
+		const logsByMedication = new Map<string, DoseLog[]>();
+		for (const log of logs) {
+			const owner = log.medication
+				? medications.find((m) => m._id.equals(log.medication as any))
+				: medications.find(
+						(m) => m.name?.toLowerCase() === log.targetName?.toLowerCase(),
+					);
+			if (!owner) continue;
+			const key = owner._id.toString();
+			logsByMedication.set(key, [
+				...(logsByMedication.get(key) ?? []),
+				log as unknown as DoseLog,
+			]);
+		}
+
+		const now = new Date();
+		return medications.map((medication) => ({
+			medication,
+			doses: resolveDoses(
+				medication,
+				logsByMedication.get(medication._id.toString()) ?? [],
+				from,
+				to,
+				now,
+			),
+		}));
+	}
+
+	/**
+	 * Writes a `missed` log for every dose whose confirm window has closed
+	 * with no confirmation. Run hourly. Doses before a medication started, or
+	 * sections it doesn't have, are never expected, and a deleted medication
+	 * has no schedule left to expect anything. The unique index on
+	 * (userId, medication, scheduledFor) makes a rerun a no-op.
+	 */
+	async recordMissedDoses(now: Date = new Date()) {
+		const to = subHours(now, MAX_DOSE_CONFIRM_BACKDATE_HOURS);
+		const from = subHours(to, MISSED_DOSE_LOOKBACK_HOURS);
+		const userIds: string[] = await this.medicationModel.distinct('userId', {
 			$or: [
-				{ scheduledFor: { $gte: thirtyDaysAgo } },
-				{ scheduledFor: { $exists: false }, takenAt: { $gte: thirtyDaysAgo } },
+				{ 'morning.time': { $exists: true } },
+				{ 'afternoon.time': { $exists: true } },
+				{ 'evening.time': { $exists: true } },
 			],
 		});
 
-		return parseFloat(((adherentDoses / expectedDoses) * 100).toFixed(2));
+		let recorded = 0;
+		for (const userId of userIds) {
+			const perMedication = await this.resolveUserDoses(userId, from, to);
+			let patientId: unknown;
+			for (const { medication, doses } of perMedication) {
+				for (const dose of doses) {
+					if (dose.status !== 'missed' || dose.logId) continue;
+					const inserted = await this.insertMissedLog(userId, medication, dose);
+					if (inserted) {
+						recorded += 1;
+						patientId ??= medication.patient;
+					}
+				}
+			}
+			if (patientId) {
+				await this.refreshPatientAdherence(userId, patientId);
+			}
+		}
+		return recorded;
+	}
+
+	/**
+	 * Inserts the log only if no log claims this dose yet, so a confirm that
+	 * landed first is never overwritten. Then counts it in the patient's
+	 * summary, as the findOneAndUpdate hook does for a confirm.
+	 */
+	private async insertMissedLog(
+		userId: string,
+		medication: ScheduledMedication,
+		dose: ResolvedDose,
+	): Promise<boolean> {
+		let upsertedId: unknown;
+		try {
+			({ upsertedId } = await this.adherenceLogModel.updateOne(
+				{ userId, medication: medication._id, scheduledFor: dose.scheduledFor },
+				{
+					$setOnInsert: {
+						userId,
+						patient: medication.patient,
+						medication: medication._id,
+						targetType: TargetType.MEDICATION,
+						targetName: medication.name,
+						scheduledFor: dose.scheduledFor,
+						section: dose.section,
+						taken: false,
+						status: Status.MISSED,
+						qdrantId: uuidv7(),
+					},
+				},
+				{ upsert: true },
+			));
+		} catch (error: any) {
+			// Another run inserted the same dose between our read and write.
+			if (error?.code === 11000) return false;
+			throw error;
+		}
+		if (!upsertedId) return false;
+
+		const log = await this.adherenceLogModel.findById(upsertedId);
+		if (log) await recordInSummary(log);
+		return true;
 	}
 
 	private determineAdherenceStatus(rate: number | null): AdherenceStatus {
@@ -279,150 +408,114 @@ export class AdherencesService {
 		return `This action removes a #${id} adherence`;
 	}
 
-	async findAdherenceLogsByTarget(
-		userId: string,
-		targetType: TargetType,
-		targetName: string,
-		limit: number = 14,
-		date?: Date,
-		medicationId?: string,
-	) {
-		// Prefer the stable medication reference when available — an unanchored
-		// name match would also match a differently-named medication that
-		// happens to share a substring (e.g. "Met" matching "Metformin"), and a
-		// renamed medication would silently lose its history under a
-		// name-only lookup.
-		const filter: Record<string, any> = medicationId
-			? { userId, targetType, medication: medicationId }
-			: {
-					userId,
-					targetType,
-					targetName: new RegExp(`^${escapeRegExp(targetName)}$`, 'i'),
-				};
-
-		if (date) {
-			const start = startOfMonth(date);
-			const end = endOfMonth(date);
-			filter.takenAt = { $gte: start, $lte: end };
-
-			const results = await this.adherenceLogModel.aggregate([
-				{ $match: filter },
-				{ $sort: { takenAt: -1 } },
-				{
-					$group: {
-						_id: {
-							$dateToString: { format: '%Y-%m-%d', date: '$takenAt' },
-						},
-						doc: { $first: '$$ROOT' },
-					},
-				},
-				{ $replaceRoot: { newRoot: '$doc' } },
-				{ $sort: { takenAt: -1 } },
-				{ $limit: limit },
-				{ $project: { _id: 1, taken: 1, takenAt: 1 } },
-			]);
-
-			return results.map((r) => ({
-				id: String(r._id),
-				taken: r.taken,
-				takenAt: r.takenAt,
-			}));
-		}
-
-		return this.adherenceLogModel
-			.find(filter)
-			.sort({ takenAt: -1 })
-			.limit(limit)
-			.select('taken takenAt');
-	}
-
+	/**
+	 * Adherence over the last 7 days (today and the 6 before it): doses
+	 * taken ÷ doses settled, across every medication and section.
+	 */
 	async aggregateMedicationAdherence(userId: string) {
 		const now = new Date();
-		const sevenDaysAgo = subDays(now, 7);
-		// The [sevenDaysAgo, now] window spans 8 calendar days inclusive, not 7
-		// — dividing by a fixed 7 let this exceed 100%. Same class of bug as
-		// estimateAdherenceRate's 30-vs-31-day window.
-		const windowDays = differenceInCalendarDays(now, sevenDaysAgo) + 1;
-
-		const result = await this.adherenceLogModel.aggregate([
-			{
-				$match: {
-					userId,
-					targetType: TargetType.MEDICATION,
-					taken: true,
-					takenAt: { $gte: sevenDaysAgo },
-				},
-			},
-			{
-				$group: {
-					_id: {
-						$dateToString: { format: '%Y-%m-%d', date: '$takenAt' },
-					},
-				},
-			},
-			{
-				$count: 'uniqueDays',
-			},
-		]);
-
-		const uniqueDays = result.length ? result[0].uniqueDays : 0;
-		return Math.round((uniqueDays / windowDays) * 100);
+		const perMedication = await this.resolveUserDoses(
+			userId,
+			startOfDay(subDays(now, 6)),
+			now,
+		);
+		return adherenceRateOf(perMedication.flatMap(({ doses }) => doses)) ?? 0;
 	}
 
+	/**
+	 * This week, Monday to Sunday. A day is `taken` only when every dose it
+	 * scheduled was taken, `null` while it is in the future or a dose is
+	 * still confirmable, and `false` otherwise. `takenDoses` and
+	 * `scheduledDoses` give the counts behind it.
+	 */
 	async aggregateMedicationTakenByWeek(userId: string) {
 		const now = new Date();
 		const weekStart = startOfWeek(now, { weekStartsOn: 1 });
 		const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+		const doses = (
+			await this.resolveUserDoses(userId, weekStart, weekEnd)
+		).flatMap(({ doses }) => doses);
 
-		const logs = await this.adherenceLogModel.find({
-			userId,
-			targetType: TargetType.MEDICATION,
-			takenAt: { $gte: weekStart, $lte: weekEnd },
-		});
-
-		const takenDates = new Set<string>();
-		for (const log of logs) {
-			if (log.taken) {
-				const dateKey = log.takenAt.toISOString().slice(0, 10);
-				takenDates.add(dateKey);
-			}
-		}
-
-		const today = new Date();
-		const todayKey = today.toISOString().slice(0, 10);
-
-		const dayLabels: Record<number, string> = {
-			1: 'M',
-			2: 'T',
-			3: 'W',
-			4: 'T',
-			5: 'F',
-			6: 'S',
-			0: 'S',
-		};
-
-		const days: { taken: boolean | null; dateTaken: Date; label: string }[] =
-			[];
-		for (let i = 0; i < 7; i++) {
-			const date = new Date(weekStart);
-			date.setDate(date.getDate() + i);
-			const dateKey = date.toISOString().slice(0, 10);
+		const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+		return eachDayOfInterval({ start: weekStart, end: weekEnd }).map((date) => {
+			const dayDoses = doses.filter((d) => isSameDay(d.scheduledFor, date));
+			const takenDoses = dayDoses.filter(
+				(d) => d.status === 'taken' || d.status === 'partial',
+			).length;
+			const scheduledDoses = dayDoses.length;
 
 			let taken: boolean | null;
-			if (dateKey > todayKey) {
-				taken = null;
-			} else {
-				taken = takenDates.has(dateKey);
-			}
+			if (date > now) taken = null;
+			else if (scheduledDoses > 0 && takenDoses === scheduledDoses)
+				taken = true;
+			else if (dayDoses.some((d) => d.status === 'pending')) taken = null;
+			else taken = false;
 
-			days.push({
+			return {
 				taken,
 				dateTaken: date,
 				label: dayLabels[date.getDay()],
-			});
-		}
+				takenDoses,
+				scheduledDoses,
+			};
+		});
+	}
 
-		return days;
+	/**
+	 * One medication's month: one entry per scheduled dose, plus the older
+	 * one-per-day `logs` for clients that still read them. A day in `logs`
+	 * is taken only when all its doses were.
+	 */
+	async medicationMonthHistory(
+		userId: string,
+		medicationId: string,
+		date: Date,
+	) {
+		const monthStart = startOfMonth(date);
+		const monthEnd = endOfMonth(date);
+		const [entry] = await this.resolveUserDoses(
+			userId,
+			monthStart,
+			monthEnd,
+			medicationId,
+		);
+		const doses = entry?.doses ?? [];
+		const now = new Date();
+
+		const logs = eachDayOfInterval({ start: monthStart, end: monthEnd }).map(
+			(day) => {
+				const dayDoses = doses.filter((d) => isSameDay(d.scheduledFor, day));
+				const settled = dayDoses.filter((d) => d.status !== 'pending');
+				let taken: boolean | null;
+				if (startOfDay(day) > now || settled.length < dayDoses.length) {
+					taken = null;
+				} else if (dayDoses.length === 0) {
+					taken = isSameDay(day, now) ? null : false;
+				} else {
+					taken = settled.every(
+						(d) => d.status === 'taken' || d.status === 'partial',
+					);
+				}
+				return {
+					takenAt: day,
+					taken,
+					id:
+						dayDoses.find((d) => d.logId)?.logId ??
+						new Types.ObjectId().toString(),
+				};
+			},
+		);
+
+		return {
+			adherenceRate: adherenceRateOf(doses) ?? 0,
+			logs,
+			doses: doses.map(({ scheduledFor, section, status, logId }) => ({
+				scheduledFor,
+				section,
+				status,
+				...(logId && { id: logId }),
+			})),
+		};
 	}
 
 	async aggregateAdherencePatterns(
