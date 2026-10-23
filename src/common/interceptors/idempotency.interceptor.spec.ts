@@ -160,14 +160,13 @@ describe('IdempotencyInterceptor', () => {
 		expect([...store.records.keys()]).toEqual([`idempotency:user-1:${KEY}`]);
 	});
 
-	it.each([
-		'short',
-		'has spaces in it',
-		'x'.repeat(129),
-	])('rejects a malformed key %#', async (key) => {
-		const { call } = setup();
-		await expect(
-			call(reading, () => of('ok'), { 'idempotency-key': key }),
-		).rejects.toBeInstanceOf(BadRequestException);
-	});
+	it.each(['short', 'has spaces in it', 'x'.repeat(129)])(
+		'rejects a malformed key %#',
+		async (key) => {
+			const { call } = setup();
+			await expect(
+				call(reading, () => of('ok'), { 'idempotency-key': key }),
+			).rejects.toBeInstanceOf(BadRequestException);
+		},
+	);
 });

@@ -72,9 +72,9 @@ describe('DhVectorsService', () => {
 
 	describe('search', () => {
 		it('should search qdrant with filtered vector query', async () => {
-			qdrantClient.search.mockResolvedValue([
-				{ id: 'vec-1', payload: { summary: 'Metformin' } },
-			] as any);
+			qdrantClient.query.mockResolvedValue({
+				points: [{ id: 'vec-1', payload: { summary: 'Metformin' } }],
+			} as any);
 
 			const vector = [0.1, 0.2];
 			const patientId = new Types.ObjectId().toString();
@@ -86,10 +86,10 @@ describe('DhVectorsService', () => {
 
 			const results = await service.search(vector, filter);
 
-			expect(qdrantClient.search).toHaveBeenCalledWith(
+			expect(qdrantClient.query).toHaveBeenCalledWith(
 				'dh_vectors',
 				expect.objectContaining({
-					vector,
+					query: vector,
 					filter: {
 						must: [
 							{ key: 'userId', match: { value: 'u1' } },

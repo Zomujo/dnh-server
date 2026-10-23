@@ -5,13 +5,12 @@ describe('resolveForbidUnknownFields', () => {
 		expect(resolveForbidUnknownFields('staging', undefined)).toBe(true);
 	});
 
-	it.each([
-		'development',
-		'production',
-		undefined,
-	])('is off for %s by default', (env) => {
-		expect(resolveForbidUnknownFields(env, undefined)).toBe(false);
-	});
+	it.each(['development', 'production', undefined])(
+		'is off for %s by default',
+		(env) => {
+			expect(resolveForbidUnknownFields(env, undefined)).toBe(false);
+		},
+	);
 
 	it('follows FORBID_UNKNOWN_FIELDS when set', () => {
 		expect(resolveForbidUnknownFields('development', 'true')).toBe(true);

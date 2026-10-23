@@ -43,10 +43,8 @@ export async function deleteByPattern(redisUrl: string, pattern: string) {
 		// *originating database write*, even though that write had already
 		// succeeded. Cache invalidation failing should never fail the write
 		// it's invalidating on behalf of.
-		logger.error(
-			`Error deleting keys by pattern: ${error.message}`,
-			error.stack,
-		);
+		const { message, stack } = error as Error;
+		logger.error(`Error deleting keys by pattern: ${message}`, stack);
 	} finally {
 		await client.quit();
 	}

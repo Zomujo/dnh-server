@@ -2,7 +2,7 @@
 
 Backend API for the **GIZ-AYA Diabetes and Hypertension (DNH) Application** — a healthcare platform serving patients with chronic conditions (diabetes, hypertension) and the clinical personnel who manage them.
 
-Built with **NestJS 11**, **MongoDB/Mongoose**, **Firebase**, **Redis**, and a **LangGraph-powered AI layer** running on Google Gemini.
+Built with **NestJS 12**, **MongoDB/Mongoose**, **Firebase**, **Redis**, and a **LangGraph-powered AI layer** running on Google Gemini.
 
 ---
 
@@ -33,7 +33,7 @@ Built with **NestJS 11**, **MongoDB/Mongoose**, **Firebase**, **Redis**, and a *
 
 | Layer | Technology |
 |---|---|
-| Framework | NestJS 11 (TypeScript) |
+| Framework | NestJS 12 (TypeScript 6) |
 | Primary DB | MongoDB via Mongoose (`@nestjs/mongoose`) |
 | Auth | Firebase Admin SDK (token verification) + JWT (personnel) |
 | Caching | Redis via `@nestjs/cache-manager` + `@keyv/redis` |
@@ -320,11 +320,11 @@ Ensure the following are installed and running locally:
 
 | Dependency | Version | Notes |
 |---|---|---|
-| Node.js | ≥ 22 | Check with `node -v` |
+| Node.js | ≥ 22.12 | Check with `node -v` (NestJS 12 needs ≥ 20.19 or ≥ 22.12) |
 | pnpm | 11.5.2 | Install: `npm i -g pnpm@11.5.2` |
 | MongoDB | ≥ 6 | Local or Atlas connection string |
 | Redis | ≥ 7 | Required for caching and BullMQ queues |
-| Qdrant | latest | Run locally via Docker (see below) |
+| Qdrant | ≥ 1.10 | Run locally via Docker (see below); the search uses the Query API added in 1.10 |
 | direnv | any | Loads `.envrc` — install via Homebrew or your OS package manager |
 
 **Qdrant via Docker (quickstart):**

@@ -1,8 +1,16 @@
 import { createHash } from 'node:crypto';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as admin from 'firebase-admin';
-import type { DecodedIdToken } from 'firebase-admin/auth';
+import {
+	type App,
+	cert,
+	initializeApp,
+	type ServiceAccount,
+} from 'firebase-admin/app';
+import { type DecodedIdToken, getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
+import { getMessaging } from 'firebase-admin/messaging';
+import { getStorage, type Storage } from 'firebase-admin/storage';
 import { extname } from 'path';
 import { CacheService } from '@/core/caching/caching.service';
 
@@ -19,7 +27,7 @@ function safeExtension(originalname: string | undefined) {
 @Injectable()
 export class FirebaseService {
 	private logger = new Logger(FirebaseService.name);
-	private baseApp: admin.app.App;
+	private baseApp: App;
 	private storageBucket: string;
 
 	constructor(
@@ -50,11 +58,9 @@ export class FirebaseService {
 
 		this.storageBucket = this.configService.get<string>('BASE_STORAGE_BUCKET')!;
 
-		this.baseApp = admin.initializeApp(
+		this.baseApp = initializeApp(
 			{
-				credential: admin.credential.cert(
-					baseServiceAccount as admin.ServiceAccount,
-				),
+				credential: cert(baseServiceAccount as ServiceAccount),
 				storageBucket: this.configService.get<string>('BASE_STORAGE_BUCKET'),
 			},
 			'database-app',
@@ -62,19 +68,19 @@ export class FirebaseService {
 	}
 
 	get auth() {
-		return this.baseApp.auth();
+		return getAuth(this.baseApp);
 	}
 
 	get db() {
-		return this.baseApp.firestore();
+		return getFirestore(this.baseApp);
 	}
 
 	get messaging() {
-		return this.baseApp.messaging();
+		return getMessaging(this.baseApp);
 	}
 
-	get firebaseStorage(): admin.storage.Storage {
-		return this.baseApp.storage();
+	get firebaseStorage(): Storage {
+		return getStorage(this.baseApp);
 	}
 
 	/**

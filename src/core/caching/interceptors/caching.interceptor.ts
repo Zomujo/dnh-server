@@ -58,7 +58,8 @@ export class CustomCacheInterceptor extends CacheInterceptor {
 			// Include token (without Bearer) in the cache key
 			return `token=${token}:${normalizedPath}${queryString ? `:${queryString}` : ''}`;
 		} catch (error) {
-			this.logger.error(`Invalid URL passed: ${error.message}`, error.stack);
+			const { message, stack } = error as Error;
+			this.logger.error(`Invalid URL passed: ${message}`, stack);
 			return '';
 		}
 	}
