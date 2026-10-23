@@ -1,3 +1,4 @@
+import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { DhVectorsModule } from '../dh-vectors/dh-vectors.module';
@@ -15,6 +16,10 @@ import {
 	AdherencePattern,
 	AdherencePatternSchema,
 } from './entities/adherence-pattern.entity';
+import {
+	MISSED_DOSES_QUEUE,
+	MissedDosesProcessor,
+} from './missed-doses.processor';
 
 @Module({
 	imports: [
@@ -28,9 +33,10 @@ import {
 			// this module needs for dose-based adherence math.
 			{ name: Medication.name, schema: MedicationSchema },
 		]),
+		BullModule.registerQueue({ name: MISSED_DOSES_QUEUE }),
 		DhVectorsModule,
 	],
-	providers: [AdherencesService],
+	providers: [AdherencesService, MissedDosesProcessor],
 	exports: [AdherencesService],
 })
 export class AdherencesModule {}

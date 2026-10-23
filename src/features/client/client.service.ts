@@ -5,18 +5,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
-import {
-	differenceInHours,
-	eachDayOfInterval,
-	endOfDay,
-	endOfMonth,
-	getDate,
-	isFuture,
-	isToday,
-	set,
-	startOfDay,
-	startOfMonth,
-} from 'date-fns';
+import { differenceInHours, endOfDay, startOfDay } from 'date-fns';
 import { toHeaderCase } from 'js-convert-case';
 import { Collection, Connection, isValidObjectId, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
@@ -27,6 +16,7 @@ import { FirebaseService } from '@/core/firebase/firebase.service';
 import { AdherencesService } from '@/features/adherences/adherences.service';
 import { TargetType } from '@/features/adherences/dto/target-type.enum';
 import { Status } from '@/features/adherences/entities/adherence-log.entity';
+import { doseTimeOn } from '@/features/adherences/utils/dose-schedule';
 import { AppointmentRequestsService } from '@/features/appointments/appointment-requests/appointment-requests.service';
 import type { CreateAppointmentRequestDto } from '@/features/appointments/appointment-requests/dto';
 import { AppointmentsService } from '@/features/appointments/appointments.service';
@@ -445,37 +435,6 @@ export class ClientService {
 	}
 
 	/**
-	 * The single place the 12h -> 24h dose arithmetic lives. Both
-	 * `confirmMedication` and `fetchTodaysMedications` derive dose times from
-	 * here — they previously each carried their own copy, which is how the two
-	 * endpoints came to disagree about which dose a log belonged to.
-	 */
-	private toDoseTimeOfDay(time: {
-		hour: number;
-		minutes: number;
-		timeDesignators?: string;
-	}): { hours: number; minutes: number } {
-		const { hour, minutes, timeDesignators } = time;
-		// Case-normalised: a lowercase "pm" slipping through would leave an
-		// evening dose at 08:00, colliding with the morning dose on the unique
-		// (userId, medication, scheduledFor) index and making one of the two
-		// unconfirmable for the rest of the day.
-		const designator = timeDesignators?.toUpperCase();
-		let hours = hour;
-		if (designator === 'PM' && hours !== 12) hours += 12;
-		if (designator === 'AM' && hours === 12) hours = 0;
-		return { hours, minutes };
-	}
-
-	/** Today's occurrence of a scheduled dose time. */
-	private doseTimeOn(
-		time: { hour: number; minutes: number; timeDesignators?: string },
-		day: Date = new Date(),
-	): Date {
-		return set(startOfDay(day), this.toDoseTimeOfDay(time));
-	}
-
-	/**
 	 * How a confirmation is recorded given how late it arrived. Still counts as
 	 * taken (the patient did take it), but flagged PARTIAL rather than TAKEN
 	 * when well past schedule — there was previously no way to distinguish
@@ -515,7 +474,7 @@ export class ClientService {
 		// The scheduled dose datetime — the stable identity of "which dose" is
 		// being confirmed (used for the unique index below), not when the
 		// patient actually tapped confirm. See takenAt below for that.
-		const scheduledFor = this.doseTimeOn(schedule.time, day);
+		const scheduledFor = doseTimeOn(schedule.time, day);
 
 		// Back-dated confirmations (a dose taken while offline) are allowed for
 		// a short window only, and never before the course started. The 4 h
@@ -568,6 +527,7 @@ export class ClientService {
 					targetType: TargetType.MEDICATION,
 					targetName: medication.name,
 					scheduledFor,
+					section: sectionKey,
 					taken: true,
 					takenAt: confirmedAt,
 					status: this.classifyDoseStatus(scheduledFor, confirmedAt),
@@ -632,7 +592,7 @@ export class ClientService {
 				name: med.name,
 				dosage: med.dosage,
 				purpose: med.purpose,
-				toBeTakenAt: this.doseTimeOn(schedule.time),
+				toBeTakenAt: doseTimeOn(schedule.time),
 				taken: false,
 			});
 			medicationIds.push(med._id);
@@ -719,65 +679,12 @@ export class ClientService {
 			medicationId,
 			userId,
 		);
-
-		const logs = await this.adherencesService.findAdherenceLogsByTarget(
+		const history = await this.adherencesService.medicationMonthHistory(
 			userId,
-			TargetType.MEDICATION,
-			medication.name,
-			31,
-			date,
 			medicationId,
+			date,
 		);
-
-		const monthStart = startOfMonth(date);
-		const monthEnd = endOfMonth(date);
-		const allDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
-
-		const logMap = new Map<number, { taken: boolean; id: string }>();
-		for (const log of logs) {
-			logMap.set(getDate(log.takenAt), { taken: log.taken, id: log.id });
-		}
-
-		const normalizedLogs: {
-			takenAt: Date;
-			taken: boolean | null;
-			id: string;
-		}[] = [];
-
-		for (const dayDate of allDays) {
-			const day = getDate(dayDate);
-			const entry = logMap.get(day);
-
-			if (entry) {
-				normalizedLogs.push({
-					takenAt: dayDate,
-					taken: entry.taken,
-					id: entry.id,
-				});
-			} else {
-				const isPending = isFuture(dayDate) || isToday(dayDate);
-				normalizedLogs.push({
-					takenAt: dayDate,
-					taken: isPending ? null : false,
-					id: new Types.ObjectId().toString(),
-				});
-			}
-		}
-
-		const takenCount = normalizedLogs.filter((l) => l.taken === true).length;
-		// Denominator is days that have actually elapsed (taken !== null),
-		// not the whole month — allDays.length included pending future days,
-		// which dragged the rate down purely for being partway through the
-		// month even with perfect adherence so far.
-		const elapsedDays = normalizedLogs.filter((l) => l.taken !== null).length;
-		const adherenceRate =
-			elapsedDays > 0 ? Math.round((takenCount / elapsedDays) * 100) : 0;
-
-		return {
-			medicationName: medication.name,
-			adherenceRate,
-			logs: normalizedLogs,
-		};
+		return { medicationName: medication.name, ...history };
 	}
 
 	async logVitalHistory(dto: LoadVitalHistoryDto, userId: string) {

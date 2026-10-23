@@ -87,6 +87,12 @@ export class MedicationAdherenceDayDto {
 
 	@ApiResponseProperty({ example: 'M' })
 	label: string;
+
+	@ApiResponseProperty({ example: 4 })
+	takenDoses: number;
+
+	@ApiResponseProperty({ example: 6 })
+	scheduledDoses: number;
 }
 
 export class MedicationAdherenceDto {

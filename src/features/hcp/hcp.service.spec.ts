@@ -217,16 +217,15 @@ describe('HcpService', () => {
 	});
 
 	describe('findPatientMedicationAdherenceLogs', () => {
-		it('should compute monthly adherence logs and adherenceRate', async () => {
+		it("returns the medication's month from the patient's own doses", async () => {
 			patientsService.findPatientById.mockResolvedValue({
 				userId: 'user-123',
 			} as any);
-			medicationsService.findById.mockResolvedValue({
+			medicationsService.findOwnedById.mockResolvedValue({
 				name: 'Lisinopril',
 			} as any);
-			adherencesService.findAdherenceLogsByTarget.mockResolvedValue([
-				{ id: 'log-1', takenAt: new Date('2026-06-01'), taken: true },
-			] as any);
+			const history = { adherenceRate: 50, logs: [], doses: [] };
+			adherencesService.medicationMonthHistory.mockResolvedValue(history);
 
 			const result = await service.findPatientMedicationAdherenceLogs(
 				'patient-1',
@@ -234,9 +233,16 @@ describe('HcpService', () => {
 				{ date: '2026-06-15' } as any,
 			);
 
-			expect(result.medicationName).toBe('Lisinopril');
-			expect(result.logs.length).toBe(30); // June has 30 days
-			expect(result.adherenceRate).toBeGreaterThanOrEqual(0);
+			expect(medicationsService.findOwnedById).toHaveBeenCalledWith(
+				'med-1',
+				'user-123',
+			);
+			expect(adherencesService.medicationMonthHistory).toHaveBeenCalledWith(
+				'user-123',
+				'med-1',
+				new Date('2026-06-15'),
+			);
+			expect(result).toEqual({ medicationName: 'Lisinopril', ...history });
 		});
 	});
 

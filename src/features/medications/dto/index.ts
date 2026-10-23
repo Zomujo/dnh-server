@@ -2,6 +2,7 @@ export {
 	AdherenceLogsQueryDto,
 	MedicationAdherenceDayDto,
 	MedicationAdherenceLogsDto,
+	MedicationDoseDto,
 } from './adherence-log.dto';
 export { CreateMedicationDto, UpsertMedicationDto } from './create.dto';
 export { GetMedicationDto, MedicationDetailDto } from './get.dto';

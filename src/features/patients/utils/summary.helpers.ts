@@ -283,6 +283,9 @@ export function upsertAdherences(
 	const { data } = adherence;
 	const targetType = data.targetType as string;
 	const targetName = data.targetName;
+	// A missed dose was never taken, so it has no takenAt: date it by the
+	// dose it stands for instead.
+	const loggedAt = data.takenAt ?? data.scheduledFor;
 
 	// 1. Initialize deep structure if empty
 	const updated: AdherenceInsights = {
@@ -329,8 +332,8 @@ export function upsertAdherences(
 			adherenceRate: 0,
 			currentStreak: 0,
 			longestStreak: 0,
-			firstLogDate: data.takenAt,
-			lastLogDate: data.takenAt,
+			firstLogDate: loggedAt,
+			lastLogDate: loggedAt,
 		};
 	}
 	const target = typeGroup.byTarget[targetName];
@@ -344,7 +347,7 @@ export function upsertAdherences(
 	} else {
 		if (data.status === 'missed') {
 			target.missedCount += 1;
-			target.lastMissedAt = data.takenAt;
+			target.lastMissedAt = loggedAt;
 		} else {
 			target.partialCount += 1;
 		}
@@ -356,7 +359,7 @@ export function upsertAdherences(
 		target.longestStreak = target.currentStreak;
 	}
 
-	target.lastLogDate = data.takenAt;
+	target.lastLogDate = loggedAt;
 	target.adherenceRate = (target.takenCount / target.totalLogs) * 100;
 
 	// 5. Roll up Target data to Type Group

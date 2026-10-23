@@ -1,16 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import {
-	eachDayOfInterval,
-	endOfMonth,
-	getDate,
-	isFuture,
-	isToday,
-	startOfMonth,
-} from 'date-fns';
-import { Types } from 'mongoose';
 import { generateFilter } from '@/common/factory';
 import { AdherencesService } from '@/features/adherences/adherences.service';
-import { TargetType } from '@/features/adherences/dto';
 import { AppointmentRequestsService } from '@/features/appointments/appointment-requests/appointment-requests.service';
 import {
 	AppointmentRequestStatus,
@@ -508,60 +498,19 @@ export class HcpService {
 			throw new NotFoundException('Patient not found');
 		}
 
-		const medication = await this.medicationsService.findById(medicationId);
-		const date = new Date(query.date);
-
-		const logs = await this.adherencesService.findAdherenceLogsByTarget(
+		// Scoped to the patient: the id alone would show any patient's
+		// history under this one.
+		const medication = await this.medicationsService.findOwnedById(
+			medicationId,
 			patient.userId,
-			TargetType.MEDICATION,
-			medication.name,
-			31,
-			date,
 		);
 
-		const monthStart = startOfMonth(date);
-		const monthEnd = endOfMonth(date);
-		const allDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
-
-		const logMap = new Map<number, { taken: boolean; id: string }>();
-		for (const log of logs) {
-			logMap.set(getDate(log.takenAt), { taken: log.taken, id: log.id });
-		}
-
-		const normalizedLogs: {
-			takenAt: Date;
-			taken: boolean | null;
-			id: string;
-		}[] = [];
-
-		for (const dayDate of allDays) {
-			const day = getDate(dayDate);
-			const entry = logMap.get(day);
-
-			if (entry) {
-				normalizedLogs.push({
-					takenAt: dayDate,
-					taken: entry.taken,
-					id: entry.id,
-				});
-			} else {
-				const isPending = isFuture(dayDate) || isToday(dayDate);
-				normalizedLogs.push({
-					takenAt: dayDate,
-					taken: isPending ? null : false,
-					id: new Types.ObjectId().toString(),
-				});
-			}
-		}
-
-		const takenCount = normalizedLogs.filter((l) => l.taken === true).length;
-		const adherenceRate = Math.round((takenCount / allDays.length) * 100);
-
-		return {
-			medicationName: medication.name,
-			adherenceRate,
-			logs: normalizedLogs,
-		};
+		const history = await this.adherencesService.medicationMonthHistory(
+			patient.userId,
+			medicationId,
+			new Date(query.date),
+		);
+		return { medicationName: medication.name, ...history };
 	}
 
 	async findPatientMedications(patientId: string, query: ChronicCareQueryDto) {
