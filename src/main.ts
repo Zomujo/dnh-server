@@ -25,6 +25,14 @@ async function bootstrap() {
 		app.useLogger(app.get(DomainLogger));
 	}
 
+	// Last line of defence for fire-and-forget work (event handlers, LLM
+	// calls after the response): log a stray rejection rather than letting
+	// Node end the process and drop every in-flight request and socket.
+	const processLogger = new Logger('Process');
+	process.on('unhandledRejection', (reason) => {
+		processLogger.error('Unhandled promise rejection', reason as Error);
+	});
+
 	// Behind Railway's proxy every request arrives from the proxy's address;
 	// without this, req.ip (rate limiting, logs) is the same for everyone.
 	app.set('trust proxy', resolveTrustProxy());
