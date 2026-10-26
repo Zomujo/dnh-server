@@ -70,6 +70,43 @@ describe('DhVectorsService', () => {
 		});
 	});
 
+	describe('index', () => {
+		it('should resolve when embedding fails, so the write carries on', async () => {
+			vi.spyOn((service as any).embeddings, 'embedQuery').mockRejectedValue(
+				new Error('402 Payment Required'),
+			);
+
+			await expect(
+				service.index({
+					userId: 'u1',
+					patient: new Types.ObjectId().toString(),
+					documentType: DHDocumentType.MEDICATION,
+					documentId: 'doc-123',
+					summary: 'Take Metformin 500mg daily',
+				} as any),
+			).resolves.toBeUndefined();
+			expect(qdrantClient.upsert).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('findSimilar', () => {
+		it('should return no matches when embedding fails', async () => {
+			vi.spyOn((service as any).embeddings, 'embedQuery').mockRejectedValue(
+				new Error('402 Payment Required'),
+			);
+
+			const results = await service.findSimilar({
+				userId: 'u1',
+				patient: new Types.ObjectId().toString(),
+				documentType: DHDocumentType.MEDICATION,
+				query: 'metformin',
+			});
+
+			expect(results).toEqual([]);
+			expect(qdrantClient.query).not.toHaveBeenCalled();
+		});
+	});
+
 	describe('search', () => {
 		it('should search qdrant with filtered vector query', async () => {
 			qdrantClient.query.mockResolvedValue({
