@@ -55,6 +55,32 @@ export class DhVectorsService implements OnModuleInit {
 		}
 	}
 
+	/**
+	 * Indexes a record for the AI's semantic search. Best-effort: the index
+	 * is secondary to MongoDB, so an embedding outage (e.g. Gemini billing)
+	 * must not fail the write that triggered it. create() logs the error.
+	 */
+	async index(dto: CreateDhVectorDto): Promise<void> {
+		try {
+			await this.create(dto);
+		} catch {
+			// Logged in create(); the record is saved, only unsearchable.
+		}
+	}
+
+	/**
+	 * findAll(), but an outage yields no matches, so callers fall back to
+	 * their exact-match lookup instead of failing.
+	 */
+	async findSimilar(dto: QueryDhVectorsDto) {
+		try {
+			return await this.findAll(dto);
+		} catch (error) {
+			this.logger.error('Error searching dh vectors', error);
+			return [];
+		}
+	}
+
 	async bulkCreate(dto: CreateDhVectorDto[]) {
 		const summaries = dto.map((d) => d.summary);
 		const vector = await this.embeddings.embedDocuments(summaries);

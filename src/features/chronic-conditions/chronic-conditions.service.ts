@@ -34,7 +34,7 @@ export class ChronicConditionsService {
 	) {
 		const qdrantId = uuidv7();
 
-		const searchMedication = await this.dhVectorsService.findAll({
+		const searchMedication = await this.dhVectorsService.findSimilar({
 			userId: filters.userId,
 			patient: filters.patient,
 			documentType: DHDocumentType.CHRONIC_CONDITION,
@@ -74,7 +74,7 @@ export class ChronicConditionsService {
 
 		const summary = this.generateChronicConditionSummary(chronicCondition);
 
-		await this.dhVectorsService.create({
+		await this.dhVectorsService.index({
 			qdrantId: chronicCondition.qdrantId,
 			userId: filters.userId,
 			patient: filters.patient,

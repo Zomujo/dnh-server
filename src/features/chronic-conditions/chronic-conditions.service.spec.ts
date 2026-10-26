@@ -34,7 +34,7 @@ describe('ChronicConditionsService', () => {
 
 	describe('upsertChronicCondition', () => {
 		it('should upsert chronic condition using conditionName regex when vector search returns no match', async () => {
-			dhVectorsService.findAll.mockResolvedValue([]);
+			dhVectorsService.findSimilar.mockResolvedValue([]);
 
 			const mockObjectId = new Types.ObjectId();
 			const mockChronicCondition = {
@@ -47,7 +47,7 @@ describe('ChronicConditionsService', () => {
 				mockChronicCondition as any,
 			);
 			patientModel.findByIdAndUpdate.mockResolvedValue({} as any);
-			dhVectorsService.create.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
 
 			const filters = {
 				userId: 'user-123',
@@ -58,7 +58,7 @@ describe('ChronicConditionsService', () => {
 
 			const result = await service.upsertChronicCondition(filters, dto as any);
 
-			expect(dhVectorsService.findAll).toHaveBeenCalledWith({
+			expect(dhVectorsService.findSimilar).toHaveBeenCalledWith({
 				userId: 'user-123',
 				patient: 'patient-456',
 				documentType: DHDocumentType.CHRONIC_CONDITION,
@@ -85,7 +85,7 @@ describe('ChronicConditionsService', () => {
 				},
 			);
 
-			expect(dhVectorsService.create).toHaveBeenCalledWith({
+			expect(dhVectorsService.index).toHaveBeenCalledWith({
 				qdrantId: 'qdrant-uuid-1',
 				userId: 'user-123',
 				patient: 'patient-456',
@@ -99,7 +99,7 @@ describe('ChronicConditionsService', () => {
 
 		it('should upsert chronic condition by vector documentId when vector search returns a match', async () => {
 			const existingDocId = new Types.ObjectId().toString();
-			dhVectorsService.findAll.mockResolvedValue([
+			dhVectorsService.findSimilar.mockResolvedValue([
 				{ item: { documentId: existingDocId } } as any,
 			]);
 
@@ -113,7 +113,7 @@ describe('ChronicConditionsService', () => {
 				mockChronicCondition as any,
 			);
 			patientModel.findByIdAndUpdate.mockResolvedValue({} as any);
-			dhVectorsService.create.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
 
 			const filters = {
 				userId: 'user-123',

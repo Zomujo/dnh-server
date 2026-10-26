@@ -58,7 +58,7 @@ describe('NotificationsService', () => {
 			};
 
 			notificationModel.create.mockResolvedValue(mockNotification as any);
-			dhVectorsService.create.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
 			notificationQueue.getJob.mockResolvedValue(null as any);
 			notificationQueue.getJobScheduler.mockResolvedValue(null as any);
 			notificationQueue.upsertJobScheduler.mockResolvedValue({} as any);
@@ -74,7 +74,7 @@ describe('NotificationsService', () => {
 			const result = await service.create(dto as any);
 
 			expect(notificationModel.create).toHaveBeenCalled();
-			expect(dhVectorsService.create).toHaveBeenCalledWith(
+			expect(dhVectorsService.index).toHaveBeenCalledWith(
 				expect.objectContaining({
 					documentType: DHDocumentType.NOTIFICATION,
 					documentId: mockId.toString(),
@@ -127,7 +127,7 @@ describe('NotificationsService', () => {
 			notificationModel.findByIdAndUpdate.mockResolvedValue(
 				mockNotification as any,
 			);
-			dhVectorsService.create.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
 			notificationQueue.getJob.mockResolvedValue(null as any);
 			notificationQueue.getJobScheduler.mockResolvedValue(null as any);
 			notificationQueue.upsertJobScheduler.mockResolvedValue({} as any);

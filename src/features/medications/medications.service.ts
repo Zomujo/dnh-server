@@ -97,7 +97,7 @@ export class MedicationsService {
 		});
 
 		const summary = this.generateMedicationDescription(medication);
-		await this.dhVectorsService.create({
+		await this.dhVectorsService.index({
 			qdrantId,
 			userId,
 			patient,
@@ -113,7 +113,7 @@ export class MedicationsService {
 		dto: UpsertMedicationDto,
 	) {
 		const qdrantId = uuidv7();
-		const searchMedication = await this.dhVectorsService.findAll({
+		const searchMedication = await this.dhVectorsService.findSimilar({
 			userId: filters.userId,
 			patient: filters.patient,
 			documentType: DHDocumentType.MEDICATION,
@@ -146,7 +146,7 @@ export class MedicationsService {
 		);
 		const summary = this.generateMedicationDescription(medication);
 
-		await this.dhVectorsService.create({
+		await this.dhVectorsService.index({
 			qdrantId: medication.qdrantId,
 			userId: filters.userId,
 			patient: filters.patient,
@@ -331,7 +331,7 @@ export class MedicationsService {
 
 		const summary = this.generateMedicationDescription(medication);
 
-		await this.dhVectorsService.create({
+		await this.dhVectorsService.index({
 			qdrantId: medication.qdrantId,
 			userId: medication.userId,
 			patient: medication.patient as any,
