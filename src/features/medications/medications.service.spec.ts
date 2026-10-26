@@ -46,7 +46,7 @@ describe('MedicationsService', () => {
 				dosage: '500mg',
 			};
 			medicationModel.create.mockResolvedValue(mockCreatedMedication as any);
-			dhVectorsService.create.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
 
 			const dto = {
 				name: 'Metformin',
@@ -67,7 +67,7 @@ describe('MedicationsService', () => {
 			);
 
 			expect(medicationModel.create).toHaveBeenCalled();
-			expect(dhVectorsService.create).toHaveBeenCalledWith(
+			expect(dhVectorsService.index).toHaveBeenCalledWith(
 				expect.objectContaining({
 					documentType: DHDocumentType.MEDICATION,
 					documentId: mockMedicationId.toString(),
@@ -81,7 +81,7 @@ describe('MedicationsService', () => {
 
 	describe('upsertMedication', () => {
 		it('should upsert medication with exact regex name match when vector search misses', async () => {
-			dhVectorsService.findAll.mockResolvedValue([]);
+			dhVectorsService.findSimilar.mockResolvedValue([]);
 
 			const mockMedId = new Types.ObjectId();
 			const mockMedication = {
@@ -90,14 +90,14 @@ describe('MedicationsService', () => {
 				qdrantId: 'qdrant-uuid-1',
 			};
 			medicationModel.findOneAndUpdate.mockResolvedValue(mockMedication as any);
-			dhVectorsService.create.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
 
 			const filters = { userId: 'u1', patient: 'p1', name: 'Lisinopril' };
 			const dto = { name: 'Lisinopril', dosage: '10mg' };
 
 			const result = await service.upsertMedication(filters, dto as any);
 
-			expect(dhVectorsService.findAll).toHaveBeenCalledWith({
+			expect(dhVectorsService.findSimilar).toHaveBeenCalledWith({
 				userId: 'u1',
 				patient: 'p1',
 				documentType: DHDocumentType.MEDICATION,
@@ -118,7 +118,7 @@ describe('MedicationsService', () => {
 
 		it('should upsert medication by documentId when vector search hits', async () => {
 			const existingDocId = new Types.ObjectId().toString();
-			dhVectorsService.findAll.mockResolvedValue([
+			dhVectorsService.findSimilar.mockResolvedValue([
 				{ item: { documentId: existingDocId } } as any,
 			]);
 
@@ -128,7 +128,7 @@ describe('MedicationsService', () => {
 				qdrantId: 'qdrant-uuid-2',
 			};
 			medicationModel.findOneAndUpdate.mockResolvedValue(mockMedication as any);
-			dhVectorsService.create.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
 
 			const filters = { userId: 'u1', patient: 'p1', name: 'Lisinopril' };
 			const dto = { name: 'Lisinopril' };
@@ -160,7 +160,7 @@ describe('MedicationsService', () => {
 
 			medicationModel.findOne.mockResolvedValue(mockMedication as any);
 			notificationsService.update.mockResolvedValue({} as any);
-			dhVectorsService.create.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
 
 			const dto = {
 				dosage: '10mg',
@@ -202,7 +202,7 @@ describe('MedicationsService', () => {
 			});
 			medicationModel.findOne.mockResolvedValue(medication as any);
 			notificationsService.remove.mockResolvedValue({} as any);
-			dhVectorsService.create.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
 
 			await service.update(medication._id, { afternoon: null } as any, 'u1');
 
@@ -219,7 +219,7 @@ describe('MedicationsService', () => {
 			});
 			medicationModel.findOne.mockResolvedValue(medication as any);
 			notificationsService.update.mockResolvedValue({} as any);
-			dhVectorsService.create.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
 
 			await service.update(
 				medication._id,
@@ -240,7 +240,7 @@ describe('MedicationsService', () => {
 				morning: { ...time(8, 'AM'), notification: 'n-morning' },
 			});
 			medicationModel.findOne.mockResolvedValue(medication as any);
-			dhVectorsService.create.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
 
 			await service.update(medication._id, { dosage: '1g' } as any, 'u1');
 

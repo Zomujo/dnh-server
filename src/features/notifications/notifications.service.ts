@@ -58,7 +58,7 @@ export class NotificationsService {
 
 		const summary = this.generateNotificationSummary(notification);
 
-		await this.dhVectorsService.create({
+		await this.dhVectorsService.index({
 			qdrantId: notification.qdrantId,
 			userId: notification.userId,
 			patient: notification.patient as any,
@@ -124,7 +124,7 @@ export class NotificationsService {
 
 		const summary = this.generateNotificationSummary(notification);
 
-		await this.dhVectorsService.create({
+		await this.dhVectorsService.index({
 			qdrantId: notification.qdrantId,
 			userId: notification.userId,
 			patient: notification.patient as any,
@@ -150,7 +150,7 @@ export class NotificationsService {
 			targetName: dto.targetName,
 			goal: filters.goal,
 		});
-		const searchNotification = await this.dhVectorsService.findAll({
+		const searchNotification = await this.dhVectorsService.findSimilar({
 			userId: filters.userId,
 			patient: filters.patient,
 			documentType: DHDocumentType.NOTIFICATION,
@@ -180,7 +180,7 @@ export class NotificationsService {
 
 		const summary = this.generateNotificationSummary(notification);
 
-		await this.dhVectorsService.create({
+		await this.dhVectorsService.index({
 			qdrantId: notification.qdrantId,
 			userId: filters.userId,
 			patient: filters.patient,
