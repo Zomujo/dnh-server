@@ -49,10 +49,30 @@ export class PatientsService {
 		return this.patientModel.findByIdAndUpdate(objectId, update);
 	}
 
+	/**
+	 * The record stores one `name`, not firstname/lastname (Mongoose drops
+	 * those as unknown fields), so the parts are joined into it. A part left
+	 * out is kept from the current name, split at its first space, the same
+	 * way onboarding joined it.
+	 */
 	async updatePatient(id: string, dto: UpdatePatientDto) {
 		const patient = await this.findPatientById(id);
 		if (!patient) throw new NotFoundException('Patient not found');
-		await this.updatePatientById(id, { $set: dto });
+		const { firstname, lastname, ...rest } = dto;
+		const update: Record<string, unknown> = { ...rest };
+		if (firstname !== undefined || lastname !== undefined) {
+			const [currentFirst = '', ...currentLast] = (patient.name ?? '').split(
+				' ',
+			);
+			update.name = [
+				firstname ?? currentFirst,
+				lastname ?? currentLast.join(' '),
+			]
+				.map((part) => part.trim())
+				.filter(Boolean)
+				.join(' ');
+		}
+		await this.updatePatientById(id, { $set: update });
 		return patient._id.toString();
 	}
 

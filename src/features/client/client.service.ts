@@ -57,6 +57,7 @@ import {
 	ChronicChatMessagesQueryDto,
 	CreateChronicCareDto,
 	PreloadedMedsQueryDto,
+	UpdateProfileDto,
 	UserPayload,
 } from './dto';
 
@@ -347,6 +348,19 @@ export class ClientService {
 			gender: patient.gender,
 			patientCode: patient.patientCode || null,
 		};
+	}
+
+	/** Saves the name and gender the patient edits in the app. */
+	async updateProfile(dto: UpdateProfileDto, userId: string) {
+		const patient = await this.patientsService.findPatientByUserId(
+			userId,
+			'_id',
+		);
+		if (!patient) {
+			throw new NotFoundException('Patient not found');
+		}
+		await this.patientsService.updatePatient(patient._id.toString(), dto);
+		return this.fetchPatientData(userId);
 	}
 
 	async fetchChronicConditions(query: ChronicCareQueryDto, userId: string) {
