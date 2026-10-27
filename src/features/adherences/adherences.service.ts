@@ -487,11 +487,17 @@ export class AdherencesService {
 			(day) => {
 				const dayDoses = doses.filter((d) => isSameDay(d.scheduledFor, day));
 				const settled = dayDoses.filter((d) => d.status !== 'pending');
+				// Null when nothing was due: a future day, a dose still
+				// confirmable, or a day the schedule expects no dose (before
+				// the start date, after the end date). Only a missed dose is
+				// `false`.
 				let taken: boolean | null;
-				if (startOfDay(day) > now || settled.length < dayDoses.length) {
+				if (
+					startOfDay(day) > now ||
+					dayDoses.length === 0 ||
+					settled.length < dayDoses.length
+				) {
 					taken = null;
-				} else if (dayDoses.length === 0) {
-					taken = isSameDay(day, now) ? null : false;
 				} else {
 					taken = settled.every(
 						(d) => d.status === 'taken' || d.status === 'partial',
