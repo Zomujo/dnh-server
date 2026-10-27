@@ -53,7 +53,7 @@ export class PatientsService {
 	 * The record stores one `name`, not firstname/lastname (Mongoose drops
 	 * those as unknown fields), so the parts are joined into it. A part left
 	 * out is kept from the current name, split at its first space, the same
-	 * way onboarding joined it.
+	 * way onboarding joined it. Blank parts never clear the stored name.
 	 */
 	async updatePatient(id: string, dto: UpdatePatientDto) {
 		const patient = await this.findPatientById(id);
@@ -64,15 +64,18 @@ export class PatientsService {
 			const [currentFirst = '', ...currentLast] = (patient.name ?? '').split(
 				' ',
 			);
-			update.name = [
-				firstname ?? currentFirst,
-				lastname ?? currentLast.join(' '),
+			const name = [
+				firstname?.trim() || currentFirst,
+				lastname?.trim() || currentLast.join(' '),
 			]
 				.map((part) => part.trim())
 				.filter(Boolean)
 				.join(' ');
+			if (name) update.name = name;
 		}
 		await this.updatePatientById(id, { $set: update });
+		// The doctor-facing summary embeds the patient record.
+		await this.summaryCacheService.delete(summaryCacheKey(id));
 		return patient._id.toString();
 	}
 

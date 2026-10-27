@@ -82,6 +82,29 @@ describe('PatientsService', () => {
 			});
 		});
 
+		it('keeps the current parts when blank ones are sent', async () => {
+			patientModel.findById.mockReturnValue(existing('Jackson Kofi Jinwoo'));
+
+			await service.updatePatient(id.toString(), {
+				firstname: '  ',
+				lastname: 'Mensah',
+			});
+
+			expect(patientModel.findByIdAndUpdate).toHaveBeenCalledWith(id, {
+				$set: { name: 'Jackson Mensah' },
+			});
+		});
+
+		it('clears the cached summary so it picks up the change', async () => {
+			patientModel.findById.mockReturnValue(existing('Jackson Jinwoo'));
+
+			await service.updatePatient(id.toString(), { gender: 'female' as any });
+
+			expect(summaryCacheService.delete).toHaveBeenCalledWith(
+				`chronic-care:doctors:patients:summary:${id.toString()}`,
+			);
+		});
+
 		it('leaves the name alone when neither part is sent', async () => {
 			patientModel.findById.mockReturnValue(existing('Jackson Jinwoo'));
 
