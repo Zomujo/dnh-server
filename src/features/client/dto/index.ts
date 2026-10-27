@@ -16,4 +16,4 @@ export {
 	MessagesPayload,
 	PreloadedMedsQueryDto,
 } from './get.dto';
-export { UpdateChronicCareDto } from './update.dto';
+export { UpdateChronicCareDto, UpdateProfileDto } from './update.dto';

@@ -98,6 +98,7 @@ import {
 	CreateChronicCareDto,
 	MedicationAdherenceDto,
 	PreloadedMedsQueryDto,
+	UpdateProfileDto,
 } from './dto';
 
 // ~5 minutes of AAC voice note, with headroom.
@@ -215,6 +216,26 @@ export class ClientController {
 				response,
 				HttpStatus.OK,
 				'Patient data fetched successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['updated', 'authorize'], {
+		message: 'Profile updated successfully',
+	})
+	@Patch('patient')
+	async updateProfile(
+		@Body() dto: UpdateProfileDto,
+		@GetUser('sub') userId: string,
+	) {
+		try {
+			const response = await this.clientService.updateProfile(dto, userId);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				'Profile updated successfully',
 			);
 		} catch (error) {
 			throwError(this.logger, error);

@@ -53,6 +53,69 @@ describe('PatientsService', () => {
 		});
 	});
 
+	describe('updatePatient', () => {
+		const id = new Types.ObjectId();
+		const existing = (name: string) =>
+			({ select: vi.fn().mockResolvedValue({ _id: id, name }) }) as any;
+
+		it('joins firstname and lastname into the stored name', async () => {
+			patientModel.findById.mockReturnValue(existing('Jackson Jinwoo'));
+
+			await service.updatePatient(id.toString(), {
+				firstname: 'Jack',
+				lastname: 'Mensah',
+				gender: 'male' as any,
+			});
+
+			expect(patientModel.findByIdAndUpdate).toHaveBeenCalledWith(id, {
+				$set: { name: 'Jack Mensah', gender: 'male' },
+			});
+		});
+
+		it('keeps the part of the name that was not sent', async () => {
+			patientModel.findById.mockReturnValue(existing('Jackson Kofi Jinwoo'));
+
+			await service.updatePatient(id.toString(), { firstname: 'Jack' });
+
+			expect(patientModel.findByIdAndUpdate).toHaveBeenCalledWith(id, {
+				$set: { name: 'Jack Kofi Jinwoo' },
+			});
+		});
+
+		it('keeps the current parts when blank ones are sent', async () => {
+			patientModel.findById.mockReturnValue(existing('Jackson Kofi Jinwoo'));
+
+			await service.updatePatient(id.toString(), {
+				firstname: '  ',
+				lastname: 'Mensah',
+			});
+
+			expect(patientModel.findByIdAndUpdate).toHaveBeenCalledWith(id, {
+				$set: { name: 'Jackson Mensah' },
+			});
+		});
+
+		it('clears the cached summary so it picks up the change', async () => {
+			patientModel.findById.mockReturnValue(existing('Jackson Jinwoo'));
+
+			await service.updatePatient(id.toString(), { gender: 'female' as any });
+
+			expect(summaryCacheService.delete).toHaveBeenCalledWith(
+				`chronic-care:doctors:patients:summary:${id.toString()}`,
+			);
+		});
+
+		it('leaves the name alone when neither part is sent', async () => {
+			patientModel.findById.mockReturnValue(existing('Jackson Jinwoo'));
+
+			await service.updatePatient(id.toString(), { gender: 'female' as any });
+
+			expect(patientModel.findByIdAndUpdate).toHaveBeenCalledWith(id, {
+				$set: { gender: 'female' },
+			});
+		});
+	});
+
 	describe('create', () => {
 		const noPatient = () =>
 			({ select: vi.fn().mockResolvedValue(null) }) as any;

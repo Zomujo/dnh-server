@@ -7,6 +7,7 @@ import {
 import { Expose } from 'class-transformer';
 import {
 	IsMongoId,
+	IsNotEmpty,
 	IsNumber,
 	IsOptional,
 	IsString,
@@ -28,11 +29,13 @@ export class UpdatePatientDto extends PartialType(
 ) {
 	@ApiPropertyOptional({ example: 'John' })
 	@IsString()
+	@IsNotEmpty()
 	@IsOptional()
 	firstname?: string;
 
 	@ApiPropertyOptional({ example: 'Doe' })
 	@IsString()
+	@IsNotEmpty()
 	@IsOptional()
 	lastname?: string;
 

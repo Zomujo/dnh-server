@@ -213,6 +213,37 @@ describe('AdherencesService', () => {
 		});
 	});
 
+	describe('medicationMonthHistory', () => {
+		it('leaves days before the medication was added blank', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-06-10T12:00:00'));
+			const now = new Date();
+			const medication = {
+				...morningMedication(),
+				startDate: new Date('2026-06-05T00:00:00'),
+				createdAt: new Date('2026-06-05T07:00:00'),
+			};
+			medicationModel.find.mockReturnValue(chain([medication]));
+			// Jun 5–7 taken; Jun 8 missed; Jun 9 and 10 still confirmable.
+			adherenceLogModel.find.mockReturnValue(
+				chain([3, 4, 5].map((d) => takenMorning(medication._id, now, d))),
+			);
+
+			const history = await service.medicationMonthHistory(
+				'u1',
+				medication._id.toString(),
+				now,
+			);
+
+			const takenOn = (day: number) => history.logs[day - 1].taken;
+			expect([1, 2, 3, 4].map(takenOn)).toEqual([null, null, null, null]);
+			expect([5, 6, 7].map(takenOn)).toEqual([true, true, true]);
+			expect(takenOn(8)).toBe(false);
+			expect([9, 10, 11].map(takenOn)).toEqual([null, null, null]);
+			expect(history.adherenceRate).toBe(75); // 3 of 4 settled doses
+		});
+	});
+
 	describe('recordMissedDoses', () => {
 		it('writes a missed log for each unconfirmed dose past its window', async () => {
 			vi.useFakeTimers();
