@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import {
 	eachDayOfInterval,
+	endOfDay,
 	endOfMonth,
 	endOfWeek,
 	isSameDay,
@@ -47,6 +48,15 @@ import {
 /** Doses whose confirm window closed this long ago are still checked, so
  * the missed-dose job catches up after the server was down for a while. */
 const MISSED_DOSE_LOOKBACK_HOURS = 72;
+
+/** Medications with at least one dose time, the ones adherence counts. */
+const HAS_DOSE_SCHEDULE = {
+	$or: [
+		{ 'morning.time': { $exists: true } },
+		{ 'afternoon.time': { $exists: true } },
+		{ 'evening.time': { $exists: true } },
+	],
+};
 
 @Injectable()
 export class AdherencesService {
@@ -140,14 +150,15 @@ export class AdherencesService {
 	 * Adherence over the last 30 days: doses taken ÷ doses scheduled on the
 	 * days that are settled (see `adherenceRateOf`), across every medication
 	 * and section. Null when no day has settled yet, so the caller can tell
-	 * "no data" from a genuine 0%.
+	 * "no data" from a genuine 0%. Today's later doses are included, so
+	 * today only counts once every one of them is taken.
 	 */
 	private async estimateAdherenceRate(userId: string): Promise<number | null> {
 		const now = new Date();
 		const perMedication = await this.resolveUserDoses(
 			userId,
 			startOfDay(subDays(now, 29)),
-			now,
+			endOfDay(now),
 		);
 		return adherenceRateOf(
 			perMedication.flatMap(({ doses }) => doses),
@@ -231,13 +242,10 @@ export class AdherencesService {
 	async recordMissedDoses(now: Date = new Date()) {
 		const to = subHours(now, MAX_DOSE_CONFIRM_BACKDATE_HOURS);
 		const from = subHours(to, MISSED_DOSE_LOOKBACK_HOURS);
-		const userIds: string[] = await this.medicationModel.distinct('userId', {
-			$or: [
-				{ 'morning.time': { $exists: true } },
-				{ 'afternoon.time': { $exists: true } },
-				{ 'evening.time': { $exists: true } },
-			],
-		});
+		const userIds: string[] = await this.medicationModel.distinct(
+			'userId',
+			HAS_DOSE_SCHEDULE,
+		);
 
 		let recorded = 0;
 		for (const userId of userIds) {
@@ -260,6 +268,27 @@ export class AdherencesService {
 			}
 		}
 		return recorded;
+	}
+
+	/**
+	 * Recomputes the clinician-facing rate of every patient with a dose
+	 * schedule. Run just after midnight: the day that just ended now counts,
+	 * and nothing else would refresh the stored rate until a dose is
+	 * confirmed or its 48 h window closes.
+	 */
+	async refreshAdherenceRates() {
+		const medications = await this.medicationModel
+			.find(HAS_DOSE_SCHEDULE)
+			.select('userId patient')
+			.lean();
+		const patientOf = new Map<string, unknown>();
+		for (const { userId, patient } of medications) {
+			if (patient && !patientOf.has(userId)) patientOf.set(userId, patient);
+		}
+		for (const [userId, patientId] of patientOf) {
+			await this.refreshPatientAdherence(userId, patientId);
+		}
+		return patientOf.size;
 	}
 
 	/**
@@ -427,7 +456,7 @@ export class AdherencesService {
 		const perMedication = await this.resolveUserDoses(
 			userId,
 			startOfDay(subDays(now, 6)),
-			now,
+			endOfDay(now),
 		);
 		return (
 			adherenceRateOf(

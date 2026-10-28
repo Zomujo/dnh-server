@@ -170,6 +170,51 @@ describe('AdherencesService', () => {
 
 			expect(rate).toBe(67); // 4 of 6 doses
 		});
+
+		it('leaves today out while a later dose is still to come', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-06-10T10:00:00'));
+			const now = new Date();
+			const medication = {
+				...morningMedication(),
+				startDate: new Date('2026-06-09T00:00:00'),
+				createdAt: new Date('2026-06-09T00:00:00'),
+				evening: { time: { hour: 8, minutes: 0, timeDesignators: 'PM' } },
+			};
+			medicationModel.find.mockReturnValue(chain([medication]));
+			// Yesterday 1 of 2. Today's morning dose is taken, the evening one
+			// is still to come.
+			adherenceLogModel.find.mockReturnValue(
+				chain([0, 1].map((d) => takenMorning(medication._id, now, d))),
+			);
+
+			const rate = await service.aggregateMedicationAdherence('u1');
+
+			expect(rate).toBe(50);
+		});
+	});
+
+	describe('refreshAdherenceRates', () => {
+		it("recomputes each scheduled patient's rate once", async () => {
+			medicationModel.find
+				.mockReturnValueOnce(
+					chain([
+						{ userId: 'u1', patient: 'p1' },
+						{ userId: 'u1', patient: 'p1' },
+						{ userId: 'u2', patient: 'p2' },
+						{ userId: 'u3' },
+					]),
+				)
+				.mockReturnValue(chain([]));
+			adherenceLogModel.find.mockReturnValue(chain([]));
+			patientModel.findByIdAndUpdate.mockResolvedValue({} as any);
+
+			expect(await service.refreshAdherenceRates()).toBe(2);
+			expect(patientModel.findByIdAndUpdate).toHaveBeenCalledTimes(2);
+			expect(patientModel.findByIdAndUpdate).toHaveBeenCalledWith('p2', {
+				$set: expect.objectContaining({ adherenceRate: 0 }),
+			});
+		});
 	});
 
 	describe('aggregateMedicationTakenByWeek', () => {

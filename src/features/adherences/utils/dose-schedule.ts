@@ -275,7 +275,9 @@ export function adherenceRateOf(
 	const byDay = new Map<string, ResolvedDose[]>();
 	for (const dose of doses) {
 		const key = format(dose.scheduledFor, 'yyyy-MM-dd');
-		byDay.set(key, [...(byDay.get(key) ?? []), dose]);
+		const dayDoses = byDay.get(key);
+		if (dayDoses) dayDoses.push(dose);
+		else byDay.set(key, [dose]);
 	}
 
 	let taken = 0;
