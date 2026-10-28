@@ -237,17 +237,54 @@ export function resolveDoses(
 	);
 }
 
+const isTaken = (dose: ResolvedDose) =>
+	dose.status === 'taken' || dose.status === 'partial';
+
 /**
- * Doses taken ÷ doses settled, as a whole percentage. `partial` (taken, but
- * late) counts as taken. Pending doses are left out until they settle, so a
- * dose that is still confirmable doesn't drag the rate down. Null when no
- * dose has settled yet.
+ * One day's adherence: `true` once every dose it scheduled was taken,
+ * `false` once the day is over with a dose not taken, and `null` while it
+ * can still go either way (today, the future) or when it scheduled nothing.
+ * A dose confirmed late turns a `false` day `true`, so this is worked out
+ * fresh from the doses every time, never stored.
  */
-export function adherenceRateOf(doses: ResolvedDose[]): number | null {
-	const settled = doses.filter((d) => d.status !== 'pending');
-	if (settled.length === 0) return null;
-	const taken = settled.filter(
-		(d) => d.status === 'taken' || d.status === 'partial',
-	).length;
-	return Math.round((taken / settled.length) * 100);
+export function dayAdherence(
+	dayDoses: ResolvedDose[],
+	day: Date,
+	now: Date = new Date(),
+): { taken: boolean | null; takenDoses: number; scheduledDoses: number } {
+	const takenDoses = dayDoses.filter(isTaken).length;
+	const scheduledDoses = dayDoses.length;
+	let taken: boolean | null = null;
+	if (scheduledDoses > 0 && startOfDay(day) <= now) {
+		if (takenDoses === scheduledDoses) taken = true;
+		else if (endOfDay(day) < now) taken = false;
+	}
+	return { taken, takenDoses, scheduledDoses };
+}
+
+/**
+ * Doses taken ÷ doses scheduled, as a whole percentage, over the days
+ * `dayAdherence` has settled (`taken` not null). `partial` (taken, but
+ * late) counts as taken. Null when no day has settled yet, so the caller
+ * can tell "no data" from a genuine 0%.
+ */
+export function adherenceRateOf(
+	doses: ResolvedDose[],
+	now: Date = new Date(),
+): number | null {
+	const byDay = new Map<string, ResolvedDose[]>();
+	for (const dose of doses) {
+		const key = format(dose.scheduledFor, 'yyyy-MM-dd');
+		byDay.set(key, [...(byDay.get(key) ?? []), dose]);
+	}
+
+	let taken = 0;
+	let scheduled = 0;
+	for (const dayDoses of byDay.values()) {
+		const day = dayAdherence(dayDoses, dayDoses[0].scheduledFor, now);
+		if (day.taken === null) continue;
+		taken += day.takenDoses;
+		scheduled += day.scheduledDoses;
+	}
+	return scheduled === 0 ? null : Math.round((taken / scheduled) * 100);
 }

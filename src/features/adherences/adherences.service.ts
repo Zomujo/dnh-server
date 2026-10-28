@@ -38,6 +38,7 @@ import {
 import {
 	adherenceRateOf,
 	type DoseLog,
+	dayAdherence,
 	type ResolvedDose,
 	resolveDoses,
 	type ScheduledMedication,
@@ -136,9 +137,10 @@ export class AdherencesService {
 	}
 
 	/**
-	 * Adherence over the last 30 days: doses taken ÷ doses settled, across
-	 * every medication and section. Null when no dose has settled yet, so
-	 * the caller can tell "no data" from a genuine 0%.
+	 * Adherence over the last 30 days: doses taken ÷ doses scheduled on the
+	 * days that are settled (see `adherenceRateOf`), across every medication
+	 * and section. Null when no day has settled yet, so the caller can tell
+	 * "no data" from a genuine 0%.
 	 */
 	private async estimateAdherenceRate(userId: string): Promise<number | null> {
 		const now = new Date();
@@ -147,7 +149,10 @@ export class AdherencesService {
 			startOfDay(subDays(now, 29)),
 			now,
 		);
-		return adherenceRateOf(perMedication.flatMap(({ doses }) => doses));
+		return adherenceRateOf(
+			perMedication.flatMap(({ doses }) => doses),
+			now,
+		);
 	}
 
 	/**
@@ -414,7 +419,8 @@ export class AdherencesService {
 
 	/**
 	 * Adherence over the last 7 days (today and the 6 before it): doses
-	 * taken ÷ doses settled, across every medication and section.
+	 * taken ÷ doses scheduled on the days that are settled (see
+	 * `adherenceRateOf`), across every medication and section.
 	 */
 	async aggregateMedicationAdherence(userId: string) {
 		const now = new Date();
@@ -423,14 +429,17 @@ export class AdherencesService {
 			startOfDay(subDays(now, 6)),
 			now,
 		);
-		return adherenceRateOf(perMedication.flatMap(({ doses }) => doses)) ?? 0;
+		return (
+			adherenceRateOf(
+				perMedication.flatMap(({ doses }) => doses),
+				now,
+			) ?? 0
+		);
 	}
 
 	/**
-	 * This week, Monday to Sunday. A day is `taken` only when every dose it
-	 * scheduled was taken, `null` while it is in the future or a dose is
-	 * still confirmable, and `false` otherwise. `takenDoses` and
-	 * `scheduledDoses` give the counts behind it.
+	 * This week, Monday to Sunday, one entry per day as `dayAdherence` sees
+	 * it. `takenDoses` and `scheduledDoses` give the counts behind it.
 	 */
 	async aggregateMedicationTakenByWeek(userId: string) {
 		const now = new Date();
@@ -443,18 +452,11 @@ export class AdherencesService {
 		const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 		return eachDayOfInterval({ start: weekStart, end: weekEnd }).map((date) => {
 			const dayDoses = doses.filter((d) => isSameDay(d.scheduledFor, date));
-			const takenDoses = dayDoses.filter(
-				(d) => d.status === 'taken' || d.status === 'partial',
-			).length;
-			const scheduledDoses = dayDoses.length;
-
-			let taken: boolean | null;
-			if (date > now) taken = null;
-			else if (scheduledDoses > 0 && takenDoses === scheduledDoses)
-				taken = true;
-			else if (dayDoses.some((d) => d.status === 'pending')) taken = null;
-			else taken = false;
-
+			const { taken, takenDoses, scheduledDoses } = dayAdherence(
+				dayDoses,
+				date,
+				now,
+			);
 			return {
 				taken,
 				dateTaken: date,
@@ -468,7 +470,7 @@ export class AdherencesService {
 	/**
 	 * One medication's month: one entry per scheduled dose, plus the older
 	 * one-per-day `logs` for clients that still read them. A day in `logs`
-	 * is taken only when all its doses were.
+	 * is as `dayAdherence` sees it.
 	 */
 	async medicationMonthHistory(
 		userId: string,
@@ -486,26 +488,9 @@ export class AdherencesService {
 		const logs = eachDayOfInterval({ start: monthStart, end: monthEnd }).map(
 			(day) => {
 				const dayDoses = doses.filter((d) => isSameDay(d.scheduledFor, day));
-				const settled = dayDoses.filter((d) => d.status !== 'pending');
-				// Null when nothing was due: a future day, a dose still
-				// confirmable, or a day the schedule expects no dose (before
-				// the start date, after the end date). Only a missed dose is
-				// `false`.
-				let taken: boolean | null;
-				if (
-					startOfDay(day) > now ||
-					dayDoses.length === 0 ||
-					settled.length < dayDoses.length
-				) {
-					taken = null;
-				} else {
-					taken = settled.every(
-						(d) => d.status === 'taken' || d.status === 'partial',
-					);
-				}
 				return {
 					takenAt: day,
-					taken,
+					taken: dayAdherence(dayDoses, day, now).taken,
 					id:
 						dayDoses.find((d) => d.logId)?.logId ??
 						new Types.ObjectId().toString(),
@@ -514,7 +499,7 @@ export class AdherencesService {
 		);
 
 		return {
-			adherenceRate: adherenceRateOf(doses) ?? 0,
+			adherenceRate: adherenceRateOf(doses, now) ?? 0,
 			logs,
 			doses: doses.map(({ scheduledFor, section, status, logId }) => ({
 				scheduledFor,
