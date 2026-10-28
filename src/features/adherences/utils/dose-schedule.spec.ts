@@ -2,7 +2,9 @@ import { Types } from 'mongoose';
 import {
 	adherenceRateOf,
 	type DoseLog,
+	dayAdherence,
 	doseOfLog,
+	type ResolvedDose,
 	resolveDoses,
 	type ScheduledMedication,
 	scheduledDoses,
@@ -188,24 +190,92 @@ describe('dose-schedule', () => {
 		});
 	});
 
-	describe('adherenceRateOf', () => {
-		it('counts partial as taken and leaves pending doses out', () => {
-			const at = new Date();
-			expect(
-				adherenceRateOf([
-					{ scheduledFor: at, section: 'morning', status: 'taken' },
-					{ scheduledFor: at, section: 'evening', status: 'partial' },
-					{ scheduledFor: at, section: 'morning', status: 'missed' },
-					{ scheduledFor: at, section: 'evening', status: 'pending' },
-				]),
-			).toBe(67);
+	describe('dayAdherence', () => {
+		const now = new Date('2026-10-28T12:00:00');
+		const dose = (
+			at: string,
+			status: ResolvedDose['status'],
+		): ResolvedDose => ({
+			scheduledFor: new Date(at),
+			section: 'morning',
+			status,
 		});
 
-		it('is null before any dose has settled', () => {
+		it('is false once the day is over with a dose not taken', () => {
 			expect(
-				adherenceRateOf([
-					{ scheduledFor: new Date(), section: 'morning', status: 'pending' },
-				]),
+				dayAdherence(
+					[
+						dose('2026-10-27T08:00:00', 'taken'),
+						dose('2026-10-27T20:00:00', 'pending'),
+					],
+					new Date('2026-10-27T00:00:00'),
+					now,
+				),
+			).toEqual({ taken: false, takenDoses: 1, scheduledDoses: 2 });
+		});
+
+		it('is true once every dose is taken, today included', () => {
+			expect(
+				dayAdherence(
+					[dose('2026-10-28T08:00:00', 'partial')],
+					new Date('2026-10-28T00:00:00'),
+					now,
+				).taken,
+			).toBe(true);
+		});
+
+		it('stays null today until every dose is taken', () => {
+			expect(
+				dayAdherence(
+					[
+						dose('2026-10-28T08:00:00', 'taken'),
+						dose('2026-10-28T20:00:00', 'pending'),
+					],
+					new Date('2026-10-28T00:00:00'),
+					now,
+				).taken,
+			).toBeNull();
+		});
+
+		it('is null on a day that scheduled nothing', () => {
+			expect(
+				dayAdherence([], new Date('2026-10-26T00:00:00'), now).taken,
+			).toBeNull();
+		});
+	});
+
+	describe('adherenceRateOf', () => {
+		const now = new Date('2026-10-28T12:00:00');
+		const dose = (
+			at: string,
+			status: ResolvedDose['status'],
+		): ResolvedDose => ({
+			scheduledFor: new Date(at),
+			section: 'morning',
+			status,
+		});
+
+		it('counts doses over the days that are settled', () => {
+			// Monday 1 of 2, Tuesday 2 of 2, today and tomorrow left out.
+			expect(
+				adherenceRateOf(
+					[
+						dose('2026-10-26T08:00:00', 'taken'),
+						dose('2026-10-26T20:00:00', 'pending'),
+						dose('2026-10-27T08:00:00', 'taken'),
+						dose('2026-10-27T20:00:00', 'partial'),
+						dose('2026-10-28T08:00:00', 'missed'),
+						dose('2026-10-28T20:00:00', 'pending'),
+						dose('2026-10-29T08:00:00', 'pending'),
+					],
+					now,
+				),
+			).toBe(75);
+		});
+
+		it('is null before any day has settled', () => {
+			expect(
+				adherenceRateOf([dose('2026-10-28T08:00:00', 'pending')], now),
 			).toBeNull();
 		});
 	});

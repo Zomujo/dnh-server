@@ -153,21 +153,67 @@ describe('AdherencesService', () => {
 	});
 
 	describe('aggregateMedicationAdherence', () => {
-		it('divides doses taken by doses settled over the last 7 days', async () => {
+		it('divides doses taken by doses scheduled on the days that are over', async () => {
 			vi.useFakeTimers();
 			vi.setSystemTime(new Date('2026-06-10T12:00:00'));
 			const now = new Date();
 			const medication = morningMedication();
 			medicationModel.find.mockReturnValue(chain([medication]));
-			// Jun 4–7 taken. Jun 8 is past the 48 h window, so missed; Jun 9
-			// and 10 can still be confirmed, so they don't count yet.
+			// Jun 4–7 taken. Jun 8 and 9 are over with nothing taken, so they
+			// count as missed even though Jun 9 can still be confirmed late.
+			// Today (Jun 10) doesn't count until it is over.
 			adherenceLogModel.find.mockReturnValue(
 				chain([3, 4, 5, 6].map((d) => takenMorning(medication._id, now, d))),
 			);
 
 			const rate = await service.aggregateMedicationAdherence('u1');
 
-			expect(rate).toBe(80); // 4 of 5 settled doses
+			expect(rate).toBe(67); // 4 of 6 doses
+		});
+
+		it('leaves today out while a later dose is still to come', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-06-10T10:00:00'));
+			const now = new Date();
+			const medication = {
+				...morningMedication(),
+				startDate: new Date('2026-06-09T00:00:00'),
+				createdAt: new Date('2026-06-09T00:00:00'),
+				evening: { time: { hour: 8, minutes: 0, timeDesignators: 'PM' } },
+			};
+			medicationModel.find.mockReturnValue(chain([medication]));
+			// Yesterday 1 of 2. Today's morning dose is taken, the evening one
+			// is still to come.
+			adherenceLogModel.find.mockReturnValue(
+				chain([0, 1].map((d) => takenMorning(medication._id, now, d))),
+			);
+
+			const rate = await service.aggregateMedicationAdherence('u1');
+
+			expect(rate).toBe(50);
+		});
+	});
+
+	describe('refreshAdherenceRates', () => {
+		it("recomputes each scheduled patient's rate once", async () => {
+			medicationModel.find
+				.mockReturnValueOnce(
+					chain([
+						{ userId: 'u1', patient: 'p1' },
+						{ userId: 'u1', patient: 'p1' },
+						{ userId: 'u2', patient: 'p2' },
+						{ userId: 'u3' },
+					]),
+				)
+				.mockReturnValue(chain([]));
+			adherenceLogModel.find.mockReturnValue(chain([]));
+			patientModel.findByIdAndUpdate.mockResolvedValue({} as any);
+
+			expect(await service.refreshAdherenceRates()).toBe(2);
+			expect(patientModel.findByIdAndUpdate).toHaveBeenCalledTimes(2);
+			expect(patientModel.findByIdAndUpdate).toHaveBeenCalledWith('p2', {
+				$set: expect.objectContaining({ adherenceRate: 0 }),
+			});
 		});
 	});
 
@@ -203,12 +249,15 @@ describe('AdherencesService', () => {
 				takenDoses: 2,
 				scheduledDoses: 2,
 			});
-			// Tuesday's evening dose can still be confirmed.
+			// Tuesday is over with its evening dose not taken, even though it
+			// can still be confirmed late.
 			expect(days[1]).toMatchObject({
-				taken: null,
+				taken: false,
 				takenDoses: 1,
 				scheduledDoses: 2,
 			});
+			// Today has nothing taken yet, so it stays open.
+			expect(days[2]).toMatchObject({ taken: null, scheduledDoses: 2 });
 			expect(days[6]).toMatchObject({ label: 'S', taken: null });
 		});
 	});
@@ -224,7 +273,7 @@ describe('AdherencesService', () => {
 				createdAt: new Date('2026-06-05T07:00:00'),
 			};
 			medicationModel.find.mockReturnValue(chain([medication]));
-			// Jun 5–7 taken; Jun 8 missed; Jun 9 and 10 still confirmable.
+			// Jun 5–7 taken; Jun 8 and 9 over and not taken; Jun 10 is today.
 			adherenceLogModel.find.mockReturnValue(
 				chain([3, 4, 5].map((d) => takenMorning(medication._id, now, d))),
 			);
@@ -238,9 +287,9 @@ describe('AdherencesService', () => {
 			const takenOn = (day: number) => history.logs[day - 1].taken;
 			expect([1, 2, 3, 4].map(takenOn)).toEqual([null, null, null, null]);
 			expect([5, 6, 7].map(takenOn)).toEqual([true, true, true]);
-			expect(takenOn(8)).toBe(false);
-			expect([9, 10, 11].map(takenOn)).toEqual([null, null, null]);
-			expect(history.adherenceRate).toBe(75); // 3 of 4 settled doses
+			expect([8, 9].map(takenOn)).toEqual([false, false]);
+			expect([10, 11].map(takenOn)).toEqual([null, null]);
+			expect(history.adherenceRate).toBe(60); // 3 of 5 doses
 		});
 	});
 
