@@ -205,6 +205,65 @@ describe('ClientService', () => {
 					),
 				).rejects.toThrow(/not yet time/);
 			});
+
+			it('refuses a dose whose time had passed when the medication was added', async () => {
+				medicationsService.findOwnedById.mockResolvedValue({
+					_id: medId,
+					patient: 'p1',
+					frequency: { repeatEvery: 1, repetitionType: 'daily' },
+					startDate: new Date(2026, 9, 23, 8, 0),
+					createdAt: new Date(2026, 9, 23, 9, 0),
+					morning: { time: eightAm },
+				} as any);
+
+				await expect(
+					service.confirmMedication(medId, 'user-1', MedicationSection.MORNING),
+				).rejects.toThrow(/added to the schedule after its time/);
+				expect(adherencesService.upsertAdherenceLog).not.toHaveBeenCalled();
+			});
+
+			it('treats a dose confirmed before its time was moved as already taken', async () => {
+				adherencesService.findTakenDoseLog.mockResolvedValueOnce({
+					_id: 'log-0',
+				} as any);
+
+				const result = await service.confirmMedication(
+					medId,
+					'user-1',
+					MedicationSection.MORNING,
+				);
+
+				expect(adherencesService.findTakenDoseLog).toHaveBeenCalledWith(
+					'user-1',
+					expect.objectContaining({ _id: medId }),
+					expect.any(Date),
+					'morning',
+				);
+				expect(result).toMatchObject({ id: 'log-0', alreadyConfirmed: true });
+				expect(adherencesService.upsertAdherenceLog).not.toHaveBeenCalled();
+			});
+		});
+
+		it('refuses a dose from after the medication ended', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date(2026, 9, 23, 10, 0));
+			medicationsService.findOwnedById.mockResolvedValue({
+				_id: new Types.ObjectId().toString(),
+				frequency: { repeatEvery: 1, repetitionType: 'daily' },
+				startDate: new Date(2026, 9, 1),
+				endDate: new Date(2026, 9, 22),
+				morning: { time: { hour: 8, minutes: 0, timeDesignators: 'AM' } },
+			} as any);
+
+			await expect(
+				service.confirmMedication(
+					new Types.ObjectId().toString(),
+					'user-1',
+					MedicationSection.MORNING,
+				),
+			).rejects.toThrow('after the medication ended');
+			expect(adherencesService.upsertAdherenceLog).not.toHaveBeenCalled();
+			vi.useRealTimers();
 		});
 
 		it("should 404 on another user's medication without writing a log", async () => {
@@ -221,6 +280,77 @@ describe('ClientService', () => {
 				),
 			).rejects.toBeInstanceOf(NotFoundException);
 			expect(adherencesService.upsertAdherenceLog).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('fetchTodaysMedications', () => {
+		const eightAm = { hour: 8, minutes: 0, timeDesignators: 'AM' };
+
+		beforeEach(() => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date(2026, 9, 28, 10, 0));
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it('leaves out a dose added after its time today', async () => {
+			medicationsService.findBySchedule.mockResolvedValue([
+				{
+					_id: new Types.ObjectId(),
+					name: 'Lisinopril',
+					startDate: new Date(2026, 9, 1),
+					createdAt: new Date(2026, 9, 1, 9, 0),
+					morning: { time: eightAm },
+					scheduleHistory: [
+						{ effectiveFrom: new Date(2026, 9, 1, 9, 0) },
+						// The 8 AM dose, added at 9:30 today.
+						{ effectiveFrom: new Date(2026, 9, 28, 9, 30), morning: eightAm },
+					],
+				},
+			] as any);
+
+			const result = await service.fetchTodaysMedications(
+				MedicationSection.MORNING,
+				'user-1',
+			);
+
+			expect(result).toEqual([]);
+			expect(
+				adherencesService.findAllAdherenceLogsByQuery,
+			).not.toHaveBeenCalled();
+		});
+
+		it('keeps a dose taken before its time was moved as taken', async () => {
+			const medicationId = new Types.ObjectId();
+			medicationsService.findBySchedule.mockResolvedValue([
+				{
+					_id: medicationId,
+					name: 'Amlodipine',
+					startDate: new Date(2026, 9, 1),
+					createdAt: new Date(2026, 9, 1, 7, 0),
+					morning: { time: { ...eightAm, hour: 9 } },
+				},
+			] as any);
+			adherencesService.findAllAdherenceLogsByQuery.mockResolvedValue([
+				{
+					medication: medicationId,
+					taken: true,
+					scheduledFor: new Date(2026, 9, 28, 8, 0),
+					section: 'morning',
+				},
+			] as any);
+
+			const [dose] = await service.fetchTodaysMedications(
+				MedicationSection.MORNING,
+				'user-1',
+			);
+
+			expect(dose).toMatchObject({
+				toBeTakenAt: new Date(2026, 9, 28, 9, 0),
+				taken: true,
+			});
 		});
 	});
 });

@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
-import { differenceInHours, endOfDay, startOfDay } from 'date-fns';
+import { differenceInHours, endOfDay, format, startOfDay } from 'date-fns';
 import { toHeaderCase } from 'js-convert-case';
 import { Collection, Connection, isValidObjectId, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
@@ -16,7 +16,13 @@ import { FirebaseService } from '@/core/firebase/firebase.service';
 import { AdherencesService } from '@/features/adherences/adherences.service';
 import { TargetType } from '@/features/adherences/dto/target-type.enum';
 import { Status } from '@/features/adherences/entities/adherence-log.entity';
-import { doseTimeOn } from '@/features/adherences/utils/dose-schedule';
+import {
+	type DoseTime,
+	doseOfLog,
+	doseTimeOn,
+	type ScheduledMedication,
+	scheduledDoses,
+} from '@/features/adherences/utils/dose-schedule';
 import { AppointmentRequestsService } from '@/features/appointments/appointment-requests/appointment-requests.service';
 import type { CreateAppointmentRequestDto } from '@/features/appointments/appointment-requests/dto';
 import { AppointmentsService } from '@/features/appointments/appointments.service';
@@ -480,15 +486,24 @@ export class ClientService {
 			| 'morning'
 			| 'afternoon'
 			| 'evening';
-		const schedule = medication[sectionKey] as any;
-		if (!schedule?.time) {
+		const scheduled = medication as unknown as ScheduledMedication;
+		// The dose as the schedule of that day planned it, which may be an
+		// earlier schedule than the current one.
+		const planned = scheduledDoses(
+			scheduled,
+			startOfDay(day),
+			endOfDay(day),
+		).find((dose) => dose.section === sectionKey);
+		const currentTime = medication[sectionKey]?.time;
+		if (!planned && !currentTime) {
 			throw new NotFoundException(`No schedule defined for ${sectionKey}`);
 		}
 
 		// The scheduled dose datetime — the stable identity of "which dose" is
 		// being confirmed (used for the unique index below), not when the
 		// patient actually tapped confirm. See takenAt below for that.
-		const scheduledFor = doseTimeOn(schedule.time, day);
+		const scheduledFor =
+			planned?.scheduledFor ?? doseTimeOn(currentTime as DoseTime, day);
 
 		// Back-dated confirmations (a dose taken while offline) are allowed for
 		// a short window only, and never before the course started. The 4 h
@@ -509,12 +524,36 @@ export class ClientService {
 				'Cannot confirm a dose from before the medication started',
 			);
 		}
+		if (medication.endDate && scheduledFor > endOfDay(medication.endDate)) {
+			throw new BadRequestException(
+				'Cannot confirm a dose from after the medication ended',
+			);
+		}
 
 		if (new Date() < scheduledFor) {
-			const { hour, minutes, timeDesignators } = schedule.time;
 			throw new BadRequestException(
-				`Cannot confirm ${sectionKey} dose — it's not yet time (${hour}:${String(minutes).padStart(2, '0')} ${timeDesignators})`,
+				`Cannot confirm ${sectionKey} dose — it's not yet time (${format(scheduledFor, 'h:mm a')})`,
 			);
+		}
+
+		// Its time had already passed when the medication, or this dose, was
+		// added, so it was never part of that day's schedule.
+		if (!planned) {
+			throw new BadRequestException(
+				`Cannot confirm this ${sectionKey} dose — it was added to the schedule after its time on that day`,
+			);
+		}
+
+		// A confirmation belongs to the day and section, so one made before
+		// the dose's time was moved still settles it.
+		const taken = await this.adherencesService.findTakenDoseLog(
+			userId,
+			scheduled,
+			day,
+			sectionKey,
+		);
+		if (taken) {
+			return { id: taken._id, scheduledFor, alreadyConfirmed: true };
 		}
 
 		const confirmedAt = new Date();
@@ -597,16 +636,25 @@ export class ClientService {
 		// match nothing and every dose comes back untaken.
 		const medicationIds: Types.ObjectId[] = [];
 
+		const todayStart = startOfDay(new Date());
+		const todayEnd = endOfDay(new Date());
+
 		for (const med of medications) {
-			const schedule = med[sectionKey] as any;
-			if (!schedule?.time) continue;
+			// Only a dose today's schedule plans, at the time it plans it: not
+			// one added after its time today, which confirm would refuse.
+			const planned = scheduledDoses(
+				med as unknown as ScheduledMedication,
+				todayStart,
+				todayEnd,
+			).find((dose) => dose.section === sectionKey);
+			if (!planned) continue;
 
 			result.push({
 				id: med._id.toString(),
 				name: med.name,
 				dosage: med.dosage,
 				purpose: med.purpose,
-				toBeTakenAt: doseTimeOn(schedule.time),
+				toBeTakenAt: planned.scheduledFor,
 				taken: false,
 			});
 			medicationIds.push(med._id);
@@ -614,8 +662,6 @@ export class ClientService {
 
 		if (result.length === 0) return result;
 
-		const todayStart = startOfDay(new Date());
-		const todayEnd = endOfDay(new Date());
 		const medNames = result.map((m) => m.name);
 
 		// Scoped by `scheduledFor` (which dose) rather than `takenAt` (when the
@@ -645,13 +691,14 @@ export class ClientService {
 					},
 				],
 			},
-			projection: 'medication targetName taken takenAt scheduledFor',
+			projection: 'medication targetName taken takenAt scheduledFor section',
 			limit: 50,
 		} as any);
 
 		for (const item of result) {
+			const medication = medications.find((m) => m._id.toString() === item.id);
 			item.taken = logs.some((log: any) => {
-				if (!log.taken) return false;
+				if (!log.taken || !medication) return false;
 
 				// Identify the medication: by reference when the log has one,
 				// by name only for logs that predate the `medication` field.
@@ -661,22 +708,13 @@ export class ClientService {
 					return false;
 				}
 
-				// Then identify the *dose*. Matching on the medication alone
-				// marked every section of the day taken as soon as any single
-				// dose was confirmed — confirming the 8am dose reported the 8pm
-				// dose as already taken.
-				if (log.scheduledFor) {
-					return (
-						new Date(log.scheduledFor).getTime() === item.toBeTakenAt.getTime()
-					);
-				}
-
-				// No dose identity on the log at all; the confirming hour is
-				// the only signal left.
+				// Then identify the *dose*, by its section: a confirmation
+				// belongs to the day and section, so moving the dose's time
+				// keeps it taken. Older logs without a section are matched to
+				// the nearest one (see doseOfLog).
 				return (
-					Math.abs(
-						new Date(log.takenAt).getHours() - item.toBeTakenAt.getHours(),
-					) <= 1
+					doseOfLog(log, medication as unknown as ScheduledMedication)
+						?.section === sectionKey
 				);
 			});
 		}

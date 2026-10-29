@@ -30,6 +30,14 @@ export interface DoseTime {
 	timeDesignators?: string;
 }
 
+/** A schedule as saved at `effectiveFrom`: the dose time of each section. */
+export interface ScheduleVersion {
+	effectiveFrom: Date;
+	morning?: DoseTime | null;
+	afternoon?: DoseTime | null;
+	evening?: DoseTime | null;
+}
+
 /** The medication fields the schedule is built from. */
 export interface ScheduledMedication {
 	_id: Types.ObjectId;
@@ -38,9 +46,12 @@ export interface ScheduledMedication {
 	startDate?: Date;
 	endDate?: Date;
 	createdAt?: Date;
+	updatedAt?: Date;
 	morning?: { time?: DoseTime } | null;
 	afternoon?: { time?: DoseTime } | null;
 	evening?: { time?: DoseTime } | null;
+	/** Every schedule it has had, oldest first. Empty until it first changes. */
+	scheduleHistory?: ScheduleVersion[];
 }
 
 /** The log fields a dose is resolved from. */
@@ -87,6 +98,9 @@ export function doseTimeOn(time: DoseTime, day: Date = new Date()): Date {
 	});
 }
 
+const doseKey = (at: Date, section: DoseSection) =>
+	`${format(at, 'yyyy-MM-dd')}|${section}`;
+
 function sectionTimes(medication: ScheduledMedication) {
 	return DOSE_SECTIONS.flatMap((section) => {
 		const time = medication[section]?.time;
@@ -106,28 +120,110 @@ function firstCountedDose(medication: ScheduledMedication): Date | null {
 	return medication.createdAt ? latest([start, medication.createdAt]) : start;
 }
 
-/** Every dose the schedule expects within [from, to], oldest first. */
+export type ScheduleTimes = Partial<Record<DoseSection, DoseTime>>;
+
+/** The current schedule's dose times, as a version stores them. */
+export function currentSchedule(
+	medication: ScheduledMedication,
+): ScheduleTimes {
+	return Object.fromEntries(
+		sectionTimes(medication).map(({ section, time }) => [section, time]),
+	);
+}
+
+export function timesOfVersion(version: ScheduleVersion): ScheduleTimes {
+	return Object.fromEntries(
+		DOSE_SECTIONS.flatMap((section) => {
+			const time = version[section];
+			return time ? [[section, time]] : [];
+		}),
+	);
+}
+
+/** Whether two schedules give every section the same dose time. */
+export function sameSchedule(a: ScheduleTimes, b: ScheduleTimes): boolean {
+	return DOSE_SECTIONS.every((section) => {
+		const [x, y] = [a[section], b[section]];
+		if (!x || !y) return !x && !y;
+		const [tx, ty] = [toDoseTimeOfDay(x), toDoseTimeOfDay(y)];
+		return tx.hours === ty.hours && tx.minutes === ty.minutes;
+	});
+}
+
+/**
+ * The schedules the medication has had and when each applied, oldest
+ * first. Without a history, the current schedule applies throughout. A
+ * schedule saved without a version (a path that bypasses `update`) is
+ * taken to apply from its last save.
+ */
+function scheduleVersions(
+	medication: ScheduledMedication,
+): { from: Date; to: Date | null; times: ScheduleTimes }[] {
+	const first = firstCountedDose(medication);
+	if (!first) return [];
+
+	const versions = [...(medication.scheduleHistory ?? [])]
+		.sort((a, b) => a.effectiveFrom.getTime() - b.effectiveFrom.getTime())
+		.map((version) => ({
+			from: latest([first, version.effectiveFrom]),
+			times: timesOfVersion(version),
+		}));
+	const current = currentSchedule(medication);
+	const lastVersion = versions.at(-1);
+	if (!lastVersion) {
+		versions.push({ from: first, times: current });
+	} else if (!sameSchedule(lastVersion.times, current)) {
+		versions.push({
+			from: latest([first, medication.updatedAt ?? lastVersion.from]),
+			times: current,
+		});
+	}
+	versions[0].from = first;
+
+	return versions.map((version, i) => ({
+		...version,
+		to: versions[i + 1]?.from ?? null,
+	}));
+}
+
+/**
+ * Every dose the schedule expects within [from, to], oldest first. Each
+ * day is planned from the schedule that applied at the time of each dose,
+ * so a change only reaches doses still to come when it was saved:
+ * - a dose added at a time already passed that day starts the next day;
+ * - a dose removed after it was due stays planned on the day of removal;
+ * - a dose moved earlier, while still to come, stays planned that day.
+ * A section planned twice on one day (its time changed) is one dose, at
+ * its latest time.
+ */
 export function scheduledDoses(
 	medication: ScheduledMedication,
 	from: Date,
 	to: Date,
 ): { scheduledFor: Date; section: DoseSection }[] {
-	const first = firstCountedDose(medication);
-	if (!first) return [];
+	const versions = scheduleVersions(medication);
 	const last = medication.endDate ? endOfDay(medication.endDate) : null;
-	const sections = sectionTimes(medication);
 
-	const doses: { scheduledFor: Date; section: DoseSection }[] = [];
+	const doses = new Map<string, { scheduledFor: Date; section: DoseSection }>();
 	for (let day = startOfDay(from); day <= to; day = addDays(day, 1)) {
-		for (const { section, time } of sections) {
-			const scheduledFor = doseTimeOn(time, day);
-			if (scheduledFor < from || scheduledFor > to) continue;
-			if (scheduledFor < first) continue;
-			if (last && scheduledFor > last) continue;
-			doses.push({ scheduledFor, section });
-		}
+		versions.forEach((version, i) => {
+			for (const section of DOSE_SECTIONS) {
+				const time = version.times[section];
+				if (!time) continue;
+				const scheduledFor = doseTimeOn(time, day);
+				if (version.to && scheduledFor >= version.to) continue;
+				if (scheduledFor < version.from) {
+					const before = versions[i - 1]?.times[section];
+					const stillToCome = before && doseTimeOn(before, day) >= version.from;
+					if (!stillToCome) continue;
+				}
+				if (scheduledFor < from || scheduledFor > to) continue;
+				if (last && scheduledFor > last) continue;
+				doses.set(doseKey(scheduledFor, section), { scheduledFor, section });
+			}
+		});
 	}
-	return doses.sort(
+	return [...doses.values()].sort(
 		(a, b) => a.scheduledFor.getTime() - b.scheduledFor.getTime(),
 	);
 }
@@ -159,18 +255,31 @@ export function doseOfLog(
 	return nearest ? { at, section: nearest.section } : null;
 }
 
-const doseKey = (at: Date, section: DoseSection) =>
-	`${format(at, 'yyyy-MM-dd')}|${section}`;
-
 function statusOfLog(log: DoseLog): DoseStatus {
 	if (!log.taken) return 'missed';
 	return log.status === 'partial' ? 'partial' : 'taken';
 }
 
 /**
+ * Whether a log for a dose the schedule doesn't plan still counts. Only
+ * before the schedule's first recorded change: until then, a section
+ * removed earlier left no version behind, so its logs are the only record
+ * that it was planned. A dose from before the medication was added never
+ * counts.
+ */
+function countsUnplanned(medication: ScheduledMedication, at: Date): boolean {
+	const first = firstCountedDose(medication);
+	if (!first || at < first) return false;
+	const firstChange = [...(medication.scheduleHistory ?? [])]
+		.map((version) => version.effectiveFrom)
+		.sort((a, b) => a.getTime() - b.getTime())[1];
+	return !firstChange || at < firstChange;
+}
+
+/**
  * What became of each dose in [from, to]: every dose the schedule expects,
- * plus any dose a log settled that the schedule no longer expects (a
- * section removed since, or confirmed before the medication was added).
+ * plus a dose a log settled that the schedule doesn't expect, when
+ * `countsUnplanned` says it still counts.
  *
  * A dose with no log is `pending` while it can still be confirmed, and
  * `missed` once its confirm window has closed, even before the missed-dose
@@ -224,6 +333,7 @@ export function resolveDoses(
 	}
 
 	for (const [key, { at, log }] of byDose) {
+		if (!countsUnplanned(medication, at)) continue;
 		resolved.push({
 			scheduledFor: at,
 			section: key.split('|')[1] as DoseSection,
