@@ -524,6 +524,11 @@ export class ClientService {
 				'Cannot confirm a dose from before the medication started',
 			);
 		}
+		if (medication.endDate && scheduledFor > endOfDay(medication.endDate)) {
+			throw new BadRequestException(
+				'Cannot confirm a dose from after the medication ended',
+			);
+		}
 
 		if (new Date() < scheduledFor) {
 			throw new BadRequestException(
@@ -631,16 +636,25 @@ export class ClientService {
 		// match nothing and every dose comes back untaken.
 		const medicationIds: Types.ObjectId[] = [];
 
+		const todayStart = startOfDay(new Date());
+		const todayEnd = endOfDay(new Date());
+
 		for (const med of medications) {
-			const schedule = med[sectionKey] as any;
-			if (!schedule?.time) continue;
+			// Only a dose today's schedule plans, at the time it plans it: not
+			// one added after its time today, which confirm would refuse.
+			const planned = scheduledDoses(
+				med as unknown as ScheduledMedication,
+				todayStart,
+				todayEnd,
+			).find((dose) => dose.section === sectionKey);
+			if (!planned) continue;
 
 			result.push({
 				id: med._id.toString(),
 				name: med.name,
 				dosage: med.dosage,
 				purpose: med.purpose,
-				toBeTakenAt: doseTimeOn(schedule.time),
+				toBeTakenAt: planned.scheduledFor,
 				taken: false,
 			});
 			medicationIds.push(med._id);
@@ -648,8 +662,6 @@ export class ClientService {
 
 		if (result.length === 0) return result;
 
-		const todayStart = startOfDay(new Date());
-		const todayEnd = endOfDay(new Date());
 		const medNames = result.map((m) => m.name);
 
 		// Scoped by `scheduledFor` (which dose) rather than `takenAt` (when the

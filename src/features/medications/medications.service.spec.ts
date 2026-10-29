@@ -293,6 +293,34 @@ describe('MedicationsService', () => {
 			expect((medication as any).scheduleHistory).toBeUndefined();
 		});
 
+		it('dates a schedule saved without a version from its save, even on an edit that changes no dose', async () => {
+			const createdAt = new Date('2026-10-20T09:00:00');
+			const savedByAi = new Date('2026-10-25T12:00:00');
+			const medication = fakeMedication({
+				createdAt,
+				updatedAt: savedByAi,
+				// The AI memory upsert added an evening dose without a version.
+				morning: { ...time(8, 'AM'), notification: 'n-morning' },
+				evening: { ...time(8, 'PM'), notification: 'n-evening' },
+				scheduleHistory: [
+					{ effectiveFrom: createdAt, morning: time(8, 'AM').time },
+				],
+			});
+			medicationModel.findOne.mockResolvedValue(medication as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
+
+			await service.update(medication._id, { notes: 'with food' } as any, 'u1');
+
+			expect((medication as any).scheduleHistory).toEqual([
+				{ effectiveFrom: createdAt, morning: time(8, 'AM').time },
+				{
+					effectiveFrom: savedByAi,
+					morning: time(8, 'AM').time,
+					evening: time(8, 'PM').time,
+				},
+			]);
+		});
+
 		it('should throw NotFoundException if medication to update does not exist', async () => {
 			medicationModel.findOne.mockResolvedValue(null);
 
@@ -396,6 +424,10 @@ describe('MedicationsService', () => {
 				userId: 'u1',
 				morning: { $exists: true, $ne: null },
 			});
+			// What today's list needs to plan the day's doses.
+			expect(mockQueryChain.select).toHaveBeenCalledWith(
+				expect.arrayContaining(['startDate', 'createdAt', 'scheduleHistory']),
+			);
 			expect(result).toEqual(mockMeds);
 		});
 	});
