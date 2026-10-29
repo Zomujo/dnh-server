@@ -1,11 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { setHours, setMinutes, startOfDay } from 'date-fns';
-import { Model, Types } from 'mongoose';
+import { HydratedDocument, Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { APP_TIME_ZONE } from '@/common/utils/time-zone';
 import { AdherencesService } from '@/features/adherences/adherences.service';
 import { TargetType } from '@/features/adherences/dto/target-type.enum';
+import {
+	currentSchedule,
+	type ScheduledMedication,
+	type ScheduleTimes,
+	sameSchedule,
+	timesOfVersion,
+} from '@/features/adherences/utils/dose-schedule';
 import {
 	type Frequency,
 	NotificationChannel,
@@ -260,6 +267,9 @@ export class MedicationsService {
 		if (dto.dosage !== undefined) medication.dosage = dto.dosage;
 		if (dto.notes !== undefined) medication.notes = dto.notes;
 
+		const scheduleBefore = currentSchedule(
+			medication as unknown as ScheduledMedication,
+		);
 		const scheduleKeys = ['morning', 'afternoon', 'evening'] as const;
 
 		for (const key of scheduleKeys) {
@@ -326,6 +336,7 @@ export class MedicationsService {
 			repeatEvery: remainingSections || 1,
 			repetitionType: RepetitionType.DAILY,
 		};
+		this.recordScheduleChange(medication, scheduleBefore);
 
 		await medication.save();
 
@@ -341,6 +352,44 @@ export class MedicationsService {
 		});
 
 		return medication._id.toString();
+	}
+
+	/**
+	 * Keeps the schedule a change replaces, so the days before it are still
+	 * counted against the doses they had. The first change also records the
+	 * schedule the medication started with.
+	 */
+	private recordScheduleChange(
+		medication: HydratedDocument<Medication>,
+		before: ScheduleTimes,
+	) {
+		const after = currentSchedule(medication as unknown as ScheduledMedication);
+		if (sameSchedule(before, after)) return;
+
+		const version = (effectiveFrom: Date, times: ScheduleTimes) => ({
+			effectiveFrom,
+			...Object.fromEntries(
+				Object.entries(times).map(
+					([section, { hour, minutes, timeDesignators }]) => [
+						section,
+						{ hour, minutes, timeDesignators },
+					],
+				),
+			),
+		});
+		const history = [...(medication.scheduleHistory ?? [])];
+		const lastVersion = history.at(-1);
+		if (!lastVersion) {
+			history.push(
+				version(medication.createdAt ?? medication.startDate, before),
+			);
+		} else if (!sameSchedule(timesOfVersion(lastVersion), before)) {
+			// Changed by a path that keeps no versions (the AI memory upsert):
+			// record it from when it was saved.
+			history.push(version(medication.updatedAt ?? new Date(), before));
+		}
+		history.push(version(new Date(), after));
+		medication.set('scheduleHistory', history);
 	}
 
 	async remove(id: string, userId: string) {

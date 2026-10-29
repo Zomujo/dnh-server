@@ -39,7 +39,9 @@ import {
 import {
 	adherenceRateOf,
 	type DoseLog,
+	type DoseSection,
 	dayAdherence,
+	doseOfLog,
 	type ResolvedDose,
 	resolveDoses,
 	type ScheduledMedication,
@@ -147,6 +149,32 @@ export class AdherencesService {
 	}
 
 	/**
+	 * The log that already settles `section` of the medication on `day`, if
+	 * the dose was taken. Matched by day and section, not by time, so a dose
+	 * confirmed before its time was moved still counts as taken.
+	 */
+	async findTakenDoseLog(
+		userId: string,
+		medication: ScheduledMedication,
+		day: Date,
+		section: DoseSection,
+	) {
+		const logs = await this.adherenceLogModel
+			.find({
+				userId,
+				medication: medication._id,
+				taken: true,
+				scheduledFor: { $gte: startOfDay(day), $lte: endOfDay(day) },
+			})
+			.select('_id scheduledFor takenAt taken status section')
+			.lean();
+		return logs.find(
+			(log) =>
+				doseOfLog(log as unknown as DoseLog, medication)?.section === section,
+		);
+	}
+
+	/**
 	 * Adherence over the last 30 days: doses taken ÷ doses scheduled on the
 	 * days that are settled (see `adherenceRateOf`), across every medication
 	 * and section. Null when no day has settled yet, so the caller can tell
@@ -184,7 +212,7 @@ export class AdherencesService {
 			this.medicationModel
 				.find({ userId, ...(medicationId && { _id: medicationId }) })
 				.select(
-					'name patient startDate endDate createdAt morning afternoon evening',
+					'name patient startDate endDate createdAt updatedAt morning afternoon evening scheduleHistory',
 				)
 				.lean<ScheduledMedication[]>(),
 			this.adherenceLogModel

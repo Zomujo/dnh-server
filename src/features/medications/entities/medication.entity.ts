@@ -61,6 +61,24 @@ export class DosingSchedule {
 export const DosingScheduleSchema =
 	SchemaFactory.createForClass(DosingSchedule);
 
+/** The dose times a schedule had from `effectiveFrom` until the next one. */
+@Schema({ _id: false })
+export class ScheduleVersion {
+	@Prop({ required: true, description: 'When this schedule began to apply' })
+	effectiveFrom: Date;
+
+	@Prop({ type: TimeDesignatorSchema, description: 'Morning dose time' })
+	morning?: TimeDesignator;
+
+	@Prop({ type: TimeDesignatorSchema, description: 'Afternoon dose time' })
+	afternoon?: TimeDesignator;
+
+	@Prop({ type: TimeDesignatorSchema, description: 'Evening dose time' })
+	evening?: TimeDesignator;
+}
+
+const ScheduleVersionSchema = SchemaFactory.createForClass(ScheduleVersion);
+
 @Schema({
 	timestamps: true,
 	toJSON: {
@@ -156,6 +174,16 @@ export class Medication extends BaseDH {
 		description: 'Evening dosing schedule',
 	})
 	evening?: DosingSchedule;
+
+	@Prop({
+		type: [ScheduleVersionSchema],
+		default: undefined,
+		description:
+			'Every dose schedule the medication has had, oldest first, so a ' +
+			'change never rewrites the days before it. Empty until the ' +
+			'schedule first changes.',
+	})
+	scheduleHistory?: ScheduleVersion[];
 
 	@Prop({
 		type: [ObjectId],

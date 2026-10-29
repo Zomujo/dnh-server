@@ -7,6 +7,7 @@ import {
 	type ResolvedDose,
 	resolveDoses,
 	type ScheduledMedication,
+	type ScheduleVersion,
 	scheduledDoses,
 } from './dose-schedule';
 
@@ -68,6 +69,164 @@ describe('dose-schedule', () => {
 			);
 
 			expect(doses).toHaveLength(2);
+		});
+	});
+
+	describe('scheduledDoses after a schedule change', () => {
+		const eightAm = { hour: 8, minutes: 0, timeDesignators: 'AM' };
+		const onePm = { hour: 1, minutes: 0, timeDesignators: 'PM' };
+		const eightPm = { hour: 8, minutes: 0, timeDesignators: 'PM' };
+		const twice = {
+			effectiveFrom: new Date('2026-06-01T07:00:00'),
+			morning: eightAm,
+			evening: eightPm,
+		};
+		const withHistory = (
+			current: Partial<ScheduledMedication>,
+			...versions: ScheduleVersion[]
+		): ScheduledMedication => ({
+			...medication,
+			morning: null,
+			afternoon: null,
+			evening: null,
+			...current,
+			scheduleHistory: versions,
+		});
+		const sectionsOn = (med: ScheduledMedication, day: string) =>
+			scheduledDoses(
+				med,
+				new Date(`${day}T00:00:00`),
+				new Date(`${day}T23:59:59`),
+			).map((d) => d.section);
+
+		it('keeps the days before a dose was added as they were', () => {
+			const added = withHistory(
+				{
+					morning: { time: eightAm },
+					afternoon: { time: onePm },
+					evening: { time: eightPm },
+				},
+				twice,
+				{
+					effectiveFrom: new Date('2026-06-03T10:00:00'),
+					morning: eightAm,
+					afternoon: onePm,
+					evening: eightPm,
+				},
+			);
+
+			expect(sectionsOn(added, '2026-06-02')).toEqual(['morning', 'evening']);
+			// Added at 10 AM: 1 PM is still to come, so today counts it.
+			expect(sectionsOn(added, '2026-06-03')).toEqual([
+				'morning',
+				'afternoon',
+				'evening',
+			]);
+		});
+
+		it('starts a dose added after its time on the next day', () => {
+			const added = withHistory(
+				{ morning: { time: eightAm }, evening: { time: eightPm } },
+				{ effectiveFrom: new Date('2026-06-01T07:00:00'), evening: eightPm },
+				{
+					effectiveFrom: new Date('2026-06-03T10:00:00'),
+					morning: eightAm,
+					evening: eightPm,
+				},
+			);
+
+			expect(sectionsOn(added, '2026-06-03')).toEqual(['evening']);
+			expect(sectionsOn(added, '2026-06-04')).toEqual(['morning', 'evening']);
+		});
+
+		it('keeps a removed dose on the days it was still planned', () => {
+			const eveningRemovedAt = (at: string) =>
+				withHistory({ morning: { time: eightAm } }, twice, {
+					effectiveFrom: new Date(at),
+					morning: eightAm,
+				});
+			const removedAt9pm = eveningRemovedAt('2026-06-02T21:00:00');
+			const removedAt2pm = eveningRemovedAt('2026-06-02T14:00:00');
+
+			expect(sectionsOn(removedAt2pm, '2026-06-01')).toEqual([
+				'morning',
+				'evening',
+			]);
+			// Already due when it was removed: still planned that day.
+			expect(sectionsOn(removedAt9pm, '2026-06-02')).toEqual([
+				'morning',
+				'evening',
+			]);
+			// Still to come when it was removed: not planned.
+			expect(sectionsOn(removedAt2pm, '2026-06-02')).toEqual(['morning']);
+			expect(sectionsOn(removedAt9pm, '2026-06-03')).toEqual(['morning']);
+		});
+
+		it('counts a dose moved on its day once, at its new time', () => {
+			const moved = withHistory(
+				{
+					morning: { time: { hour: 9, minutes: 0, timeDesignators: 'AM' } },
+					evening: { time: eightPm },
+				},
+				twice,
+				{
+					effectiveFrom: new Date('2026-06-02T08:30:00'),
+					morning: { hour: 9, minutes: 0, timeDesignators: 'AM' },
+					evening: eightPm,
+				},
+			);
+
+			const doses = scheduledDoses(
+				moved,
+				new Date('2026-06-02T00:00:00'),
+				new Date('2026-06-02T23:59:59'),
+			);
+			expect(doses.map((d) => [d.scheduledFor, d.section])).toEqual([
+				[new Date('2026-06-02T09:00:00'), 'morning'],
+				[new Date('2026-06-02T20:00:00'), 'evening'],
+			]);
+		});
+
+		it('keeps a dose moved earlier while still to come', () => {
+			const movedEarlier = withHistory(
+				{
+					morning: { time: { hour: 7, minutes: 0, timeDesignators: 'AM' } },
+					evening: { time: eightPm },
+				},
+				twice,
+				{
+					effectiveFrom: new Date('2026-06-02T07:30:00'),
+					morning: { hour: 7, minutes: 0, timeDesignators: 'AM' },
+					evening: eightPm,
+				},
+			);
+
+			expect(sectionsOn(movedEarlier, '2026-06-02')).toEqual([
+				'morning',
+				'evening',
+			]);
+		});
+
+		it('picks up a schedule saved without a version from its last save', () => {
+			const savedElsewhere = withHistory(
+				{
+					morning: { time: eightAm },
+					afternoon: { time: onePm },
+					evening: { time: eightPm },
+					updatedAt: new Date('2026-06-03T10:00:00'),
+				},
+				twice,
+			);
+
+			expect(sectionsOn(savedElsewhere, '2026-06-02')).toEqual([
+				'morning',
+				'evening',
+			]);
+			expect(sectionsOn(savedElsewhere, '2026-06-03')).toEqual([
+				'morning',
+				'afternoon',
+				'evening',
+			]);
 		});
 	});
 
@@ -169,6 +328,111 @@ describe('dose-schedule', () => {
 			});
 			// Jun 2 gains nothing from it: its morning dose is still open.
 			expect(doses[2]).toMatchObject({ section: 'morning', status: 'pending' });
+		});
+
+		it('never counts a dose from before the medication was added', () => {
+			const addedAt10pm = {
+				...medication,
+				createdAt: new Date('2026-06-01T22:00:00'),
+			};
+
+			const doses = resolveDoses(
+				addedAt10pm,
+				[
+					log({
+						scheduledFor: new Date('2026-06-01T08:00:00'),
+						section: 'morning',
+					}),
+					log({
+						scheduledFor: new Date('2026-06-01T20:00:00'),
+						section: 'evening',
+					}),
+				],
+				from,
+				new Date('2026-06-01T23:59:59'),
+				now,
+			);
+
+			expect(doses).toEqual([]);
+		});
+
+		it('counts a dose confirmed before its time was moved once, as taken', () => {
+			const moved: ScheduledMedication = {
+				...medication,
+				morning: { time: { hour: 8, minutes: 5, timeDesignators: 'AM' } },
+				scheduleHistory: [
+					{
+						effectiveFrom: new Date('2026-06-01T07:00:00'),
+						morning: { hour: 8, minutes: 0, timeDesignators: 'AM' },
+						evening: { hour: 8, minutes: 0, timeDesignators: 'PM' },
+					},
+					{
+						effectiveFrom: new Date('2026-06-03T08:02:00'),
+						morning: { hour: 8, minutes: 5, timeDesignators: 'AM' },
+						evening: { hour: 8, minutes: 0, timeDesignators: 'PM' },
+					},
+				],
+			};
+
+			const doses = resolveDoses(
+				moved,
+				[
+					log({
+						scheduledFor: new Date('2026-06-03T08:00:00'),
+						section: 'morning',
+					}),
+				],
+				new Date('2026-06-03T00:00:00'),
+				new Date('2026-06-03T23:59:59'),
+				now,
+			);
+
+			expect(doses.map((d) => [d.section, d.status])).toEqual([
+				['morning', 'taken'],
+				['evening', 'pending'],
+			]);
+		});
+
+		const morningLog = log({
+			scheduledFor: new Date('2026-06-03T08:00:00'),
+			section: 'morning',
+		});
+		const june3 = [
+			new Date('2026-06-03T00:00:00'),
+			new Date('2026-06-03T23:59:59'),
+		] as const;
+
+		it('drops a log for a dose the versioned schedule no longer plans', () => {
+			const morningRemoved: ScheduledMedication = {
+				...medication,
+				morning: null,
+				scheduleHistory: [
+					{
+						effectiveFrom: new Date('2026-06-01T07:00:00'),
+						morning: { hour: 8, minutes: 0, timeDesignators: 'AM' },
+						evening: { hour: 8, minutes: 0, timeDesignators: 'PM' },
+					},
+					{
+						effectiveFrom: new Date('2026-06-02T10:00:00'),
+						evening: { hour: 8, minutes: 0, timeDesignators: 'PM' },
+					},
+				],
+			};
+
+			const doses = resolveDoses(morningRemoved, [morningLog], ...june3, now);
+
+			expect(doses.map((d) => d.section)).toEqual(['evening']);
+		});
+
+		it('still counts a log for a section removed before versions were kept', () => {
+			const morningRemoved = { ...medication, morning: null };
+
+			const doses = resolveDoses(morningRemoved, [morningLog], ...june3, now);
+
+			expect(doses.map((d) => [d.section, d.status])).toEqual([
+				['morning', 'taken'],
+				['evening', 'pending'],
+			]);
 		});
 
 		it('prefers a taken log over a missed one for the same dose', () => {

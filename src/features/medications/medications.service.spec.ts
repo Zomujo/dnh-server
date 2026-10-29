@@ -250,6 +250,49 @@ describe('MedicationsService', () => {
 			expect(medication.frequency.repeatEvery).toBe(1);
 		});
 
+		it('keeps the schedule it replaces, so earlier days keep their doses', async () => {
+			const createdAt = new Date('2026-10-20T09:00:00');
+			const medication = fakeMedication({
+				createdAt,
+				morning: { ...time(8, 'AM'), notification: 'n-morning' },
+			});
+			medicationModel.findOne.mockResolvedValue(medication as any);
+			notificationsService.create.mockResolvedValue('n-afternoon' as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
+
+			await service.update(
+				medication._id,
+				{ afternoon: time(1, 'PM') } as any,
+				'u1',
+			);
+
+			expect((medication as any).scheduleHistory).toEqual([
+				{ effectiveFrom: createdAt, morning: time(8, 'AM').time },
+				{
+					effectiveFrom: expect.any(Date),
+					morning: time(8, 'AM').time,
+					afternoon: time(1, 'PM').time,
+				},
+			]);
+		});
+
+		it('records no version when no dose time changes', async () => {
+			const medication = fakeMedication({
+				morning: { ...time(8, 'AM'), notification: 'n-morning' },
+			});
+			medicationModel.findOne.mockResolvedValue(medication as any);
+			notificationsService.update.mockResolvedValue({} as any);
+			dhVectorsService.index.mockResolvedValue({} as any);
+
+			await service.update(
+				medication._id,
+				{ dosage: '1g', morning: time(8, 'AM') } as any,
+				'u1',
+			);
+
+			expect((medication as any).scheduleHistory).toBeUndefined();
+		});
+
 		it('should throw NotFoundException if medication to update does not exist', async () => {
 			medicationModel.findOne.mockResolvedValue(null);
 

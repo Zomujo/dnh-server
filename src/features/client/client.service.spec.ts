@@ -205,6 +205,43 @@ describe('ClientService', () => {
 					),
 				).rejects.toThrow(/not yet time/);
 			});
+
+			it('refuses a dose whose time had passed when the medication was added', async () => {
+				medicationsService.findOwnedById.mockResolvedValue({
+					_id: medId,
+					patient: 'p1',
+					frequency: { repeatEvery: 1, repetitionType: 'daily' },
+					startDate: new Date(2026, 9, 23, 8, 0),
+					createdAt: new Date(2026, 9, 23, 9, 0),
+					morning: { time: eightAm },
+				} as any);
+
+				await expect(
+					service.confirmMedication(medId, 'user-1', MedicationSection.MORNING),
+				).rejects.toThrow(/added to the schedule after its time/);
+				expect(adherencesService.upsertAdherenceLog).not.toHaveBeenCalled();
+			});
+
+			it('treats a dose confirmed before its time was moved as already taken', async () => {
+				adherencesService.findTakenDoseLog.mockResolvedValueOnce({
+					_id: 'log-0',
+				} as any);
+
+				const result = await service.confirmMedication(
+					medId,
+					'user-1',
+					MedicationSection.MORNING,
+				);
+
+				expect(adherencesService.findTakenDoseLog).toHaveBeenCalledWith(
+					'user-1',
+					expect.objectContaining({ _id: medId }),
+					expect.any(Date),
+					'morning',
+				);
+				expect(result).toMatchObject({ id: 'log-0', alreadyConfirmed: true });
+				expect(adherencesService.upsertAdherenceLog).not.toHaveBeenCalled();
+			});
 		});
 
 		it("should 404 on another user's medication without writing a log", async () => {
