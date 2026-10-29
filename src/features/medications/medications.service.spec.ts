@@ -2,7 +2,6 @@ import { NotFoundException } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { type Mocked, TestBed } from '@suites/unit';
 import { Model, Types } from 'mongoose';
-import { AdherencesService } from '@/features/adherences/adherences.service';
 import { DhVectorsService } from '../dh-vectors/dh-vectors.service';
 import { DHDocumentType } from '../dh-vectors/dto';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -13,7 +12,6 @@ describe('MedicationsService', () => {
 	let service: MedicationsService;
 	let medicationModel: Mocked<Model<Medication>>;
 	let dhVectorsService: Mocked<DhVectorsService>;
-	let adherencesService: Mocked<AdherencesService>;
 	let notificationsService: Mocked<NotificationsService>;
 
 	beforeAll(async () => {
@@ -23,7 +21,6 @@ describe('MedicationsService', () => {
 		service = unit;
 		medicationModel = unitRef.get(getModelToken(Medication.name));
 		dhVectorsService = unitRef.get(DhVectorsService);
-		adherencesService = unitRef.get(AdherencesService);
 		notificationsService = unitRef.get(NotificationsService);
 	});
 
@@ -331,7 +328,7 @@ describe('MedicationsService', () => {
 	});
 
 	describe('remove', () => {
-		it('should remove medication, cancel notifications, adherence logs, and vector embeddings', async () => {
+		it('cancels reminders and search, but keeps the medication and its history', async () => {
 			const mockMedId = new Types.ObjectId().toString();
 			const mockMedication = {
 				_id: mockMedId,
@@ -342,52 +339,20 @@ describe('MedicationsService', () => {
 
 			medicationModel.findOne.mockResolvedValue(mockMedication as any);
 			notificationsService.remove.mockResolvedValue({} as any);
-			medicationModel.exists.mockResolvedValue(null);
-			adherencesService.removeMedicationHistory.mockResolvedValue({} as any);
 			dhVectorsService.deleteByDocumentId.mockResolvedValue({} as any);
-			medicationModel.findByIdAndDelete.mockResolvedValue({} as any);
+			medicationModel.updateOne.mockResolvedValue({} as any);
 
 			await service.remove(mockMedId, 'u1');
 
 			expect(notificationsService.remove).toHaveBeenCalledWith('notif-99');
-			expect(adherencesService.removeMedicationHistory).toHaveBeenCalledWith(
-				'u1',
-				mockMedId,
-				'Aspirin',
-				false,
-			);
 			expect(dhVectorsService.deleteByDocumentId).toHaveBeenCalledWith(
 				mockMedId,
 			);
-			expect(medicationModel.findByIdAndDelete).toHaveBeenCalledWith(mockMedId);
-		});
-	});
-
-	describe("remove keeps another same-named medication's history", () => {
-		it('tells adherences the name is still in use', async () => {
-			const id = new Types.ObjectId().toString();
-			medicationModel.findOne.mockResolvedValue({
-				_id: id,
-				userId: 'u1',
-				name: 'Aspirin',
-			} as any);
-			medicationModel.exists.mockResolvedValue({ _id: 'other' } as any);
-			dhVectorsService.deleteByDocumentId.mockResolvedValue({} as any);
-			medicationModel.findByIdAndDelete.mockResolvedValue({} as any);
-
-			await service.remove(id, 'u1');
-
-			expect(medicationModel.exists).toHaveBeenCalledWith({
-				userId: 'u1',
-				_id: { $ne: id },
-				name: /^Aspirin$/i,
-			});
-			expect(adherencesService.removeMedicationHistory).toHaveBeenCalledWith(
-				'u1',
-				id,
-				'Aspirin',
-				true,
+			expect(medicationModel.updateOne).toHaveBeenCalledWith(
+				{ _id: mockMedId },
+				{ $set: { deletedAt: expect.any(Date) } },
 			);
+			expect(medicationModel.findByIdAndDelete).not.toHaveBeenCalled();
 		});
 	});
 

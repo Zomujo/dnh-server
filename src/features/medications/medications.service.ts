@@ -396,6 +396,10 @@ export class MedicationsService {
 		medication.set('scheduleHistory', history);
 	}
 
+	/**
+	 * Deletes the medication for the patient: cancels its reminders and
+	 * forgets it in search, but keeps its history (see `deletedAt`).
+	 */
 	async remove(id: string, userId: string) {
 		const medication = await this.medicationModel.findOne({ _id: id, userId });
 		if (!medication) {
@@ -418,21 +422,14 @@ export class MedicationsService {
 			}
 		}
 
-		const nameStillInUse = await this.medicationModel.exists({
-			userId,
-			_id: { $ne: medication._id },
-			name: new RegExp(`^${escapeRegExp(medication.name)}$`, 'i'),
-		});
-		await this.adherencesService.removeMedicationHistory(
-			medication.userId,
-			medication._id,
-			medication.name,
-			Boolean(nameStillInUse),
-		);
-
 		await this.dhVectorsService.deleteByDocumentId(medication._id.toString());
 
-		await this.medicationModel.findByIdAndDelete(id);
+		// Kept, with its adherence logs, so the days before still count its
+		// doses; from now on it plans none and no query finds it.
+		await this.medicationModel.updateOne(
+			{ _id: medication._id },
+			{ $set: { deletedAt: new Date() } },
+		);
 	}
 
 	async findByUserId(userId: string, offset: number, limit: number) {

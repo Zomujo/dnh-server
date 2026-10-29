@@ -47,6 +47,8 @@ export interface ScheduledMedication {
 	endDate?: Date;
 	createdAt?: Date;
 	updatedAt?: Date;
+	/** When the patient deleted it: no dose is planned from then on. */
+	deletedAt?: Date | null;
 	morning?: { time?: DoseTime } | null;
 	afternoon?: { time?: DoseTime } | null;
 	evening?: { time?: DoseTime } | null;
@@ -194,7 +196,8 @@ function scheduleVersions(
  * - a dose removed after it was due stays planned on the day of removal;
  * - a dose moved earlier, while still to come, stays planned that day.
  * A section planned twice on one day (its time changed) is one dose, at
- * its latest time.
+ * its latest time. Deleting the medication ends the schedule the same way
+ * removing every dose would.
  */
 export function scheduledDoses(
 	medication: ScheduledMedication,
@@ -219,6 +222,9 @@ export function scheduledDoses(
 				}
 				if (scheduledFor < from || scheduledFor > to) continue;
 				if (last && scheduledFor > last) continue;
+				if (medication.deletedAt && scheduledFor >= medication.deletedAt) {
+					continue;
+				}
 				doses.set(doseKey(scheduledFor, section), { scheduledFor, section });
 			}
 		});
@@ -264,12 +270,13 @@ function statusOfLog(log: DoseLog): DoseStatus {
  * Whether a log for a dose the schedule doesn't plan still counts. Only
  * before the schedule's first recorded change: until then, a section
  * removed earlier left no version behind, so its logs are the only record
- * that it was planned. A dose from before the medication was added never
- * counts.
+ * that it was planned. A dose from before the medication was added, or
+ * after it was deleted, never counts.
  */
 function countsUnplanned(medication: ScheduledMedication, at: Date): boolean {
 	const first = firstCountedDose(medication);
 	if (!first || at < first) return false;
+	if (medication.deletedAt && at >= medication.deletedAt) return false;
 	const firstChange = [...(medication.scheduleHistory ?? [])]
 		.map((version) => version.effectiveFrom)
 		.sort((a, b) => a.getTime() - b.getTime())[1];
