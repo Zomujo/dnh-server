@@ -364,7 +364,15 @@ export class MedicationsService {
 		before: ScheduleTimes,
 	) {
 		const after = currentSchedule(medication as unknown as ScheduledMedication);
-		if (sameSchedule(before, after)) return;
+		const history = [...(medication.scheduleHistory ?? [])];
+		const lastVersion = history.at(-1);
+		// Changed by a path that keeps no versions (the AI memory upsert).
+		// Recorded even when this update leaves the schedule alone: its save
+		// moves `updatedAt`, the only trace of when that change was made.
+		const changedElsewhere =
+			lastVersion && !sameSchedule(timesOfVersion(lastVersion), before);
+		const changedHere = !sameSchedule(before, after);
+		if (!changedHere && !changedElsewhere) return;
 
 		const version = (effectiveFrom: Date, times: ScheduleTimes) => ({
 			effectiveFrom,
@@ -377,18 +385,14 @@ export class MedicationsService {
 				),
 			),
 		});
-		const history = [...(medication.scheduleHistory ?? [])];
-		const lastVersion = history.at(-1);
 		if (!lastVersion) {
 			history.push(
 				version(medication.createdAt ?? medication.startDate, before),
 			);
-		} else if (!sameSchedule(timesOfVersion(lastVersion), before)) {
-			// Changed by a path that keeps no versions (the AI memory upsert):
-			// record it from when it was saved.
+		} else if (changedElsewhere) {
 			history.push(version(medication.updatedAt ?? new Date(), before));
 		}
-		history.push(version(new Date(), after));
+		if (changedHere) history.push(version(new Date(), after));
 		medication.set('scheduleHistory', history);
 	}
 
@@ -487,6 +491,11 @@ export class MedicationsService {
 				'morning',
 				'afternoon',
 				'evening',
+				'startDate',
+				'endDate',
+				'createdAt',
+				'updatedAt',
+				'scheduleHistory',
 			])
 			.lean();
 	}
