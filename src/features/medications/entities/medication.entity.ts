@@ -186,6 +186,14 @@ export class Medication extends BaseDH {
 	scheduleHistory?: ScheduleVersion[];
 
 	@Prop({
+		description:
+			'When the patient deleted the medication. It stays stored so the ' +
+			'days before still count its doses, but no query finds it unless ' +
+			'it asks for deleted medications (see INCLUDE_DELETED).',
+	})
+	deletedAt?: Date;
+
+	@Prop({
 		type: [ObjectId],
 		ref: 'AdherenceLog',
 		description: 'Array of adherence log references for this medication',
@@ -194,6 +202,46 @@ export class Medication extends BaseDH {
 }
 
 export const MedicationSchema = SchemaFactory.createForClass(Medication);
+
+/**
+ * Query option that lets a read see deleted medications too, for the
+ * adherence history: `.setOptions(INCLUDE_DELETED)` on a query,
+ * `.option(INCLUDE_DELETED)` on an aggregate.
+ */
+export const INCLUDE_DELETED = { includeDeleted: true } as const;
+
+/**
+ * Reads the INCLUDE_DELETED flag and takes it off the options, so it never
+ * reaches the driver.
+ */
+function takeIncludeDeleted(options: Record<string, unknown>): boolean {
+	const included = options.includeDeleted === true;
+	delete options.includeDeleted;
+	return included;
+}
+
+// Every read and update skips deleted medications unless it opts in.
+// Deletes are left alone, so removing an account still removes them all.
+MedicationSchema.pre(
+	[
+		'find',
+		'findOne',
+		'findOneAndUpdate',
+		'countDocuments',
+		'distinct',
+		'updateOne',
+		'updateMany',
+	],
+	function () {
+		if (takeIncludeDeleted(this.getOptions())) return;
+		this.where({ deletedAt: null });
+	},
+);
+
+MedicationSchema.pre('aggregate', function () {
+	if (takeIncludeDeleted(this.options as Record<string, unknown>)) return;
+	this.pipeline().unshift({ $match: { deletedAt: null } });
+});
 
 MedicationSchema.post<Medication>(
 	'findOneAndUpdate',

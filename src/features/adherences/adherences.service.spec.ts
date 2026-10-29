@@ -7,10 +7,7 @@ import { Patient } from '@/features/patients/entities/patient.entity';
 import { Medication } from '../medications/entities/medication.entity';
 import { AdherencesService } from './adherences.service';
 import { AdherenceLog, TargetType } from './entities/adherence-log.entity';
-import {
-	AdherencePattern,
-	PatternTargetType,
-} from './entities/adherence-pattern.entity';
+import { AdherencePattern } from './entities/adherence-pattern.entity';
 
 const MORNING = { time: { hour: 8, minutes: 0, timeDesignators: 'AM' } };
 
@@ -39,6 +36,7 @@ const takenMorning = (
 
 const chain = (result: unknown) =>
 	({
+		setOptions: vi.fn().mockReturnThis(),
 		select: vi.fn().mockReturnThis(),
 		lean: vi.fn().mockResolvedValue(result),
 	}) as any;
@@ -299,7 +297,9 @@ describe('AdherencesService', () => {
 			vi.setSystemTime(new Date('2026-06-10T12:00:00'));
 			const now = new Date();
 			const medication = morningMedication();
-			medicationModel.distinct.mockResolvedValue(['u1'] as any);
+			medicationModel.distinct.mockReturnValue({
+				setOptions: vi.fn().mockResolvedValue(['u1']),
+			} as any);
 			medicationModel.find.mockReturnValue(chain([medication]));
 			// The window is the 72 h before now − 48 h: the mornings of Jun 6,
 			// 7 and 8. Jun 7 was confirmed.
@@ -334,7 +334,9 @@ describe('AdherencesService', () => {
 		});
 
 		it('does not count a dose another run already recorded', async () => {
-			medicationModel.distinct.mockResolvedValue(['u1'] as any);
+			medicationModel.distinct.mockReturnValue({
+				setOptions: vi.fn().mockResolvedValue(['u1']),
+			} as any);
 			medicationModel.find.mockReturnValue(chain([morningMedication()]));
 			adherenceLogModel.find.mockReturnValue(chain([]));
 			adherenceLogModel.updateOne.mockResolvedValue({
@@ -347,68 +349,6 @@ describe('AdherencesService', () => {
 	});
 
 	describe('remove functions', () => {
-		describe('removeMedicationHistory', () => {
-			const medicationId = new Types.ObjectId();
-
-			it('deletes logs by medication id and, when the name is free, name-level data', async () => {
-				adherenceLogModel.deleteMany
-					.mockResolvedValueOnce({ deletedCount: 3 } as any)
-					.mockResolvedValueOnce({ deletedCount: 1 } as any);
-				adherencePatternModel.deleteMany.mockResolvedValue({
-					deletedCount: 1,
-				} as any);
-
-				const result = await service.removeMedicationHistory(
-					'u1',
-					medicationId,
-					'Aspirin',
-					false,
-				);
-
-				expect(adherenceLogModel.deleteMany).toHaveBeenNthCalledWith(1, {
-					userId: 'u1',
-					medication: {
-						$in: [medicationId.toString(), medicationId],
-					},
-				});
-				expect(adherenceLogModel.deleteMany).toHaveBeenNthCalledWith(2, {
-					userId: 'u1',
-					targetType: TargetType.MEDICATION,
-					targetName: /^Aspirin$/i,
-					medication: { $exists: false },
-				});
-				expect(adherencePatternModel.deleteMany).toHaveBeenCalledWith({
-					userId: 'u1',
-					targetType: PatternTargetType.MEDICATION,
-					targetName: /^Aspirin$/i,
-				});
-				expect(result).toEqual({ logs: 4, patterns: 1 });
-			});
-
-			it('keeps name-level data while another medication has the same name', async () => {
-				adherenceLogModel.deleteMany.mockResolvedValue({
-					deletedCount: 2,
-				} as any);
-
-				const result = await service.removeMedicationHistory(
-					'u1',
-					medicationId,
-					'Aspirin',
-					true,
-				);
-
-				expect(adherenceLogModel.deleteMany).toHaveBeenCalledTimes(1);
-				expect(adherenceLogModel.deleteMany).toHaveBeenCalledWith({
-					userId: 'u1',
-					medication: {
-						$in: [medicationId.toString(), medicationId],
-					},
-				});
-				expect(adherencePatternModel.deleteMany).not.toHaveBeenCalled();
-				expect(result).toEqual({ logs: 2, patterns: 0 });
-			});
-		});
-
 		it('removeLogsByUserId should delete all adherence logs for a user', async () => {
 			adherenceLogModel.deleteMany.mockResolvedValue({
 				deletedCount: 10,

@@ -207,6 +207,18 @@ describe('dose-schedule', () => {
 			]);
 		});
 
+		it('plans nothing from when the medication was deleted', () => {
+			const deleted = {
+				...medication,
+				deletedAt: new Date('2026-06-02T10:00:00'),
+			};
+
+			expect(sectionsOn(deleted, '2026-06-01')).toEqual(['morning', 'evening']);
+			// Its 8 AM dose was already due: it still counts, taken or not.
+			expect(sectionsOn(deleted, '2026-06-02')).toEqual(['morning']);
+			expect(sectionsOn(deleted, '2026-06-03')).toEqual([]);
+		});
+
 		it('picks up a schedule saved without a version from its last save', () => {
 			const savedElsewhere = withHistory(
 				{

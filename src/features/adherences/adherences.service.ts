@@ -15,11 +15,13 @@ import {
 import { Model, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '../../common/entities/base-dh.entity';
-import { anyIdForm, escapeRegExp } from '../../common/utils/helpers';
 import { AdherenceStatus } from '../../features/patients/dto';
 import { Patient } from '../../features/patients/entities/patient.entity';
 import { MAX_DOSE_CONFIRM_BACKDATE_HOURS } from '../medications/dto/today.dto';
-import { Medication } from '../medications/entities/medication.entity';
+import {
+	INCLUDE_DELETED,
+	Medication,
+} from '../medications/entities/medication.entity';
 import {
 	AdherenceLogQueryFilter,
 	AdherencePatternQueryFilter,
@@ -32,10 +34,7 @@ import {
 	Status,
 	TargetType,
 } from './entities/adherence-log.entity';
-import {
-	AdherencePattern,
-	PatternTargetType,
-} from './entities/adherence-pattern.entity';
+import { AdherencePattern } from './entities/adherence-pattern.entity';
 import {
 	adherenceRateOf,
 	type DoseLog,
@@ -211,8 +210,9 @@ export class AdherencesService {
 		const [medications, logs] = await Promise.all([
 			this.medicationModel
 				.find({ userId, ...(medicationId && { _id: medicationId }) })
+				.setOptions(INCLUDE_DELETED)
 				.select(
-					'name patient startDate endDate createdAt updatedAt morning afternoon evening scheduleHistory',
+					'name patient startDate endDate createdAt updatedAt deletedAt morning afternoon evening scheduleHistory',
 				)
 				.lean<ScheduledMedication[]>(),
 			this.adherenceLogModel
@@ -235,11 +235,14 @@ export class AdherencesService {
 
 		const logsByMedication = new Map<string, DoseLog[]>();
 		for (const log of logs) {
+			const sameName = (m: ScheduledMedication) =>
+				m.name?.toLowerCase() === log.targetName?.toLowerCase();
+			// An older log with only a name goes to the medication of that name
+			// the patient still has, ahead of a deleted one.
 			const owner = log.medication
 				? medications.find((m) => m._id.equals(log.medication as any))
-				: medications.find(
-						(m) => m.name?.toLowerCase() === log.targetName?.toLowerCase(),
-					);
+				: (medications.find((m) => sameName(m) && !m.deletedAt) ??
+					medications.find(sameName));
 			if (!owner) continue;
 			const key = owner._id.toString();
 			logsByMedication.set(key, [
@@ -263,17 +266,17 @@ export class AdherencesService {
 	/**
 	 * Writes a `missed` log for every dose whose confirm window has closed
 	 * with no confirmation. Run hourly. Doses before a medication started, or
-	 * sections it doesn't have, are never expected, and a deleted medication
-	 * has no schedule left to expect anything. The unique index on
+	 * sections it doesn't have, are never expected, nor is any dose after a
+	 * medication was deleted. The unique index on
 	 * (userId, medication, scheduledFor) makes a rerun a no-op.
 	 */
 	async recordMissedDoses(now: Date = new Date()) {
 		const to = subHours(now, MAX_DOSE_CONFIRM_BACKDATE_HOURS);
 		const from = subHours(to, MISSED_DOSE_LOOKBACK_HOURS);
-		const userIds: string[] = await this.medicationModel.distinct(
-			'userId',
-			HAS_DOSE_SCHEDULE,
-		);
+		// Deleted medications too: their doses before the deletion still count.
+		const userIds: string[] = await this.medicationModel
+			.distinct('userId', HAS_DOSE_SCHEDULE)
+			.setOptions(INCLUDE_DELETED);
 
 		let recorded = 0;
 		for (const userId of userIds) {
@@ -307,6 +310,7 @@ export class AdherencesService {
 	async refreshAdherenceRates() {
 		const medications = await this.medicationModel
 			.find(HAS_DOSE_SCHEDULE)
+			.setOptions(INCLUDE_DELETED)
 			.select('userId patient')
 			.lean();
 		const patientOf = new Map<string, unknown>();
@@ -619,46 +623,6 @@ export class AdherencesService {
 
 	async removeLogsByUserId(userId: string) {
 		return this.adherenceLogModel.deleteMany({ userId });
-	}
-
-	/**
-	 * Removes a deleted medication's adherence history. Logs linked to the
-	 * medication go by id. Patterns, and older logs that only carry the name,
-	 * are kept per medication *name*, so they go only once no other medication
-	 * of this user shares it; otherwise they still belong to that one.
-	 */
-	async removeMedicationHistory(
-		userId: string,
-		medicationId: Types.ObjectId | string,
-		name: string,
-		nameStillInUse: boolean,
-	) {
-		const { deletedCount: linkedLogs } =
-			await this.adherenceLogModel.deleteMany({
-				userId,
-				// Mixed field: older rows may hold the id as a string.
-				medication: anyIdForm(medicationId),
-			});
-		if (nameStillInUse) {
-			return { logs: linkedLogs, patterns: 0 };
-		}
-
-		const sameName = new RegExp(`^${escapeRegExp(name)}$`, 'i');
-		const [{ deletedCount: unlinkedLogs }, { deletedCount: patterns }] =
-			await Promise.all([
-				this.adherenceLogModel.deleteMany({
-					userId,
-					targetType: TargetType.MEDICATION,
-					targetName: sameName,
-					medication: { $exists: false },
-				}),
-				this.adherencePatternModel.deleteMany({
-					userId,
-					targetType: PatternTargetType.MEDICATION,
-					targetName: sameName,
-				}),
-			]);
-		return { logs: linkedLogs + unlinkedLogs, patterns };
 	}
 
 	async removePatternsByUserId(userId: string) {
