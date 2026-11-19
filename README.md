@@ -22,6 +22,7 @@ Data protection (Ghana Data Protection Act, 2012): see [`docs/data-protection.md
 - [Retired features](#retired-features)
 - [AI Agent System](#ai-agent-system)
 - [Auth Flow](#auth-flow)
+- [Audit Logs](#audit-logs)
 - [Response Shape](#response-shape)
 - [Prerequisites](#prerequisites)
 - [Environment Variables](#environment-variables)
@@ -123,7 +124,7 @@ Registers two `APP_GUARD` providers that intercept **every** incoming request:
 
 2. **`RolesGuard`** — reads `@Roles(PersonnelRoles[])`. If present, asserts `request.user.role` is in the allowed list. Only meaningful for `CHRONIC_CARE` routes.
 
-The `AuthController` exposes patient signup (creates Firebase user + MongoDB patient record), login, Google OAuth, and an FCM test endpoint.
+The `AuthController` exposes patient signup (`POST /auth/signup`, creates the Firebase user) and onboarding (`POST /auth/onboard`, creates the MongoDB patient record). Patients sign in with Firebase on the device, so there is no patient login endpoint. Personnel login (email/password and Google) and OTP verification live in `ChronicCareAuthController` (`/personnel/auth`).
 
 #### DatabaseModule
 
@@ -150,6 +151,10 @@ The `private_key` value must be stored with escaped `\n` sequences (e.g. `"-----
 #### LoggingModule
 
 `DomainLogger` extends NestJS's `ConsoleLogger`. In non-development environments it additionally forwards `error` and `warn` calls to BetterStack (Logtail) using `LOGTAIL_SOURCE_TOKEN` and `LOGTAIL_HOST`. In development the NestJS default console logger is used and Logtail forwarding is silent.
+
+#### AuditModule (`@Global`)
+
+Writes the `audit_logs` collection through a global `AuditInterceptor`. See [Audit Logs](#audit-logs).
 
 ### FeaturesModule
 
@@ -307,6 +312,74 @@ Personnel roles: `clinician`, `pharmacy`.
 
 ---
 
+## Audit Logs
+
+Every audited request adds one document to the `audit_logs` MongoDB collection (`src/core/audit/`). A global interceptor writes it after the response has been sent, so it records the real status code. If the client disconnects first, it waits for the handler to finish: an error is recorded with its status, and a handler that completes is recorded as `aborted` with no status code. Requests the auth guards reject never reach interceptors; `AuditDeniedMiddleware` records those. Writes are fire-and-forget: a failed write is logged but never fails or delays the request.
+
+### What is recorded
+
+| Requests | Examples |
+|---|---|
+| Every write (`POST`/`PUT`/`PATCH`/`DELETE`) by a signed-in patient or personnel | `PATCH /api/v1/hcp/patients/:id` |
+| Personnel reads of patient health data (routes under `patients`, `vital-histories`, `vitals`, `medications`, `adherence`, `symptoms`, `concerns`, `appointments`, `appointment-requests`, `chat`) | `GET /api/v1/hcp/patients/:patientId/medications` |
+| Full data exports (right of access / portability), by the patient or by a clinician, recorded as `EXPORT` | `GET /api/v1/client/data-export`, `GET /api/v1/hcp/patients/:id/data-export` |
+| Auth events, successful or not: personnel login (password and Google), signup, onboarding, OTP send/verify; patient signup and onboarding | `POST /api/v1/personnel/auth/login` → `LOGIN`, 401 |
+| Requests to token-protected routes rejected by `AuthGuard` (401: missing, expired or invalid token) or `RolesGuard` (403: wrong role) | `GET /api/v1/hcp/patients/:id` → `ACCESS_DENIED`, 403 |
+
+Each entry holds:
+
+- `timestamp`
+- `actor`: `kind` (`personnel` / `patient` / `anonymous`), `userType` (token audience), `userId` (personnel id or patient Firebase uid), `role` and `facilityId` for personnel, `personnelId`/`patientId` when known. A failed login has no user id.
+- `action`: `CREATE`, `READ`, `EXPORT`, `UPDATE`, `DELETE`, `LOGIN`, `SIGNUP`, `ONBOARD`, `OTP_SEND`, `OTP_VERIFY`, `ACCESS_DENIED`. A rejected request is anonymous unless its token was valid and only the role check failed.
+- `method`, `route` (the route template, e.g. `/api/v1/hcp/patients/:id`, never the raw URL)
+- `resourceType`, `resourceId` (from the route params), `patientId` (the patient whose data was touched, when the route names one)
+- `statusCode`, `outcome` (`success` below 400, otherwise `failure`; `aborted` with no `statusCode` when the client disconnected and the handler then completed, i.e. the action ran but no response was delivered)
+- `ip` (the client IP, honouring `TRUST_PROXY`), `userAgent`, `requestId` (`X-Request-Id` / `X-Railway-Request-Id`, if sent)
+
+### What is never recorded
+
+Request and response bodies, query strings, the `Authorization` header or any token, passwords, OTPs, email addresses and phone numbers. On a successful login only the personnel id is read from the response.
+
+Not recorded: patients reading their own data, unauthenticated requests other than the auth events (health check, public facility list), Swagger, and the USSD callback (each menu step is a `POST` from Africa's Talking whose only identity is the caller's phone number).
+
+### Known limitations
+
+- `patientId` is empty for several personnel reads whose route doesn't name the patient: `appointments/:id`, `appointment-requests/:id`, `vital-histories/:id` (both `/hcp` and `/personnel/pharmacies`), chat room messages (`chat/hcp/rooms/:roomId/messages`), and patient lists (`hcp/patients`, `personnel/pharmacies/patients`). `resourceId` and `route` still say what was read, but finding "everyone who read patient X" needs a join through that resource.
+- An `Idempotency-Key` replay is recorded as a second entry (same action and resource), even though the handler did not run again.
+- Patients reading their own data are not recorded (by decision), except a full data export. A consent change (`PUT /api/v1/client/consent`) is recorded as an `UPDATE` by the patient; reading consent is not. A patient's own export and consent change name no patient in the route, so `patientId` is empty and the patient is `actor.userId` (Firebase uid).
+
+### Retention
+
+A TTL index on `timestamp` deletes entries after `AUDIT_LOG_TTL_DAYS` days. **The default of `730` (2 years) is a placeholder and still needs GHS sign-off.**
+
+The index is created at startup. When the value changes, the next start updates it: in place with `collMod` if the database user has `dbAdmin` (or another role with the `collMod` action) on the database; with only `readWrite`, the index is dropped and recreated instead, so nothing expires for the moment in between. The log line `Audit log retention: … days` / `Audit log retention updated to … days` shows the value in force; if both paths fail, the error log says which retention still applies.
+
+### Querying
+
+There is no API endpoint for audit logs; query MongoDB directly with a read-only user:
+
+```js
+// Who accessed a patient's records in the last 30 days
+db.audit_logs.find({
+  patientId: '<patient id>',
+  timestamp: { $gte: new Date(Date.now() - 30 * 864e5) },
+}).sort({ timestamp: -1 })
+
+// Everything a personnel account did
+db.audit_logs.find({ 'actor.userId': '<personnel id>' }).sort({ timestamp: -1 })
+
+// Failed logins by IP
+db.audit_logs.aggregate([
+  { $match: { action: 'LOGIN', outcome: 'failure' } },
+  { $group: { _id: '$ip', attempts: { $sum: 1 }, last: { $max: '$timestamp' } } },
+  { $sort: { attempts: -1 } },
+])
+```
+
+Indexes: `timestamp` (TTL), `actor.userId + timestamp`, `resourceId + timestamp`, `patientId + timestamp`. A patient's `actor.userId` is their Firebase uid, which matches `patients.userId`.
+
+---
+
 ## Response Shape
 
 Every successful response is wrapped in a consistent envelope by the response interceptors:
@@ -399,6 +472,7 @@ After any change to `.envrc`, run `direnv allow` again to reload.
 | `LOGTAIL_HOST` | Staging/Prod | BetterStack ingestion endpoint |
 | `QUEUE_TLS` | No | Set to `true` to enable TLS for the Redis/BullMQ connection |
 | `NANOID_GEN` | No | Custom nanoid alphabet for code generation |
+| `AUDIT_LOG_TTL_DAYS` | No | Days audit log entries are kept before MongoDB deletes them. Defaults to `730` (2 years), pending GHS sign-off |
 
 ### Optional — retired AI features
 
