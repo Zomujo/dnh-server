@@ -44,6 +44,12 @@ export class Personnel extends BaseEntity {
 	facility: Facility;
 
 	@Prop({
+		description:
+			'When the personnel first completed onboarding. Later profile changes need their own token.',
+	})
+	onboardedAt?: Date;
+
+	@Prop({
 		type: [ObjectId],
 		ref: 'PersonnelAccount',
 		description: 'References to the auth accounts belonging to this personnel',

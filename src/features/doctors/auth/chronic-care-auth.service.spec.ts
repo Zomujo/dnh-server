@@ -1,5 +1,6 @@
 import {
 	ConflictException,
+	ForbiddenException,
 	NotFoundException,
 	UnauthorizedException,
 } from '@nestjs/common';
@@ -97,12 +98,30 @@ describe('ChronicCareAuthService', () => {
 			);
 			expect(result).toEqual(mockPersonnelId);
 		});
+
+		it('should refuse to attach a new account to an existing personnel', async () => {
+			personnelAccountModel.findOne.mockResolvedValue({
+				_id: 'google-acc',
+				personnel: new Types.ObjectId(),
+			} as any);
+			personnelModel.exists.mockResolvedValue({ _id: 'p' } as any);
+
+			await expect(
+				service.create({
+					email: 'victim@gmail.com',
+					password: 'attackerPassword',
+					role: PersonnelRoles.CLINICIAN,
+				}),
+			).rejects.toThrow(ConflictException);
+			expect(personnelAccountModel.create).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('onboard', () => {
 		it('should onboard personnel and send verification code mail for OTP required roles', async () => {
 			const validPersonnelId = new Types.ObjectId().toString();
-			personnelModel.exists.mockResolvedValue(true as any);
+			mockExisting({ _id: validPersonnelId });
+			personnelAccountModel.exists.mockResolvedValue(null);
 			facilitiesService.findOne.mockResolvedValue({} as any);
 
 			const mockAccount = {
@@ -119,7 +138,7 @@ describe('ChronicCareAuthService', () => {
 				personnelAccounts: [mockAccount],
 			};
 
-			personnelModel.findByIdAndUpdate.mockReturnValue({
+			personnelModel.findOneAndUpdate.mockReturnValue({
 				populate: vi.fn().mockResolvedValue(mockPersonnel),
 			} as any);
 
@@ -137,7 +156,110 @@ describe('ChronicCareAuthService', () => {
 			expect(otpService.generate).toHaveBeenCalledWith({
 				identifier: 'doc@example.com',
 			});
+			// The code proves the email, so it never goes to the supplied phone.
+			expect(communicationsService.sendSms).not.toHaveBeenCalled();
 			expect(res).toBe(validPersonnelId);
+			const [filter, update] = personnelModel.findOneAndUpdate.mock
+				.calls[0] as any;
+			expect(update.$set.onboardedAt).toBeInstanceOf(Date);
+			// The not-onboarded check is part of the write.
+			expect(filter).toMatchObject({
+				_id: validPersonnelId,
+				onboardedAt: null,
+			});
+		});
+
+		const mockExisting = (existing: object | null) =>
+			personnelModel.findById.mockReturnValue({
+				select: vi.fn().mockReturnValue({
+					lean: vi.fn().mockResolvedValue(existing),
+				}),
+			} as any);
+
+		const mockUpdated = () =>
+			personnelModel.findOneAndUpdate.mockReturnValue({
+				populate: vi.fn().mockResolvedValue({
+					_id: 'id',
+					role: PersonnelRoles.PHARMACY,
+					personnelAccounts: [],
+				}),
+			} as any);
+
+		it('should refuse to change an onboarded profile without a token', async () => {
+			const personnelId = new Types.ObjectId().toString();
+			mockExisting({ userName: 'Real Clinician' });
+
+			await expect(
+				service.onboard({
+					personnelId,
+					role: PersonnelRoles.PHARMACY,
+				} as any),
+			).rejects.toThrow(UnauthorizedException);
+			expect(personnelModel.findOneAndUpdate).not.toHaveBeenCalled();
+		});
+
+		it('should refuse a token for a different personnel', async () => {
+			const personnelId = new Types.ObjectId().toString();
+
+			await expect(
+				service.onboard(
+					{ personnelId } as any,
+					new Types.ObjectId().toString(),
+				),
+			).rejects.toThrow(ForbiddenException);
+			expect(personnelModel.findOneAndUpdate).not.toHaveBeenCalled();
+		});
+
+		it('should let a personnel change their own onboarded profile', async () => {
+			const personnelId = new Types.ObjectId().toString();
+			const onboardedAt = new Date('2026-01-01');
+			mockExisting({ userName: 'Real Clinician', onboardedAt });
+			mockUpdated();
+
+			await service.onboard(
+				{ personnelId, firstname: 'New' } as any,
+				personnelId,
+			);
+
+			const [, update] = personnelModel.findOneAndUpdate.mock.calls[0] as any;
+			expect(update.$set.onboardedAt).toBe(onboardedAt);
+		});
+
+		it('should treat a profile with onboardedAt but no name as onboarded', async () => {
+			mockExisting({ onboardedAt: new Date() });
+
+			await expect(
+				service.onboard({
+					personnelId: new Types.ObjectId().toString(),
+				} as any),
+			).rejects.toThrow(UnauthorizedException);
+		});
+
+		it('should refuse tokenless onboarding once an account can log in', async () => {
+			const personnelId = new Types.ObjectId().toString();
+			mockExisting({ _id: personnelId });
+			personnelAccountModel.exists.mockResolvedValue({ _id: 'acc' } as any);
+
+			await expect(
+				service.onboard({
+					personnelId,
+					role: PersonnelRoles.CLINICIAN,
+				} as any),
+			).rejects.toThrow(UnauthorizedException);
+			expect(personnelModel.findOneAndUpdate).not.toHaveBeenCalled();
+		});
+
+		it('should refuse when a concurrent tokenless onboarding won the write', async () => {
+			const personnelId = new Types.ObjectId().toString();
+			mockExisting({ _id: personnelId });
+			personnelAccountModel.exists.mockResolvedValue(null);
+			personnelModel.findOneAndUpdate.mockReturnValue({
+				populate: vi.fn().mockResolvedValue(null),
+			} as any);
+
+			await expect(service.onboard({ personnelId } as any)).rejects.toThrow(
+				UnauthorizedException,
+			);
 		});
 	});
 
@@ -273,6 +395,47 @@ describe('ChronicCareAuthService', () => {
 			await expect(
 				service.login({ email: 'doc@example.com', providerUserId: 'g-123' }),
 			).rejects.toThrow(NotFoundException);
+		});
+	});
+
+	describe('login verification by role', () => {
+		const loginAs = async (
+			role: PersonnelRoles,
+			verificationStatus: PersonnelAccountVerificationStatus,
+		) => {
+			const mockAccount = {
+				email: 'staff@example.com',
+				password: await bcrypt.hash('validPassword', 4),
+				verificationStatus,
+				personnel: { _id: new Types.ObjectId(), role },
+			};
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue(mockAccount),
+			} as any);
+			authService.signToken.mockResolvedValue('token' as any);
+			return service.login({
+				email: 'staff@example.com',
+				password: 'validPassword',
+			});
+		};
+
+		it('should refuse an EXEMPT account whose role requires OTP', async () => {
+			await expect(
+				loginAs(
+					PersonnelRoles.CLINICIAN,
+					PersonnelAccountVerificationStatus.EXEMPT,
+				),
+			).rejects.toThrow(UnauthorizedException);
+			expect(authService.signToken).not.toHaveBeenCalled();
+		});
+
+		it('should let an EXEMPT pharmacy account log in', async () => {
+			await expect(
+				loginAs(
+					PersonnelRoles.PHARMACY,
+					PersonnelAccountVerificationStatus.EXEMPT,
+				),
+			).resolves.toMatchObject({ token: 'token' });
 		});
 	});
 

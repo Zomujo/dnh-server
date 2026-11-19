@@ -16,6 +16,7 @@ import {
 	ApiSuccessResponseNoData,
 	throwError,
 } from '@/common/utils/responses';
+import { AuthService } from '@/core/auth/auth.service';
 import { UserType } from '@/core/auth/enums';
 import { GenerateOtpDto, VerifyOtpDto } from '@/core/security/otp/dto';
 import { ChronicCareAuthService } from './chronic-care-auth.service';
@@ -30,7 +31,10 @@ import {
 @Controller('personnel/auth')
 export class ChronicCareAuthController {
 	private logger = new Logger(ChronicCareAuthController.name);
-	constructor(private readonly authService: ChronicCareAuthService) {}
+	constructor(
+		private readonly authService: ChronicCareAuthService,
+		private readonly tokenService: AuthService,
+	) {}
 
 	@CustomApiResponse(['updated'], {
 		message: 'Personnel signed up successfully',
@@ -55,9 +59,15 @@ export class ChronicCareAuthController {
 	})
 	@HttpCode(HttpStatus.OK)
 	@Post('onboard')
-	async onboard(@Body() dto: CreatePersonnelDto) {
+	async onboard(
+		@Body() dto: CreatePersonnelDto,
+		@Headers('authorization') authorization?: string,
+	) {
 		try {
-			const response = await this.authService.onboard(dto);
+			// Public for a new account's first onboarding; a Bearer token, when
+			// sent, must be valid and is required to change an onboarded profile.
+			const actorPersonnelId = await this.optionalPersonnelId(authorization);
+			const response = await this.authService.onboard(dto, actorPersonnelId);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.CREATED,
@@ -172,6 +182,25 @@ export class ChronicCareAuthController {
 			);
 		} catch (error) {
 			throwError(this.logger, error);
+		}
+	}
+
+	/**
+	 * The personnel id from an onboarding request's staff token, if it has a
+	 * valid one. A missing, malformed or stale token falls back to the
+	 * tokenless rules, which only allow a first onboarding of an account that
+	 * cannot log in yet; so this never grants more than no token would.
+	 */
+	private async optionalPersonnelId(
+		authorization?: string,
+	): Promise<string | undefined> {
+		const [type, token] = authorization?.split(' ') ?? [];
+		if (type !== 'Bearer' || !token) return undefined;
+		try {
+			const payload = await this.tokenService.verifyChronicCareToken(token);
+			return payload.sub;
+		} catch {
+			return undefined;
 		}
 	}
 }

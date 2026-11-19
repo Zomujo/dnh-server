@@ -1,6 +1,7 @@
 import {
 	BadRequestException,
 	ConflictException,
+	ForbiddenException,
 	Injectable,
 	NotFoundException,
 	UnauthorizedException,
@@ -31,6 +32,19 @@ import {
 // instead of VERIFIED, so they stay findable and can be pushed through real
 // verification later just by adding PersonnelRoles.PHARMACY here.
 const OTP_REQUIRED_ROLES: PersonnelRoles[] = [PersonnelRoles.CLINICIAN];
+
+// Whether a personnel has been through onboarding, after which their profile
+// only changes with their own token. Profiles onboarded before onboardedAt
+// existed are recognised by the name onboarding set.
+function isOnboarded(personnel: { onboardedAt?: Date; userName?: string }) {
+	return !!personnel.onboardedAt || !!personnel.userName?.trim();
+}
+
+/** Mongo filter matching what isOnboarded() treats as not onboarded. */
+const NOT_ONBOARDED = {
+	onboardedAt: null,
+	userName: { $not: /\S/ },
+};
 
 // Appointments in these states still need a host. Only the host can modify an
 // appointment, so deleting the host would strand them — deletion is refused
@@ -88,12 +102,16 @@ export class ChronicCareAuthService {
 			personnelId = undefined;
 		}
 
-		if (!personnelId) {
-			const personnel = await this.personnelModel.create({
-				role: PersonnelRoles.CLINICIAN,
-			});
-			personnelId = personnel._id;
+		if (personnelId) {
+			// Never attach a new credential to someone else's personnel: signing
+			// up with a Google user's email would otherwise add a password of the
+			// caller's choosing to that user's profile.
+			throw new ConflictException('Account with this email already exists');
 		}
+
+		personnelId = (
+			await this.personnelModel.create({ role: PersonnelRoles.CLINICIAN })
+		)._id;
 
 		const provider = dto.provider || PersonnelProviders.EMAIL;
 
@@ -118,7 +136,16 @@ export class ChronicCareAuthService {
 		return personnelId;
 	}
 
-	async onboard(dto: CreatePersonnelDto) {
+	/**
+	 * Sets the personnel's profile, role and facility.
+	 *
+	 * The route is public because a new email account onboards before it can
+	 * log in (onboarding sends the OTP). So only the first onboarding may come
+	 * without a token; once a profile is onboarded, changing it needs that
+	 * personnel's own token (`actorPersonnelId`). Without this, anyone who knew
+	 * a personnel id could rewrite their role, name and facility.
+	 */
+	async onboard(dto: CreatePersonnelDto, actorPersonnelId?: string) {
 		// findByIdAndUpdate/exists/countDocuments all silently collapse an
 		// undefined/malformed _id filter to {} and match an arbitrary document —
 		// verified against this project's mongoose version. Guard before any query.
@@ -126,11 +153,43 @@ export class ChronicCareAuthService {
 			throw new NotFoundException('Personnel not found');
 		}
 
-		const personnelExists = await this.personnelModel.exists({
-			_id: dto.personnelId,
-		});
-		if (!personnelExists) {
+		if (
+			actorPersonnelId !== undefined &&
+			actorPersonnelId !== dto.personnelId
+		) {
+			throw new ForbiddenException('You can only onboard your own account');
+		}
+
+		const existing = await this.personnelModel
+			.findById(dto.personnelId)
+			.select('onboardedAt userName')
+			.lean();
+		if (!existing) {
 			throw new NotFoundException('Personnel not found');
+		}
+
+		const tokenless = actorPersonnelId === undefined;
+		if (tokenless) {
+			if (isOnboarded(existing)) {
+				throw new UnauthorizedException(
+					'This profile is already onboarded; sign in to change it',
+				);
+			}
+			// Tokenless onboarding is for a new email signup, verified or not
+			// (the app may verify the OTP first). A Google account, or an exempt
+			// one that can already log in, has a token and must use it.
+			const canLogIn = await this.personnelAccountModel.exists({
+				personnel: existing._id,
+				$or: [
+					{ provider: { $ne: PersonnelProviders.EMAIL } },
+					{
+						verificationStatus: PersonnelAccountVerificationStatus.EXEMPT,
+					},
+				],
+			});
+			if (canLogIn) {
+				throw new UnauthorizedException('Sign in to onboard this account');
+			}
 		}
 
 		if (dto.facility) {
@@ -139,8 +198,12 @@ export class ChronicCareAuthService {
 		}
 
 		const personnel = await this.personnelModel
-			.findByIdAndUpdate(
-				dto.personnelId,
+			.findOneAndUpdate(
+				// Without a token, the not-onboarded check is part of the write, so
+				// two concurrent tokenless calls cannot both succeed.
+				tokenless
+					? { _id: dto.personnelId, ...NOT_ONBOARDED }
+					: { _id: dto.personnelId },
 				{
 					$set: {
 						userName: `${dto.firstname ?? ''} ${dto.lastname ?? ''}`.trim(),
@@ -148,6 +211,7 @@ export class ChronicCareAuthService {
 						personnelIdNumber: dto.personnelIdNumber,
 						facility: dto.facility,
 						...(dto.role !== undefined && { role: dto.role }),
+						onboardedAt: existing.onboardedAt ?? new Date(),
 					},
 				},
 				{ new: true },
@@ -155,7 +219,10 @@ export class ChronicCareAuthService {
 			.populate({ path: 'personnelAccounts' });
 
 		if (!personnel) {
-			throw new NotFoundException('Personnel not found');
+			// It existed a moment ago, so a concurrent tokenless onboarding won.
+			throw new UnauthorizedException(
+				'This profile is already onboarded; sign in to change it',
+			);
 		}
 
 		const account = (personnel.personnelAccounts as any)?.[0] as
@@ -175,7 +242,6 @@ export class ChronicCareAuthService {
 					mail: account.email,
 					fullName: personnel.userName,
 					code: code,
-					phoneNumber: personnel.phoneNumber,
 				});
 			} else {
 				account.verificationStatus = PersonnelAccountVerificationStatus.EXEMPT;
@@ -243,6 +309,17 @@ export class ChronicCareAuthService {
 				throw new NotFoundException('Personnel not found');
 			}
 			throw new UnauthorizedException('This account has been deleted');
+		}
+
+		// EXEMPT only waives the OTP for roles that don't need one. A role that
+		// does (e.g. an EXEMPT pharmacy account re-onboarded as clinician) must
+		// prove the email first, or onboarding could skip verification.
+		if (
+			OTP_REQUIRED_ROLES.includes(personnel.role as PersonnelRoles) &&
+			personnelAccount.verificationStatus !==
+				PersonnelAccountVerificationStatus.VERIFIED
+		) {
+			throw new UnauthorizedException('Personnel not verified');
 		}
 
 		const token = await this.authService.signToken(
@@ -414,7 +491,6 @@ export class ChronicCareAuthService {
 			mail: account.email,
 			fullName: personnel?.userName,
 			code: code,
-			phoneNumber: personnel?.phoneNumber,
 		});
 	}
 
@@ -442,9 +518,11 @@ export class ChronicCareAuthService {
 		mail: string;
 		fullName: string;
 		code: number;
-		phoneNumber?: string;
 	}) {
-		const { mail, fullName, code, phoneNumber } = payload;
+		// Email only: this code proves the email address. The phone number comes
+		// from the unauthenticated onboarding request, so an SMS copy would let
+		// anyone verify an email they do not own.
+		const { mail, fullName, code } = payload;
 		const emailPayload = {
 			recipient: mail,
 			subject: 'Email OTP - Yelima',
@@ -458,12 +536,5 @@ export class ChronicCareAuthService {
 		};
 
 		this.communicationsService.sendMail(emailPayload);
-
-		if (phoneNumber) {
-			this.communicationsService.sendSms({
-				recipient: [phoneNumber],
-				message: `Hi ${fullName}, your OTP is ${code}. It is valid for 10 minutes.`,
-			});
-		}
 	}
 }
