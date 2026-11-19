@@ -109,12 +109,9 @@ export class ChronicCareAuthService {
 			throw new ConflictException('Account with this email already exists');
 		}
 
-		if (!personnelId) {
-			const personnel = await this.personnelModel.create({
-				role: PersonnelRoles.CLINICIAN,
-			});
-			personnelId = personnel._id;
-		}
+		personnelId = (
+			await this.personnelModel.create({ role: PersonnelRoles.CLINICIAN })
+		)._id;
 
 		const provider = dto.provider || PersonnelProviders.EMAIL;
 
@@ -178,14 +175,17 @@ export class ChronicCareAuthService {
 					'This profile is already onboarded; sign in to change it',
 				);
 			}
-			// Tokenless onboarding is for an email signup that cannot log in yet.
-			// Once any of its accounts can log in (verified, exempt or Google), the
-			// owner has a token and must use it.
+			// Tokenless onboarding is for a new email signup, verified or not
+			// (the app may verify the OTP first). A Google account, or an exempt
+			// one that can already log in, has a token and must use it.
 			const canLogIn = await this.personnelAccountModel.exists({
 				personnel: existing._id,
-				verificationStatus: {
-					$ne: PersonnelAccountVerificationStatus.UNVERIFIED,
-				},
+				$or: [
+					{ provider: { $ne: PersonnelProviders.EMAIL } },
+					{
+						verificationStatus: PersonnelAccountVerificationStatus.EXEMPT,
+					},
+				],
 			});
 			if (canLogIn) {
 				throw new UnauthorizedException('Sign in to onboard this account');
