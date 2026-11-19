@@ -27,8 +27,12 @@ export class NodemailerService {
 			.then((success) => {
 				this.logger.log(`mail sent: ${success?.messageId ?? 'no message id'}`);
 			})
+			// Code and message only: the error object can carry the envelope
+			// (recipient addresses) and the SMTP response.
 			.catch((err) => {
-				this.logger.error('mail sending error!', err);
+				this.logger.error(
+					`mail sending error: ${err?.code ?? 'unknown'} ${err?.message ?? ''}`.trim(),
+				);
 			});
 	}
 }

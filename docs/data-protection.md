@@ -40,7 +40,7 @@ What the code now provides:
 | Need | Status |
 |---|---|
 | Record consent (who, when, which notice, which channel), and withdrawal | **Added** in this change: `consent` / `consentHistory` on the patient record, `GET`/`PUT /client/consent`, optional `consent` on onboarding and on clinician registration |
-| Right of access / portability | **Added**: `GET /client/data-export` (patient) and `GET /hcp/patients/:id/data-export` (clinician, for patients without the app) |
+| Right of access / portability | **Added**: `GET /client/data-export` (patient) and `GET /hcp/patients/:id/data-export` (clinician, only for patients without an app account; 403 otherwise) |
 | Right to correction | Existing: `PATCH /client/patient` (name, gender) and `PATCH /hcp/patients/:id` (all profile fields) |
 | Right to erasure | Existing `DELETE /client/clean` (app users; covers every collection, Firestore, Storage and the Firebase Auth user). **Added** `dist/scripts/erase-patient.js` for patients without an app account |
 | No personal data in logs | **Fixed**: request logging sent headers (bearer tokens) and bodies (health readings, names, passwords, OTPs) to BetterStack; push, mail and error logs leaked tokens, message content and duplicate-key values. See [section 7](#7-security-safeguards) |
@@ -90,7 +90,7 @@ All MongoDB collections live in the database named by `DB_NAME` on the cluster i
 | Profile mirror (name, phone) and in-app notification feed | Firestore `clients/{uid}` (+ `notifications` subcollection), `users/{uid}` | App display | no (see gap G6) | yes |
 | Name and phone (cache, 50 min) | Redis | Request handling | no | yes |
 | USSD session (vital type, value, time; 5 min) | Redis `ussd:session:*` | Multi-step USSD entry | no | expires |
-| Retired: AI chat messages, AI conversation state, voice notes; chat rooms/messages/media | `clientaichats`, `checkpoints`, `checkpoint_writes`, Firebase Storage, `chatrooms`, `chatmessages` | Not deployed for GHS | AI messages only, when the module is loaded | yes (chat media in Storage: see gap G7) |
+| Retired: AI chat messages, AI conversation state, voice notes; chat rooms/messages/media | `clientaichats`, `checkpoints`, `checkpoint_writes`, Firebase Storage, `chatrooms`, `chatmessages` | Not deployed for GHS | AI messages only, when the module is loaded (see gap G7) | yes |
 
 ### Staff (clinicians and pharmacy users)
 
@@ -151,7 +151,7 @@ later change to the notice can be re-consented.
 | App onboarding | `POST /auth/onboard` with optional `"consent": { "policyVersion": "..." }` → granted, channel `app`. A retried onboarding does not add a second record |
 | App, later | `PUT /client/consent` with `{ "granted": true \| false, "policyVersion": "..." }`. `GET /client/consent` returns `{ consent, history }` |
 | Clinician registers a patient | `POST /hcp/patients` (clinician) or `POST /personnel/pharmacies/patients` (pharmacy) with optional `"consent": { "policyVersion": "..." }` → granted, channel `hcp`, `recordedBy` = the calling personnel |
-| Clinician records consent for an existing patient | `PATCH /hcp/patients/:id` with `"consent": { "policyVersion": "..." }` |
+| Clinician records consent for an existing patient | `PATCH /hcp/patients/:id` with `"consent": { "policyVersion": "..." }`. Recorded after the profile update succeeds; nothing is written if consent is already granted under the same version. If the patient withdrew consent themselves, the request is rejected (409) unless it also sends `"overrideWithdrawal": true` (the patient has agreed again in person); the re-grant is then recorded with `recordedBy` and `overridesWithdrawal: true` |
 | USSD | Not yet: USSD only logs readings for patients already registered (matched by phone number). The `ussd` channel is reserved for a future consent step in the USSD menu |
 
 ### Withdrawal
@@ -166,9 +166,9 @@ it as an erasure request) and say so in the privacy notice.
 | Right | Patient with the app | Patient without the app (USSD / registered at a facility) |
 |---|---|---|
 | Be informed (openness) | Privacy notice in the app (GHS to write, [section 11](#11-checklist-for-ghs-organisational-items)) | Notice at the facility / on the USSD welcome screen |
-| Access and a copy (section 32) | `GET /client/data-export`: one JSON document with the profile and every collection in [section 3](#3-data-inventory) | A clinician calls `GET /hcp/patients/:id/data-export` and gives the patient the file after verifying identity |
+| Access and a copy (section 32) | `GET /client/data-export`: one JSON document with the profile and every collection in [section 3](#3-data-inventory) | A clinician calls `GET /hcp/patients/:id/data-export` and gives the patient the file after verifying identity. Only for patients without an app account (403 for app users, who export their own). Clinician profile: leaves out AI chat messages and devices, and includes only appointment requests made to the clinician's facility |
 | Correction (section 33) | `PATCH /client/patient` (name, gender); other fields via a clinician | Clinician: `PATCH /hcp/patients/:id` |
-| Deletion (section 33) | `DELETE /client/clean`: deletes every collection, Firestore records, Storage files and the Firebase Auth user. Safe to repeat after a partial failure | Operator: `node dist/scripts/erase-patient.js <patientCode>` (dry run, prints what is held), then the same with `--confirm` |
+| Deletion (section 33) | `DELETE /client/clean`: deletes every collection, Firestore records, Storage files and the Firebase Auth user. Safe to repeat after a partial failure | Operator: `node dist/scripts/erase-patient.js <patientCode>` (dry run, prints what is held), then the same with `--confirm`. If a run fails part-way it prints the patient's user id; finish with `--user-id <userId> --confirm`. The script boots only the modules the purge needs, with queue workers and startup maintenance off (`DISABLE_BACKGROUND_JOBS`, set by the script itself; never set it on the API) |
 | Withdraw consent / object | `PUT /client/consent` with `granted: false` | Clinician records it; GHS procedure decides the follow-up |
 
 Procedure notes for GHS:
@@ -229,7 +229,7 @@ Gaps and recommendations (technical):
 | G4 | Error logs can still include whole error objects (for example a database validation error quoting a value) | Self-host the log service (OpenObserve) so logs stay under GHS control, restrict access to it and set a short retention |
 | G5 | No automatic retention for clinical data ([section 8](#8-retention)) | Decide a schedule; implement as TTL indexes or a scheduled purge |
 | G6 | The data export does not include the Firestore profile mirror or the Firebase Auth record | Both hold only data the patient entered and sees in the app (name, phone, email, notification feed); GHS can export them from the Firebase console on request |
-| G7 | Retired chat: deleting chat rooms on erasure does not delete chat media files in Storage (`hcp_chats/...`) | Only relevant if chat is re-enabled; delete room media on erasure first |
+| G7 | Retired chat and AI: the data export leaves out chat rooms and messages and the AI's LangGraph conversation checkpoints (erasure does delete them, room media in Storage included) | Only relevant if chat or AI is re-enabled; add them to the export first |
 | G8 | Patients cannot correct phone number or date of birth themselves | Through a clinician for now. A self-service phone change needs verification, because the phone number links USSD readings to the record |
 
 ## 8. Retention
@@ -347,4 +347,8 @@ Web app (clinicians and pharmacy staff):
   `"consent": { "policyVersion": "..." }` when it is ticked.
 - For existing patients, allow recording consent with `PATCH /hcp/patients/:id`
   (`"consent": { "policyVersion": "..." }`); the patient record shows `consent`.
-- Add "Export patient data" calling `GET /hcp/patients/:id/data-export`.
+- Add "Export patient data" calling `GET /hcp/patients/:id/data-export`, shown only for
+  patients without an app account (a 403 otherwise: app users export their own data).
+- Handle 409 on `PATCH /hcp/patients/:id` with consent: the patient withdrew consent in
+  the app. Only after the patient agrees again in person, resend with
+  `"overrideWithdrawal": true`.
