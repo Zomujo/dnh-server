@@ -55,6 +55,7 @@ describe('ChatService', () => {
 			expect(messageModel.exists).toHaveBeenCalledWith({
 				_id: parent,
 				roomId: 'room-a',
+				deletedForEveryone: { $ne: true },
 			});
 			expect(messageModel.create).not.toHaveBeenCalled();
 		});
