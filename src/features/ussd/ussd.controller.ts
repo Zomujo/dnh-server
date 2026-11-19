@@ -4,9 +4,11 @@ import {
 	Header,
 	HttpCode,
 	Post,
+	Req,
 	UseGuards,
 } from '@nestjs/common';
 import { seconds, Throttle } from '@nestjs/throttler';
+import type { Request } from 'express';
 import { UssdSessionDto } from './dto/ussd-session.dto';
 import { UssdService } from './ussd.service';
 import { UssdCallbackGuard } from './ussd-callback.guard';
@@ -31,11 +33,15 @@ export class UssdController {
 	@Post()
 	@HttpCode(200)
 	@Header('Content-Type', 'text/plain')
-	async handleSession(@Body() dto: UssdSessionDto): Promise<string> {
+	async handleSession(
+		@Body() dto: UssdSessionDto,
+		@Req() request: Request,
+	): Promise<string> {
 		return this.ussdService.handleSession(
 			dto.sessionId,
 			dto.phoneNumber,
 			dto.text ?? '',
+			{ headers: request.headers, ip: request.ip },
 		);
 	}
 }

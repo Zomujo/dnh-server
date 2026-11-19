@@ -14,11 +14,12 @@ flowchart LR
     A3["3 · Process request<br/>patients · medications · adherence ·<br/>vitals · appointments · concerns ·<br/>consent · data export"]
     A4["4 · Write audit entry<br/>sign-ins · writes · staff reads of<br/>patient data · exports · denials"]
     J["Scheduled jobs<br/>dose & appointment reminders ·<br/>missed doses · adherence rates"]
-    U1["USSD callback check<br/>shared key / IP allowlist<br/>(not audited)"]
+    U1["USSD callback check<br/>shared key / IP allowlist"]
     A1 --> A2 --> A3 --> A4
     A1 -. "rejected 401" .-> A4
     A2 -. "rejected 403" .-> A4
     U1 --> A3
+    U1 -. "saved readings,<br/>unknown numbers" .-> A4
   end
 
   DB[("MongoDB<br/>personal & health data<br/>Confidential")]

@@ -44,7 +44,7 @@ What the code now provides:
 | Right to correction | Existing: `PATCH /client/patient` (name, gender) and `PATCH /hcp/patients/:id` (all profile fields) |
 | Right to erasure | Existing `DELETE /client/clean` (app users; covers every collection, Firestore, Storage and the Firebase Auth user). **Added** `dist/scripts/erase-patient.js` for patients without an app account |
 | No personal data in logs | **Fixed**: request logging sent headers (bearer tokens) and bodies (health readings, names, passwords, OTPs) to BetterStack; push, mail and error logs leaked tokens, message content and duplicate-key values. See [section 7](#7-security-safeguards) |
-| Audit trail of who accessed what | Separate PR `feat/audit-logs` (`audit_logs` collection: actor, action, route, resource, outcome, IP; no bodies or secrets; TTL `AUDIT_LOG_TTL_DAYS`) |
+| Audit trail of who accessed what | Separate PR `feat/audit-logs` (`audit_logs` collection: actor, action, route, resource, outcome, IP; no bodies or secrets; TTL `AUDIT_LOG_TTL_DAYS`). USSD readings are audited too: each save (or its refusal for an unknown number) is recorded against the patient, never the phone number |
 | Registration with the DPC, data protection supervisor, privacy notice, DPIA, processor agreements, retention schedule | **GHS organisational items**, [section 11](#11-checklist-for-ghs-organisational-items) |
 
 AI features (Gemini, OpenAI, Qdrant) and real-time chat are **retired** and will not be
@@ -90,7 +90,8 @@ All MongoDB collections live in the database named by `DB_NAME` on the cluster i
 | Profile mirror (name, phone) and in-app notification feed | Firestore `clients/{uid}` (+ `notifications` subcollection), `users/{uid}` | App display | no (see gap G6) | yes |
 | Name and phone (cache, 50 min) | Redis | Request handling | no | yes |
 | USSD session (vital type, value, time; 5 min) | Redis `ussd:session:*` | Multi-step USSD entry | no | expires |
-| Retired: AI chat messages, AI conversation state, voice notes; chat rooms/messages/media | `clientaichats`, `checkpoints`, `checkpoint_writes`, Firebase Storage, `chatrooms`, `chatmessages` | Not deployed for GHS | AI messages only, when the module is loaded (see gap G7) | yes |
+| Conversation history: dose reminder texts (and AI chat turns when the assistant is on), with a copy of name, phone and language | `checkpoints`, `checkpoint_writes` (LangGraph, thread = userId) | Written by every dose reminder, AI on or off | yes (`conversationHistory`) | yes |
+| Retired: AI chat messages, voice notes; chat rooms/messages/media | `clientaichats`, Firebase Storage, `chatrooms`, `chatmessages` | Not deployed for GHS | AI messages only, when the module is loaded; not chat rooms (see gap G7) | yes |
 
 ### Staff (clinicians and pharmacy users)
 
@@ -166,7 +167,7 @@ it as an erasure request) and say so in the privacy notice.
 | Right | Patient with the app | Patient without the app (USSD / registered at a facility) |
 |---|---|---|
 | Be informed (openness) | Privacy notice in the app (GHS to write, [section 11](#11-checklist-for-ghs-organisational-items)) | Notice at the facility / on the USSD welcome screen |
-| Access and a copy (section 32) | `GET /client/data-export`: one JSON document with the profile and every collection in [section 3](#3-data-inventory) | A clinician calls `GET /hcp/patients/:id/data-export` and gives the patient the file after verifying identity. Only for patients without an app account (403 for app users, who export their own). Clinician profile: leaves out AI chat messages and devices, and includes only appointment requests made to the clinician's facility |
+| Access and a copy (section 32) | `GET /client/data-export`: one JSON document with the profile and every collection in [section 3](#3-data-inventory) | A clinician calls `GET /hcp/patients/:id/data-export` and gives the patient the file after verifying identity. Only for patients without an app account (403 for app users, who export their own). Clinician profile: leaves out AI chat messages and devices (its conversation history holds only dose reminders, since these patients have no app), and includes only appointment requests made to the clinician's facility |
 | Correction (section 33) | `PATCH /client/patient` (name, gender); other fields via a clinician | Clinician: `PATCH /hcp/patients/:id` |
 | Deletion (section 33) | `DELETE /client/clean`: deletes every collection, Firestore records, Storage files and the Firebase Auth user. Safe to repeat after a partial failure | Operator: `node dist/scripts/erase-patient.js <patientCode>` (dry run, prints what is held), then the same with `--confirm`. If a run fails part-way it prints the patient's user id; finish with `--user-id <userId> --confirm`. The script boots only the modules the purge needs, with queue workers and startup maintenance off (`DISABLE_BACKGROUND_JOBS`, set by the script itself; never set it on the API) |
 | Withdraw consent / object | `PUT /client/consent` with `granted: false` | Clinician records it; GHS procedure decides the follow-up |
@@ -199,7 +200,7 @@ In place (section 28 requires appropriate technical and organisational measures)
   escaped (no regex injection or ID-number extraction through search).
 - **Storage:** uploaded files have no public download token; they are read through
   short-lived signed URLs.
-- **USSD callbacks** are accepted only with the shared secret / from the provider.
+- **USSD callbacks** are accepted only with the shared secret / from the provider. A callback refused by that check (forged or misconfigured) is written to the server log, not the audit log.
 - **API docs (Swagger)** are disabled in production; CORS is restricted to listed origins.
 - **List endpoints return limited fields:** patient lists return name, date of birth,
   conditions and adherence only (or name and patient code). Ghana Card and NHIS numbers are
@@ -229,7 +230,7 @@ Gaps and recommendations (technical):
 | G4 | Error logs can still include whole error objects (for example a database validation error quoting a value) | Self-host the log service (OpenObserve) so logs stay under GHS control, restrict access to it and set a short retention |
 | G5 | No automatic retention for clinical data ([section 8](#8-retention)) | Decide a schedule; implement as TTL indexes or a scheduled purge |
 | G6 | The data export does not include the Firestore profile mirror or the Firebase Auth record | Both hold only data the patient entered and sees in the app (name, phone, email, notification feed); GHS can export them from the Firebase console on request |
-| G7 | Retired chat and AI: the data export leaves out chat rooms and messages and the AI's LangGraph conversation checkpoints (erasure does delete them, room media in Storage included) | Only relevant if chat or AI is re-enabled; add them to the export first |
+| G7 | Retired chat: the data export leaves out chat rooms and messages (erasure does delete them, room media in Storage included) | Only relevant if chat is re-enabled; add them to the export first |
 | G8 | Patients cannot correct phone number or date of birth themselves | Through a clinician for now. A self-service phone change needs verification, because the phone number links USSD readings to the record |
 
 ## 8. Retention

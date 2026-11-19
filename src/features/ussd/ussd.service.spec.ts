@@ -1,4 +1,11 @@
 import { type Mocked, TestBed } from '@suites/unit';
+import { Types } from 'mongoose';
+import { AuditService } from '@/core/audit/audit.service';
+import {
+	AuditAction,
+	AuditActorKind,
+	AuditOutcome,
+} from '@/core/audit/entities/audit-log.entity';
 import { CacheService } from '@/core/caching/caching.service';
 import { VitalTypes } from '@/features/vital-histories/dto/vital-history.dto';
 import { VitalHistoriesService } from '@/features/vital-histories/vital-histories.service';
@@ -10,6 +17,7 @@ describe('UssdService', () => {
 	let patientsService: Mocked<PatientsService>;
 	let vitalHistoriesService: Mocked<VitalHistoriesService>;
 	let cacheService: Mocked<CacheService<any>>;
+	let auditService: Mocked<AuditService>;
 
 	beforeAll(async () => {
 		const { unit, unitRef } = await TestBed.solitary(UssdService).compile();
@@ -18,6 +26,7 @@ describe('UssdService', () => {
 		patientsService = unitRef.get(PatientsService);
 		vitalHistoriesService = unitRef.get(VitalHistoriesService);
 		cacheService = unitRef.get(CacheService);
+		auditService = unitRef.get(AuditService);
 	});
 
 	beforeEach(() => {
@@ -153,6 +162,136 @@ describe('UssdService', () => {
 				'END Invalid format. Please dial again and use DD-MM-YY HH:MM AM|PM',
 			);
 			expect(vitalHistoriesService.loadVitalHistory).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('audit trail', () => {
+		const phone = '+233201234567';
+		const requestInfo = {
+			headers: { 'user-agent': 'AfricasTalking' },
+			ip: '196.201.214.1',
+		};
+
+		beforeEach(() => {
+			cacheService.get.mockResolvedValue({
+				vitalType: VitalTypes.BLOOD_SUGAR,
+				value: '5.6',
+				recordedAt: new Date(),
+			});
+			patientsService.findPatientByPhoneNumber.mockResolvedValue({
+				_id: { toString: () => 'p-1' },
+				userId: 'hcp-0193',
+			} as any);
+		});
+
+		it('records a saved reading against the patient and the new vital', async () => {
+			const vitalId = new Types.ObjectId();
+			vitalHistoriesService.loadVitalHistory.mockResolvedValue(vitalId);
+
+			await service.handleSession('sess-1', phone, '2*5.6*1', requestInfo);
+
+			expect(auditService.record).toHaveBeenCalledTimes(1);
+			expect(auditService.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					action: AuditAction.CREATE,
+					outcome: AuditOutcome.SUCCESS,
+					method: 'POST',
+					route: '/api/v1/ussd',
+					resourceType: 'vital-histories',
+					resourceId: vitalId.toHexString(),
+					patientId: 'p-1',
+					ip: '196.201.214.1',
+					userAgent: 'AfricasTalking',
+					actor: {
+						kind: AuditActorKind.PATIENT,
+						userType: 'ussd',
+						userId: 'hcp-0193',
+						patientId: 'p-1',
+					},
+				}),
+			);
+		});
+
+		it('records a failed save', async () => {
+			vitalHistoriesService.loadVitalHistory.mockRejectedValue(
+				new Error('db down'),
+			);
+
+			const res = await service.handleSession(
+				'sess-1',
+				phone,
+				'2*5.6*1',
+				requestInfo,
+			);
+
+			expect(res).toContain('END Could not save your reading.');
+			expect(auditService.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					action: AuditAction.CREATE,
+					outcome: AuditOutcome.FAILURE,
+					patientId: 'p-1',
+					resourceId: undefined,
+				}),
+			);
+		});
+
+		it('reports a saved reading as saved when the session cleanup fails', async () => {
+			vitalHistoriesService.loadVitalHistory.mockResolvedValue(
+				new Types.ObjectId(),
+			);
+			cacheService.delete.mockRejectedValueOnce(new Error('redis down'));
+
+			const res = await service.handleSession(
+				'sess-1',
+				phone,
+				'2*5.6*1',
+				requestInfo,
+			);
+
+			expect(res).toContain('END Reading logged successfully.');
+			expect(auditService.record).toHaveBeenCalledTimes(1);
+			expect(auditService.record).toHaveBeenCalledWith(
+				expect.objectContaining({ outcome: AuditOutcome.SUCCESS }),
+			);
+		});
+
+		it('records nothing when the patient lookup itself fails', async () => {
+			patientsService.findPatientByPhoneNumber.mockRejectedValueOnce(
+				new Error('db down'),
+			);
+
+			const res = await service.handleSession(
+				'sess-1',
+				phone,
+				'2*5.6*1',
+				requestInfo,
+			);
+
+			expect(res).toContain('END Could not save your reading.');
+			expect(auditService.record).not.toHaveBeenCalled();
+		});
+
+		it('records an unknown number as refused, without the number', async () => {
+			patientsService.findPatientByPhoneNumber.mockResolvedValue(null);
+
+			await service.handleSession('sess-1', phone, '2*5.6*1', requestInfo);
+
+			expect(vitalHistoriesService.loadVitalHistory).not.toHaveBeenCalled();
+			const entry = auditService.record.mock.calls[0][0];
+			expect(entry).toMatchObject({
+				action: AuditAction.ACCESS_DENIED,
+				outcome: AuditOutcome.FAILURE,
+				actor: { kind: AuditActorKind.ANONYMOUS, userType: 'ussd' },
+			});
+			expect(JSON.stringify(entry)).not.toContain('201234567');
+		});
+
+		it('does not audit menu steps', async () => {
+			await service.handleSession('sess-1', phone, '', requestInfo);
+			await service.handleSession('sess-1', phone, '2', requestInfo);
+			await service.handleSession('sess-1', phone, '2*5.6', requestInfo);
+
+			expect(auditService.record).not.toHaveBeenCalled();
 		});
 	});
 });

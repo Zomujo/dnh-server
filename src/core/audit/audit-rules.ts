@@ -239,8 +239,9 @@ export function actorFromRequest(
  * - a full data export (`.../data-export`) by anyone, patients included,
  *   recorded as EXPORT
  *
- * Unauthenticated traffic otherwise (health check, public facility lists,
- * the USSD callback) is not audited; Swagger isn't a Nest route at all.
+ * Unauthenticated traffic otherwise (health check, public facility lists)
+ * is not audited; Swagger isn't a Nest route at all. The USSD callback has
+ * no token either: UssdService records its saves itself.
  */
 /** Last path segment of the full patient data export routes. */
 const DATA_EXPORT_SEGMENT = 'data-export';

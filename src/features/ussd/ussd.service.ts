@@ -1,4 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { AuditService } from '@/core/audit/audit.service';
+import {
+	API_PREFIX,
+	type AuditRequest,
+	buildAuditEntry,
+	cleanId,
+} from '@/core/audit/audit-rules';
+import {
+	AuditAction,
+	AuditActorKind,
+	AuditOutcome,
+} from '@/core/audit/entities/audit-log.entity';
 import { CacheService } from '@/core/caching/caching.service';
 import { VitalTypes } from '@/features/vital-histories/dto/vital-history.dto';
 import { VitalHistoriesService } from '@/features/vital-histories/vital-histories.service';
@@ -30,6 +42,14 @@ const VITAL_OPTIONS: Record<
 
 const SESSION_TTL = 1000 * 60 * 5; // 5 minutes
 
+/** Route recorded on USSD audit entries (the callback is POST /ussd). */
+export const USSD_AUDIT_ROUTE = `${API_PREFIX}/ussd`;
+/** `actor.userType` on USSD audit entries: no token, identified by phone. */
+export const USSD_USER_TYPE = 'ussd';
+
+/** What the controller passes on for the audit entry (no body, no query). */
+export type UssdRequestInfo = Pick<AuditRequest, 'headers' | 'ip'>;
+
 @Injectable()
 export class UssdService {
 	private readonly logger = new Logger(UssdService.name);
@@ -38,12 +58,14 @@ export class UssdService {
 		private readonly patientsService: PatientsService,
 		private readonly vitalHistoriesService: VitalHistoriesService,
 		private readonly cacheService: CacheService<UssdSessionState>,
+		private readonly auditService: AuditService,
 	) {}
 
 	async handleSession(
 		sessionId: string,
 		phoneNumber: string,
 		text: string,
+		requestInfo: UssdRequestInfo = { headers: {} },
 	): Promise<string> {
 		const inputs = text ? text.split('*') : [];
 		const cacheKey = `ussd:session:${sessionId}`;
@@ -104,7 +126,7 @@ export class UssdService {
 				{ ...state, recordedAt },
 				SESSION_TTL,
 			);
-			return this.saveReading(cacheKey, sessionId, phoneNumber);
+			return this.saveReading(cacheKey, sessionId, phoneNumber, requestInfo);
 		}
 
 		// Step 3b — different time: prompt for date/time
@@ -124,7 +146,7 @@ export class UssdService {
 				{ ...state, recordedAt },
 				SESSION_TTL,
 			);
-			return this.saveReading(cacheKey, sessionId, phoneNumber);
+			return this.saveReading(cacheKey, sessionId, phoneNumber, requestInfo);
 		}
 
 		return 'END An error occurred. Please dial again.';
@@ -134,7 +156,9 @@ export class UssdService {
 		cacheKey: string,
 		sessionId: string,
 		phoneNumber: string,
+		requestInfo: UssdRequestInfo,
 	): Promise<string> {
+		let patient: { patientId: string; userId: string } | null = null;
 		try {
 			const state = await this.cacheService.get(cacheKey);
 
@@ -142,13 +166,14 @@ export class UssdService {
 				return 'END Session data incomplete. Please dial again.';
 			}
 
-			const patient = await this.resolvePatient(state, sessionId, phoneNumber);
+			patient = await this.resolvePatient(state, sessionId, phoneNumber);
 
 			if (!patient) {
+				this.audit(requestInfo, AuditAction.ACCESS_DENIED, null);
 				return 'END Your phone number is not linked to a Yelima account. Please register via the app.';
 			}
 
-			await this.vitalHistoriesService.loadVitalHistory(
+			const vitalHistoryId = await this.vitalHistoriesService.loadVitalHistory(
 				{
 					vitalType: state.vitalType,
 					value: state.value,
@@ -158,13 +183,60 @@ export class UssdService {
 				patient.userId,
 			);
 
-			await this.cacheService.delete(cacheKey);
-
-			return 'END Reading logged successfully.\nStay healthy!';
+			this.audit(requestInfo, AuditAction.CREATE, patient, vitalHistoryId);
 		} catch (error) {
 			this.logger.error('USSD save reading failed', error);
+			if (patient) this.audit(requestInfo, AuditAction.CREATE, patient);
 			return 'END Could not save your reading. Please try again later.';
 		}
+
+		// The reading is saved; a cache failure here must not tell the patient
+		// otherwise (they would enter it again). The session expires anyway.
+		try {
+			await this.cacheService.delete(cacheKey);
+		} catch (error) {
+			this.logger.warn(`USSD session cleanup failed: ${String(error)}`);
+		}
+		return 'END Reading logged successfully.\nStay healthy!';
+	}
+
+	/**
+	 * The callback carries no token, so the global audit interceptor skips
+	 * it; the save is recorded here instead. Menu steps aren't audited, only
+	 * the write (or its refusal for an unknown number). The phone number is
+	 * never written: the patient is named by id. Without a vital id the save
+	 * failed. USSD replies are always HTTP 200, so `statusCode` is 200 even
+	 * on ACCESS_DENIED; the outcome carries the result.
+	 */
+	private audit(
+		requestInfo: UssdRequestInfo,
+		action: AuditAction.CREATE | AuditAction.ACCESS_DENIED,
+		patient: { patientId: string; userId: string } | null,
+		vitalHistoryId?: unknown,
+	) {
+		const saved = action === AuditAction.CREATE && vitalHistoryId != null;
+		const entry = buildAuditEntry({
+			request: { ...requestInfo, method: 'POST' },
+			route: USSD_AUDIT_ROUTE,
+			action,
+			actor: patient
+				? {
+						kind: AuditActorKind.PATIENT,
+						userType: USSD_USER_TYPE,
+						userId: patient.userId,
+						patientId: patient.patientId,
+					}
+				: { kind: AuditActorKind.ANONYMOUS, userType: USSD_USER_TYPE },
+			// USSD replies are always HTTP 200; the outcome says what happened.
+			statusCode: 200,
+			outcome: saved ? AuditOutcome.SUCCESS : AuditOutcome.FAILURE,
+		});
+		this.auditService.record({
+			...entry,
+			resourceType: 'vital-histories',
+			resourceId: saved ? cleanId(vitalHistoryId) : undefined,
+			patientId: patient?.patientId,
+		});
 	}
 
 	private async resolvePatient(

@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { TestBed } from '@suites/unit';
 import { Types } from 'mongoose';
@@ -78,6 +79,84 @@ describe('PatientDataExportService', () => {
 			ClientAIChat: model([{ message: 'hello' }]),
 		};
 		(service as any).connection = { models };
+		checkpointer = { getTuple: vi.fn().mockResolvedValue(undefined) };
+		(service as any).checkpointer = checkpointer;
+	});
+
+	let checkpointer: { getTuple: ReturnType<typeof vi.fn> };
+
+	describe('conversation history (LangGraph checkpoints)', () => {
+		it("leaves out the AI's tool turns", async () => {
+			checkpointer.getTuple.mockResolvedValue({
+				checkpoint: {
+					ts: '2026-11-01T08:00:00.000Z',
+					channel_values: {
+						messages: [
+							new HumanMessage({ id: 'h1', content: 'My sugar is high' }),
+							new AIMessage({
+								id: 'a1',
+								content: '',
+								tool_calls: [{ id: 'c1', name: 'getVitals', args: {} }],
+							}),
+							new ToolMessage({
+								id: 't1',
+								content: '{"vitals":[]}',
+								tool_call_id: 'c1',
+							}),
+							new AIMessage({ id: 'a2', content: 'Please see your clinician' }),
+						],
+					},
+				},
+			});
+
+			const result = await service.exportByUserId('uid-1');
+
+			expect(
+				result.conversationHistory.messages.map((m: { id?: string }) => m.id),
+			).toEqual(['h1', 'a2']);
+		});
+
+		it("reads the latest checkpoint on the patient's thread", async () => {
+			const result = await service.exportByUserId('uid-1');
+
+			expect(checkpointer.getTuple).toHaveBeenCalledWith({
+				configurable: { thread_id: 'uid-1' },
+			});
+			expect(result.conversationHistory).toEqual({
+				updatedAt: null,
+				profile: null,
+				messages: [],
+			});
+		});
+
+		it('decodes reminders, chat turns and the profile copy', async () => {
+			checkpointer.getTuple.mockResolvedValue({
+				checkpoint: {
+					ts: '2026-11-01T08:00:00.000Z',
+					channel_values: {
+						user: { name: 'Ama Mensah', phoneNumber: '+233201234567' },
+						messages: [
+							new AIMessage({
+								id: 'm1',
+								content: 'Time for your Metformin',
+							}),
+							new HumanMessage({ id: 'm2', content: 'Taken' }),
+						],
+					},
+				},
+			});
+
+			const result = await service.exportByUserId('uid-1');
+
+			expect(result.conversationHistory).toEqual({
+				updatedAt: '2026-11-01T08:00:00.000Z',
+				profile: { name: 'Ama Mensah', phoneNumber: '+233201234567' },
+				messages: [
+					{ id: 'm1', role: 'ai', content: 'Time for your Metformin' },
+					{ id: 'm2', role: 'human', content: 'Taken' },
+				],
+			});
+		});
 	});
 
 	it('returns the profile and every collection, keyed by the patient', async () => {
@@ -170,6 +249,18 @@ describe('PatientDataExportService', () => {
 			expect(models.ClientAIChat.find).not.toHaveBeenCalled();
 			expect(models.UserToken.find).not.toHaveBeenCalled();
 			expect(result).toHaveProperty('medications');
+		});
+
+		it("includes the patient's reminder history", async () => {
+			const result = await service.exportByPatientId(
+				patientId.toString(),
+				facilityId,
+			);
+
+			expect(checkpointer.getTuple).toHaveBeenCalledWith({
+				configurable: { thread_id: 'hcp-0193' },
+			});
+			expect(result).toHaveProperty('conversationHistory');
 		});
 
 		it("keeps only appointment requests made to the caller's facility", async () => {
