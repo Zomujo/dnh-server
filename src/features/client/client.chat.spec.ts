@@ -12,6 +12,8 @@ describe('ClientService.chat resend by localChatId', () => {
 	const localChatId = '0b7f6c1e-3f0e-4a8e-9a55-0f6a7c1d2e3f';
 
 	beforeEach(async () => {
+		// A new reply goes to the AI, which needs a key to count as configured.
+		vi.stubEnv('GOOGLE_API_KEY', 'test-key');
 		const { unit } = await TestBed.solitary(ClientService).compile();
 		service = unit;
 		deps = service as any;
@@ -25,6 +27,10 @@ describe('ClientService.chat resend by localChatId', () => {
 		deps.clientAiService.bulkCompletion = vi
 			.fn()
 			.mockResolvedValue({ outResponse: { _id: 'new' }, inResponse: {} });
+	});
+
+	afterEach(() => {
+		vi.unstubAllEnvs();
 	});
 
 	it('returns the original pair without calling the AI again', async () => {

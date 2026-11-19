@@ -32,6 +32,10 @@ AppModule
 └── FeaturesModule – 16 domain feature modules (client, doctors, patients, chronic-conditions, medications, adherences, vital-histories, concerns, notifications, pharmacies, dh-vectors, facilities, appointments, hcp, chat, ussd)
 ```
 
+### Retired features (keep the code, need no config)
+
+The AI layer (Gemini, Whisper, Qdrant via `dh-vectors`) and the Socket.IO `chat` gateway are retired. The server must boot with no AI env vars and no Qdrant: build AI clients lazily and gate them with `src/common/utils/ai-features.ts` (`isAiConfigured()`, `createGeminiChatModel()`, which throws a 503). AI side effects in core flows must skip or fall back, never throw.
+
 ### CoreModule breakdown
 
 | Sub-module | Purpose |

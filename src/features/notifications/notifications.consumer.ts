@@ -1,13 +1,16 @@
 import { AIMessage } from '@langchain/core/messages';
 import { PromptTemplate } from '@langchain/core/prompts';
-import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
-// import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import type { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Job, Queue } from 'bullmq';
 import { addMilliseconds, addMinutes, subMinutes } from 'date-fns';
 import { Model, Types } from 'mongoose';
+import {
+	createGeminiChatModel,
+	isAiConfigured,
+} from '@/common/utils/ai-features';
 import { TargetType } from '@/features/adherences/dto/target-type.enum';
 import { AUGURY_PROMPT } from '@/features/client/ai/agents/augury/state';
 import { ExtClientAIService } from '@/features/client/ai/ai-ext.service';
@@ -20,7 +23,12 @@ import { PushService } from './push/push.service';
 @Processor(AugurNotification.name)
 export class NotificationsConsumer extends WorkerHost {
 	private logger = new Logger(NotificationsConsumer.name);
-	private llm: ChatGoogleGenerativeAI;
+	// Built on first AI-written reminder: the (retired) AI may be off.
+	private llmInstance?: ChatGoogleGenerativeAI;
+	private get llm() {
+		this.llmInstance ??= createGeminiChatModel({ temperature: 0.7 });
+		return this.llmInstance;
+	}
 
 	constructor(
 		@InjectModel(AugurNotification.name)
@@ -31,10 +39,6 @@ export class NotificationsConsumer extends WorkerHost {
 		private readonly notificationQueue: Queue,
 	) {
 		super();
-		this.llm = new ChatGoogleGenerativeAI({
-			model: process.env.GOOGLE_AI_VERSION ?? 'gemini-2.5-flash',
-			temperature: 0.7,
-		});
 	}
 
 	async process(job: Job<any, any, string>) {
@@ -91,25 +95,13 @@ export class NotificationsConsumer extends WorkerHost {
 		if (!notification) {
 			throw new NotFoundException('Notification not found');
 		}
-		const promptTemplate = PromptTemplate.fromTemplate(AUGURY_PROMPT);
-
 		const goals = data.groupedNotifications.map((not) => not.goal);
 		this.logger.log('goals', { goals });
 
-		const prompt = await promptTemplate.invoke({
-			notificationType: notification.notificationType,
-			patientName: notification.patient.name,
-			patientLanguage: notification.patient.language ?? 'English',
-			patientTimezone: getUserTimezone(
-				notification.patient.timezone ?? 'Africa/Accra',
-			),
-			tone: notification.tone,
-			channel: notification.channel,
-			characterLimit: notification.characterLimit,
-			goals: goals,
-			priority: notification.priority,
-			constraints: notification.constraints,
-		});
+		const text = await this.composeReminder(
+			notification,
+			data.groupedNotifications,
+		);
 
 		const user = {
 			patientId: notification.patient.id,
@@ -122,12 +114,10 @@ export class NotificationsConsumer extends WorkerHost {
 			configurable: { thread_id: notification.patient.userId },
 		} as IConfig;
 
-		const output = await this.llm.invoke(prompt);
-
 		const messageId = new Types.ObjectId();
 		const aiMessage = new AIMessage({
 			id: messageId.toString(),
-			content: output.content.toString(),
+			content: text,
 			additional_kwargs: {
 				timestamp: new Date(),
 				userId: notification.patient.userId,
@@ -172,7 +162,7 @@ export class NotificationsConsumer extends WorkerHost {
 		await this.pushService.sendAugurNotification({
 			userId: notification.patient.userId,
 			title: 'Yelima AI',
-			body: output.content.toString(),
+			body: text,
 			payload: {
 				notification_type: onlyMedications
 					? PushNotificationType.MEDICATION
@@ -201,8 +191,53 @@ export class NotificationsConsumer extends WorkerHost {
 		// 		updatedAt: addSeconds(timestamp, 1),
 		// 	},
 		// ]);
-		this.logger.log('Ai Output: ' + output.content.toString());
+		this.logger.log('Ai Output: ' + text);
 		return;
+	}
+
+	/**
+	 * The reminder text: AI-written in the patient's language and tone when
+	 * the (retired) AI is configured, else (or if the AI call fails) a plain
+	 * template, so reminders still go out.
+	 */
+	private async composeReminder(
+		notification: AugurNotification,
+		groupedNotifications: { goal: string; targetName: string }[],
+	): Promise<string> {
+		if (!isAiConfigured()) {
+			return fallbackReminderText(
+				notification.patient.name,
+				groupedNotifications,
+			);
+		}
+		try {
+			const promptTemplate = PromptTemplate.fromTemplate(AUGURY_PROMPT);
+			const prompt = await promptTemplate.invoke({
+				notificationType: notification.notificationType,
+				patientName: notification.patient.name,
+				patientLanguage: notification.patient.language ?? 'English',
+				patientTimezone: getUserTimezone(
+					notification.patient.timezone ?? 'Africa/Accra',
+				),
+				tone: notification.tone,
+				channel: notification.channel,
+				characterLimit: notification.characterLimit,
+				goals: groupedNotifications.map((not) => not.goal),
+				priority: notification.priority,
+				constraints: notification.constraints,
+			});
+			const output = await this.llm.invoke(prompt);
+			const text = output.content.toString().trim();
+			if (text) return text;
+		} catch (error) {
+			this.logger.warn(
+				`AI reminder text failed, sending the plain one: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+		return fallbackReminderText(
+			notification.patient.name,
+			groupedNotifications,
+		);
 	}
 
 	async updateNotification(data: {
@@ -281,4 +316,27 @@ export class NotificationsConsumer extends WorkerHost {
 				throw new Error(`Unsupported repetition type: ${repetitionType}`);
 		}
 	}
+}
+
+/**
+ * A plain reminder for when the AI can't write one, e.g.
+ * "Hi Ama, a reminder: Take Metformin; Take Lisinopril."
+ */
+export function fallbackReminderText(
+	patientName: string | undefined,
+	groupedNotifications: { goal?: string; targetName?: string }[],
+): string {
+	const firstName = patientName?.trim().split(/\s+/)[0];
+	const items = [
+		...new Set(
+			groupedNotifications
+				.map((not) => (not.goal || not.targetName || '').trim())
+				.filter(Boolean),
+		),
+	];
+	const greeting = firstName ? `Hi ${firstName}, ` : '';
+	if (!items.length) {
+		return `${greeting}${greeting ? 'you' : 'You'} have a health reminder from Yelima.`;
+	}
+	return `${greeting}${greeting ? 'a' : 'A'} reminder: ${items.join('; ')}.`;
 }

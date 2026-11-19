@@ -2,6 +2,7 @@ import {
 	Body,
 	Controller,
 	Get,
+	HttpException,
 	HttpStatus,
 	Logger,
 	Param,
@@ -208,6 +209,12 @@ export class PatientsController {
 				}),
 			);
 		} catch (error) {
+			// Raised before the stream opens (e.g. 503 when the AI is off):
+			// answered as a plain HTTP error, not a 200 stream.
+			if (error instanceof HttpException) {
+				this.logger.warn(`Summary not generated: ${error.message}`);
+				throw error;
+			}
 			const stack = error instanceof Error ? error.stack : String(error);
 			const name = error instanceof Error ? error.name : String(error);
 			const message = error instanceof Error ? error.message : String(error);

@@ -2,6 +2,7 @@ import {
 	BadRequestException,
 	Injectable,
 	NotFoundException,
+	ServiceUnavailableException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
@@ -10,6 +11,11 @@ import { toHeaderCase } from 'js-convert-case';
 import { Collection, Connection, isValidObjectId, Types } from 'mongoose';
 import { v7 as uuidv7 } from 'uuid';
 import { generateFilter } from '@/common/factory';
+import {
+	AI_UNAVAILABLE_MESSAGE,
+	assertAiConfigured,
+	isTranscriptionConfigured,
+} from '@/common/utils/ai-features';
 import { escapeRegExp } from '@/common/utils/helpers';
 import { CacheService } from '@/core/caching/caching.service';
 import { FirebaseService } from '@/core/firebase/firebase.service';
@@ -154,6 +160,9 @@ export class ClientService {
 			}
 		}
 
+		// Everything above answers from stored chats; a new reply needs the AI.
+		assertAiConfigured();
+
 		const patient = await this.retrievePatient(userId, language);
 
 		const cCond = await this.retrieveChronicConditions(userId);
@@ -216,6 +225,12 @@ export class ClientService {
 				audioIdPresent._id.toString(),
 				userId,
 			);
+		}
+
+		// A voice note needs Whisper to transcribe it and Gemini to answer.
+		assertAiConfigured();
+		if (!isTranscriptionConfigured()) {
+			throw new ServiceUnavailableException(AI_UNAVAILABLE_MESSAGE);
 		}
 
 		const prevMessage =

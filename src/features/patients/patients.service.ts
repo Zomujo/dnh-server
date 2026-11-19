@@ -1,6 +1,5 @@
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { PromptTemplate } from '@langchain/core/prompts';
-import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { differenceInYears } from 'date-fns';
@@ -19,6 +18,10 @@ import {
 import { v7 as uuidv7 } from 'uuid';
 import { flattenMeta } from '@/common/entities';
 import { generateFilter } from '@/common/factory';
+import {
+	assertAiConfigured,
+	createGeminiChatModel,
+} from '@/common/utils/ai-features';
 import { generateCode } from '@/common/utils/helpers';
 import { CacheService } from '@/core/caching/caching.service';
 import { VitalHistory } from '@/features/vital-histories/entities/vital-history.entity';
@@ -37,7 +40,16 @@ import { SUMMARY_PROMPT } from './utils/summary.prompt';
 
 @Injectable()
 export class PatientsService {
-	private llm: ChatGoogleGenerativeAI;
+	// Built on first summary: the (retired) AI may not be configured.
+	private get llm() {
+		this.llmInstance ??= createGeminiChatModel({
+			model: 'gemini-2.5-flash',
+			temperature: 0.7,
+			streaming: true,
+		});
+		return this.llmInstance;
+	}
+	private llmInstance?: ReturnType<typeof createGeminiChatModel>;
 
 	findPatientById(id: string, projection?: string) {
 		const objectId = new Types.ObjectId(id);
@@ -163,13 +175,7 @@ export class PatientsService {
 		private vitalHistoryModel: Model<VitalHistory>,
 		private readonly chronicConditionsService: ChronicConditionsService,
 		private readonly summaryCacheService: CacheService<string>,
-	) {
-		this.llm = new ChatGoogleGenerativeAI({
-			model: 'gemini-2.5-flash',
-			temperature: 0.7,
-			streaming: true,
-		});
-	}
+	) {}
 
 	private async generateUniquePatientCode(): Promise<string> {
 		const MAX_ATTEMPTS = 5;
@@ -576,6 +582,9 @@ export class PatientsService {
 				new MessageEvent('message', { data: '\n' }),
 			);
 		}
+
+		// The written summary is AI prose: 503 when the AI is off.
+		assertAiConfigured();
 
 		let fullSummary = '';
 		return defer(async () => {
