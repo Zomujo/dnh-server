@@ -1,6 +1,7 @@
 import {
 	BadRequestException,
 	ConflictException,
+	ForbiddenException,
 	Injectable,
 	NotFoundException,
 	UnauthorizedException,
@@ -31,6 +32,13 @@ import {
 // instead of VERIFIED, so they stay findable and can be pushed through real
 // verification later just by adding PersonnelRoles.PHARMACY here.
 const OTP_REQUIRED_ROLES: PersonnelRoles[] = [PersonnelRoles.CLINICIAN];
+
+// Whether a personnel has been through onboarding, after which their profile
+// only changes with their own token. Profiles onboarded before onboardedAt
+// existed are recognised by the name onboarding set.
+function isOnboarded(personnel: { onboardedAt?: Date; userName?: string }) {
+	return !!personnel.onboardedAt || !!personnel.userName?.trim();
+}
 
 // Appointments in these states still need a host. Only the host can modify an
 // appointment, so deleting the host would strand them — deletion is refused
@@ -118,7 +126,16 @@ export class ChronicCareAuthService {
 		return personnelId;
 	}
 
-	async onboard(dto: CreatePersonnelDto) {
+	/**
+	 * Sets the personnel's profile, role and facility.
+	 *
+	 * The route is public because a new email account onboards before it can
+	 * log in (onboarding sends the OTP). So only the first onboarding may come
+	 * without a token; once a profile is onboarded, changing it needs that
+	 * personnel's own token (`actorPersonnelId`). Without this, anyone who knew
+	 * a personnel id could rewrite their role, name and facility.
+	 */
+	async onboard(dto: CreatePersonnelDto, actorPersonnelId?: string) {
 		// findByIdAndUpdate/exists/countDocuments all silently collapse an
 		// undefined/malformed _id filter to {} and match an arbitrary document —
 		// verified against this project's mongoose version. Guard before any query.
@@ -126,11 +143,25 @@ export class ChronicCareAuthService {
 			throw new NotFoundException('Personnel not found');
 		}
 
-		const personnelExists = await this.personnelModel.exists({
-			_id: dto.personnelId,
-		});
-		if (!personnelExists) {
+		if (
+			actorPersonnelId !== undefined &&
+			actorPersonnelId !== dto.personnelId
+		) {
+			throw new ForbiddenException('You can only onboard your own account');
+		}
+
+		const existing = await this.personnelModel
+			.findById(dto.personnelId)
+			.select('onboardedAt userName')
+			.lean();
+		if (!existing) {
 			throw new NotFoundException('Personnel not found');
+		}
+
+		if (actorPersonnelId === undefined && isOnboarded(existing)) {
+			throw new UnauthorizedException(
+				'This profile is already onboarded; sign in to change it',
+			);
 		}
 
 		if (dto.facility) {
@@ -148,6 +179,7 @@ export class ChronicCareAuthService {
 						personnelIdNumber: dto.personnelIdNumber,
 						facility: dto.facility,
 						...(dto.role !== undefined && { role: dto.role }),
+						onboardedAt: existing.onboardedAt ?? new Date(),
 					},
 				},
 				{ new: true },
@@ -243,6 +275,17 @@ export class ChronicCareAuthService {
 				throw new NotFoundException('Personnel not found');
 			}
 			throw new UnauthorizedException('This account has been deleted');
+		}
+
+		// EXEMPT only waives the OTP for roles that don't need one. A role that
+		// does (e.g. an EXEMPT pharmacy account re-onboarded as clinician) must
+		// prove the email first, or onboarding could skip verification.
+		if (
+			OTP_REQUIRED_ROLES.includes(personnel.role as PersonnelRoles) &&
+			personnelAccount.verificationStatus !==
+				PersonnelAccountVerificationStatus.VERIFIED
+		) {
+			throw new UnauthorizedException('Personnel not verified');
 		}
 
 		const token = await this.authService.signToken(
