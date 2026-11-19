@@ -11,7 +11,7 @@ import {
 	Put,
 	Query,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { CustomApiResponse, GetUser, Roles } from '@/common/decorators';
 import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import {
@@ -288,18 +288,30 @@ export class HcpController {
 		}
 	}
 
-	// Right of access for a patient without the app (USSD or registered at a
-	// facility): the clinician hands them this export. Clinicians can already
-	// read every part of it, so it widens no access.
+	// Right of access for a patient without the app (registered at a facility
+	// or pharmacy, or USSD only), who has no other way to get their data: the
+	// clinician hands them this export. 403 for a patient with an app account,
+	// who exports their own data (GET /client/data-export). Clinician profile:
+	// no AI chat or device rows, and only appointment requests made to the
+	// caller's facility.
 	@CustomApiResponse(['success', 'notfound', 'authorizeChronicCare'], {
 		message: 'Patient data exported successfully',
 	})
+	@ApiForbiddenResponse({
+		description:
+			'The patient has an app account and exports their own data from the app',
+	})
 	@Roles(PersonnelRoles.CLINICIAN)
 	@Get('patients/:id/data-export')
-	async exportPatientData(@Param('id', ParseMongoIdPipe) id: string) {
+	async exportPatientData(
+		@Param('id', ParseMongoIdPipe) id: string,
+		@GetUser('facility') facilityId: string,
+	) {
 		try {
-			const response =
-				await this.patientDataExportService.exportByPatientId(id);
+			const response = await this.patientDataExportService.exportByPatientId(
+				id,
+				facilityId,
+			);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,

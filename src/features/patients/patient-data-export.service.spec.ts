@@ -1,10 +1,35 @@
-import { NotFoundException } from '@nestjs/common';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { TestBed } from '@suites/unit';
 import { Types } from 'mongoose';
 import {
+	EXPORT_MODEL_NAMES,
 	PATIENT_EXPORT_FORMAT,
 	PatientDataExportService,
 } from './patient-data-export.service';
+
+/**
+ * Model names registered through MongooseModule.forFeature anywhere in src.
+ * Every registration uses `name: Entity.name`, and an entity's model name is
+ * its class name, so the identifier is the model name.
+ */
+function registeredModelNames() {
+	const src = join(__dirname, '..', '..');
+	const names = new Set<string>();
+	const files = readdirSync(src, { recursive: true, encoding: 'utf8' }).filter(
+		(file) => file.endsWith('.module.ts'),
+	);
+	for (const file of files) {
+		const text = readFileSync(join(src, file), 'utf8');
+		for (const block of text.matchAll(/forFeature\(\[([\s\S]*?)\]\)/g)) {
+			for (const [, name] of block[1].matchAll(/name:\s*(\w+)\.name/g)) {
+				names.add(name);
+			}
+		}
+	}
+	return names;
+}
 
 // GET /client/data-export and GET /hcp/patients/:id/data-export.
 describe('PatientDataExportService', () => {
@@ -12,6 +37,13 @@ describe('PatientDataExportService', () => {
 	let models: Record<string, any>;
 	const patientId = new Types.ObjectId();
 	const patient = { _id: patientId, userId: 'uid-1', name: 'Ama Mensah' };
+	// Registered by a clinician or pharmacy: no app account.
+	const staffPatient = {
+		_id: patientId,
+		userId: 'hcp-0193',
+		name: 'Kofi Boateng',
+	};
+	const facilityId = new Types.ObjectId().toString();
 
 	/** A model whose find()/findOne() chain resolves to `rows`. */
 	const model = (rows: unknown) => {
@@ -43,6 +75,7 @@ describe('PatientDataExportService', () => {
 			AugurNotification: model([]),
 			Summary: model([]),
 			UserToken: model([{ userType: 'dh-clients' }]),
+			ClientAIChat: model([{ message: 'hello' }]),
 		};
 		(service as any).connection = { models };
 	});
@@ -85,15 +118,86 @@ describe('PatientDataExportService', () => {
 	});
 
 	it('skips a collection whose module is not loaded', async () => {
+		delete models.ClientAIChat;
+
 		const result = await service.exportByUserId('uid-1');
 
 		expect(result).not.toHaveProperty('aiChatMessages');
 	});
 
-	it('looks a patient up by id for a clinician', async () => {
-		await service.exportByPatientId(patientId.toString());
+	it('gives the patient their AI chat and devices (subject profile)', async () => {
+		const result = await service.exportByUserId('uid-1');
 
-		expect(models.Patient.findOne).toHaveBeenCalledWith({ _id: patientId });
+		expect(result).toMatchObject({
+			profile: 'subject',
+			aiChatMessages: [{ message: 'hello' }],
+			devices: [{ userType: 'dh-clients' }],
+		});
+		expect(models.AppointmentRequest.find).toHaveBeenCalledWith({
+			patient: { $in: [patientId.toString(), patientId] },
+		});
+	});
+
+	describe('clinician export (exportByPatientId)', () => {
+		beforeEach(() => {
+			models.Patient = model(staffPatient);
+		});
+
+		it('looks the patient up by id', async () => {
+			await service.exportByPatientId(patientId.toString(), facilityId);
+
+			expect(models.Patient.findOne).toHaveBeenCalledWith({ _id: patientId });
+		});
+
+		it('is a 403 for a patient with an app account', async () => {
+			models.Patient = model(patient);
+
+			await expect(
+				service.exportByPatientId(patientId.toString(), facilityId),
+			).rejects.toBeInstanceOf(ForbiddenException);
+			expect(models.Medication.find).not.toHaveBeenCalled();
+		});
+
+		it('leaves out AI chat messages and devices', async () => {
+			const result = await service.exportByPatientId(
+				patientId.toString(),
+				facilityId,
+			);
+
+			expect(result.profile).toBe('clinician');
+			expect(result).not.toHaveProperty('aiChatMessages');
+			expect(result).not.toHaveProperty('devices');
+			expect(models.ClientAIChat.find).not.toHaveBeenCalled();
+			expect(models.UserToken.find).not.toHaveBeenCalled();
+			expect(result).toHaveProperty('medications');
+		});
+
+		it("keeps only appointment requests made to the caller's facility", async () => {
+			await service.exportByPatientId(patientId.toString(), facilityId);
+
+			expect(models.AppointmentRequest.find).toHaveBeenCalledWith({
+				patient: { $in: [patientId.toString(), patientId] },
+				host: { $in: [facilityId, new Types.ObjectId(facilityId)] },
+			});
+		});
+
+		it('returns no appointment requests when the caller has no facility', async () => {
+			await service.exportByPatientId(patientId.toString());
+
+			expect(models.AppointmentRequest.find).toHaveBeenCalledWith({
+				patient: { $in: [patientId.toString(), patientId] },
+				host: { $in: [] },
+			});
+		});
+	});
+
+	it('reads only models registered with Mongoose', () => {
+		const registered = registeredModelNames();
+
+		expect(registered.size).toBeGreaterThan(0);
+		for (const name of EXPORT_MODEL_NAMES) {
+			expect(registered, `model ${name} is not registered`).toContain(name);
+		}
 	});
 
 	it('is a 404 for an unknown patient or a malformed id', async () => {

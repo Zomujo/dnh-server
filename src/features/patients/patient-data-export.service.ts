@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+	ForbiddenException,
+	Injectable,
+	NotFoundException,
+} from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import { anyIdForm } from '@/common/utils/helpers';
@@ -6,12 +10,31 @@ import { anyIdForm } from '@/common/utils/helpers';
 /** Version of the export layout, so a consumer can tell formats apart. */
 export const PATIENT_EXPORT_FORMAT = 'yelima-patient-export/1';
 
+/** Prefix of the userId given to a patient registered by staff, not the app. */
+export const STAFF_REGISTERED_USER_ID_PREFIX = 'hcp-';
+
+/**
+ * Who the export is for. `subject`: the patient themselves (everything).
+ * `clinician`: a clinician handing a patient without the app their data;
+ * limited to what the clinician's role already shows them.
+ */
+export type ExportProfile = 'subject' | 'clinician';
+
+type ExportContext = {
+	userId: string;
+	patientId: string;
+	/** The calling clinician's facility (clinician profile only). */
+	facilityId?: string;
+};
+
 type Section = {
 	/** Mongoose model name, as registered with MongooseModule.forFeature. */
 	model: string;
-	filter: (ids: { userId: string; patientId: string }) => object;
+	filter: (ctx: ExportContext) => object;
 	/** Fields left out: internal secrets, not personal data about the patient. */
 	exclude?: string;
+	/** Filter for the clinician profile; `false` leaves the section out. */
+	clinician?: false | ((ctx: ExportContext) => object);
 };
 
 /**
@@ -45,6 +68,11 @@ const SECTIONS: Record<string, Section> = {
 	appointmentRequests: {
 		model: 'AppointmentRequest',
 		filter: ({ patientId }) => ({ patient: anyIdForm(patientId) }),
+		// A clinician sees only the requests made to their own facility.
+		clinician: ({ patientId, facilityId }) => ({
+			patient: anyIdForm(patientId),
+			host: facilityId ? anyIdForm(facilityId) : { $in: [] },
+		}),
 	},
 	reminders: {
 		model: 'AugurNotification',
@@ -60,52 +88,94 @@ const SECTIONS: Record<string, Section> = {
 		model: 'UserToken',
 		filter: ({ userId }) => ({ userId }),
 		exclude: '-fcmToken',
+		clinician: false,
 	},
 	// Only present while the (retired) AI assistant module is loaded.
 	aiChatMessages: {
 		model: 'ClientAIChat',
 		filter: ({ userId }) => ({ userId }),
+		clinician: false,
 	},
 };
 
+/** Model names the export reads, for the registration check in the spec. */
+export const EXPORT_MODEL_NAMES = [
+	'Patient',
+	...Object.values(SECTIONS).map((section) => section.model),
+];
+
 /**
- * Right of access / portability: one JSON document with everything stored
+ * Right of access / portability: one JSON document with what is stored
  * about a patient in MongoDB. Reads through the connection's registered
  * models so it sees each collection without depending on every feature
  * module; a model that isn't registered (a retired module) is skipped.
+ *
+ * Not exported: the retired clinician-patient chat (rooms and messages),
+ * the AI assistant's LangGraph conversation checkpoints, the Firestore
+ * profile mirror and the Firebase Auth record. See docs/data-protection.md.
  */
 @Injectable()
 export class PatientDataExportService {
 	constructor(@InjectConnection() private readonly connection: Connection) {}
 
+	/** The patient's own export (GET /client/data-export). */
 	async exportByUserId(userId: string) {
-		return this.export({ userId });
+		const patient = await this.findPatient({ userId });
+		return this.export(patient, 'subject');
 	}
 
-	async exportByPatientId(patientId: string) {
+	/**
+	 * A clinician's export for a patient without an app account (registered
+	 * at a facility or a pharmacy, or USSD only), who has no other way to
+	 * get their data. An app user exports their own data, so this is a 403
+	 * for them: it would otherwise hand any clinician a bulk copy of any
+	 * patient's record. Uses the clinician profile.
+	 */
+	async exportByPatientId(patientId: string, facilityId?: string) {
 		if (!Types.ObjectId.isValid(patientId)) {
 			throw new NotFoundException('Patient not found');
 		}
-		return this.export({ _id: new Types.ObjectId(patientId) });
+		const patient = await this.findPatient({
+			_id: new Types.ObjectId(patientId),
+		});
+		if (!String(patient.userId).startsWith(STAFF_REGISTERED_USER_ID_PREFIX)) {
+			throw new ForbiddenException(
+				'This patient has an app account and can export their own data from the app',
+			);
+		}
+		return this.export(patient, 'clinician', facilityId);
 	}
 
-	private async export(filter: object) {
+	private async findPatient(filter: object) {
 		const patient = await this.model('Patient')
 			?.findOne(filter)
 			.select('-__v -qdrantId')
 			.lean<Record<string, any>>();
 		if (!patient) throw new NotFoundException('Patient not found');
+		return patient;
+	}
 
-		const ids = {
+	private async export(
+		patient: Record<string, any>,
+		profile: ExportProfile,
+		facilityId?: string,
+	) {
+		const ctx: ExportContext = {
 			userId: String(patient.userId),
 			patientId: String(patient._id),
+			facilityId,
 		};
 		const data: Record<string, unknown[]> = {};
 		for (const [key, section] of Object.entries(SECTIONS)) {
+			const filter =
+				profile === 'clinician' && section.clinician !== undefined
+					? section.clinician
+					: section.filter;
+			if (!filter) continue;
 			const model = this.model(section.model);
 			if (!model) continue;
 			data[key] = await model
-				.find(section.filter(ids))
+				.find(filter(ctx))
 				.select(['-__v', section.exclude].filter(Boolean).join(' '))
 				.sort({ createdAt: 1 })
 				.lean();
@@ -113,6 +183,7 @@ export class PatientDataExportService {
 
 		return {
 			format: PATIENT_EXPORT_FORMAT,
+			profile,
 			exportedAt: new Date().toISOString(),
 			patient,
 			...data,
