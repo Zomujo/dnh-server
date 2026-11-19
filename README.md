@@ -2,7 +2,9 @@
 
 Backend API for the **GIZ-AYA Diabetes and Hypertension (DNH) Application** — a healthcare platform serving patients with chronic conditions (diabetes, hypertension) and the clinical personnel who manage them.
 
-Built with **NestJS 12**, **MongoDB/Mongoose**, **Firebase**, **Redis**, and a **LangGraph-powered AI layer** running on Google Gemini.
+Built with **NestJS 12**, **MongoDB/Mongoose**, **Firebase**, and **Redis**.
+
+> **Retired features.** The AI layer (LangGraph agents on Google Gemini, Whisper transcription, the Qdrant vector store) and the real-time patient–HCP chat (Socket.IO) are retired for now. Their code is kept so they can come back, but they need **no configuration**: the server boots and every core feature works without them. See [Retired features](#retired-features).
 
 ---
 
@@ -15,6 +17,7 @@ Built with **NestJS 12**, **MongoDB/Mongoose**, **Firebase**, **Redis**, and a *
   - [CommonModule](#commonmodule)
   - [CoreModule](#coremodule)
   - [FeaturesModule](#featuresmodule)
+- [Retired features](#retired-features)
 - [AI Agent System](#ai-agent-system)
 - [Auth Flow](#auth-flow)
 - [Response Shape](#response-shape)
@@ -38,9 +41,9 @@ Built with **NestJS 12**, **MongoDB/Mongoose**, **Firebase**, **Redis**, and a *
 | Auth | Firebase Admin SDK (token verification) + JWT (personnel) |
 | Caching | Redis via `@nestjs/cache-manager` + `@keyv/redis` |
 | Queues | BullMQ (backed by same Redis instance) |
-| AI / LLM | Google Gemini (`@langchain/google-genai`) via LangChain/LangGraph |
-| Vector DB | Qdrant (`@qdrant/js-client-rest`) |
-| AI Memory | LangGraph `MongoDBSaver` checkpointer |
+| AI / LLM (retired, optional) | Google Gemini (`@langchain/google-genai`) via LangChain/LangGraph |
+| Vector DB (retired, optional) | Qdrant (`@qdrant/js-client-rest`) |
+| AI Memory (retired, optional) | LangGraph `MongoDBSaver` checkpointer |
 | Push Notifications | Firebase Cloud Messaging (FCM) |
 | File Storage | Firebase Storage |
 | Observability | BetterStack (Logtail) via `@logtail/node` |
@@ -72,11 +75,11 @@ AppModule
     ├── ConcernsModule
     ├── NotificationsModule
     ├── PharmaciesModule
-    ├── DhVectorsModule    (Qdrant vector store management)
+    ├── DhVectorsModule    (Qdrant vector store management — retired, optional)
     ├── FacilitiesModule   (Facility CRUD)
     ├── AppointmentsModule (Appointments & appointment requests)
     ├── HcpModule          (Healthcare Provider aggregation workflows)
-    ├── ChatModule         (peer-to-peer chat)
+    ├── ChatModule         (peer-to-peer chat — retired, needs no setup)
     └── UssdModule         (USSD patient vitals reporting)
 ```
 
@@ -200,6 +203,8 @@ BullMQ-backed notification queue. The `NotificationsConsumer` processes queued F
 
 #### ChatModule
 
+> Retired: needs no setup. See [Retired features](#retired-features).
+
 Real-time peer-to-peer chat between patients and HCPs using Socket.IO. Includes:
 - Dual-auth WebSocket gateway (Firebase for patients, JWT for HCPs)
 - REST endpoints for session listing, message history, and media uploads
@@ -211,6 +216,8 @@ See [`docs/chat-backend.md`](docs/chat-backend.md) for the full technical refere
 
 #### DhVectorsModule
 
+> Retired, optional: with no Qdrant (or no `GOOGLE_API_KEY` for embeddings) configured, indexing is a no-op and searches return nothing. A configured but unreachable Qdrant is logged and retried; it never blocks startup.
+
 Manages the Qdrant vector collection `dh_vectors`. On module init (`OnModuleInit`) it ensures the collection and keyword indexes (`userId`, `patient`, `documentType`) exist. Uses `gemini-embedding-001` (3072-dimensional vectors) for embedding and Fuse.js for client-side fuzzy re-ranking of semantic search results.
 
 #### UssdModule
@@ -219,7 +226,27 @@ Provides Africa's Talking USSD integration endpoints for low-connectivity patien
 
 ---
 
+## Retired features
+
+### AI (Gemini, Whisper, Qdrant)
+
+None of the AI env vars are needed. Each AI client is built only when its key is set (`src/common/utils/ai-features.ts`):
+
+| Without… | Behaviour |
+|---|---|
+| `GOOGLE_API_KEY` | `POST /client/chat`, `POST /client/chat/audio` and the pharmacy patient summary SSE answer **503** "AI features are not enabled on this server". Medication/notification reminders are sent with a plain template ("Hi Ama, a reminder: Take Metformin.") instead of AI-written text. Adherence patterns are still computed, with empty notes. |
+| `OPENAI_API_KEY` | `POST /client/chat/audio` answers 503. |
+| `QDRANT_URL` (or `GOOGLE_API_KEY`) | The vector store is off: indexing is skipped and similarity lookups find nothing, so callers use their exact-match lookups. |
+
+To bring the AI back, set the variables in the "Optional — retired AI features" section of `.envrc.example`.
+
+### Real-time chat (Socket.IO)
+
+The chat gateway needs no setup. It runs on the same HTTP port as the API with Socket.IO's default in-memory adapter: no extra port, env var, Redis adapter or sticky sessions. A reverse proxy in front of the API does **not** need WebSocket upgrade support unless chat is re-enabled. (If it is, and the API runs on more than one instance, add sticky sessions or a Socket.IO Redis adapter, since presence is tracked in memory.)
+
 ## AI Agent System
+
+> Retired — see [Retired features](#retired-features).
 
 The AI layer lives in `src/features/client/ai/` and is built on **LangGraph** with **Google Gemini** (`gemini-2.5-flash` by default, overridable via `GOOGLE_AI_VERSION`).
 
@@ -324,10 +351,10 @@ Ensure the following are installed and running locally:
 | pnpm | 11.5.2 | Install: `npm i -g pnpm@11.5.2` |
 | MongoDB | ≥ 6 | Local or Atlas connection string |
 | Redis | ≥ 7 | Required for caching and BullMQ queues |
-| Qdrant | ≥ 1.10 | Run locally via Docker (see below); the search uses the Query API added in 1.10 |
+| Qdrant | ≥ 1.10 | **Not required** — only for the retired AI features. The search uses the Query API added in 1.10 |
 | direnv | any | Loads `.envrc` — install via Homebrew or your OS package manager |
 
-**Qdrant via Docker (quickstart):**
+**Qdrant via Docker (only if re-enabling the AI features):**
 ```bash
 docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant
 ```
@@ -365,15 +392,24 @@ After any change to `.envrc`, run `direnv allow` again to reload.
 | `FIREBASE_BASE_CLIENT_CERT_URL` | Yes | Firebase client certificate URL |
 | `BASE_STORAGE_BUCKET` | Yes | Firebase Storage bucket name |
 | `GOOGLE_CLIENT_ID` | Yes | Google OAuth client ID (for personnel Google login) |
-| `GOOGLE_API_KEY` | Yes | Google API key for Gemini LLM and embedding models |
-| `GOOGLE_AI_VERSION` | No | Gemini model version. Defaults to `gemini-2.5-flash` |
-| `QDRANT_URL` | Yes | Qdrant HTTP URL (e.g. `http://localhost:6333`) |
-| `QDRANT_API_KEY` | No | Qdrant API key (required for cloud instances) |
-| `QDRANT_HOST` | No | Qdrant host (used by some configs) |
 | `LOGTAIL_SOURCE_TOKEN` | Staging/Prod | BetterStack source token |
 | `LOGTAIL_HOST` | Staging/Prod | BetterStack ingestion endpoint |
 | `QUEUE_TLS` | No | Set to `true` to enable TLS for the Redis/BullMQ connection |
 | `NANOID_GEN` | No | Custom nanoid alphabet for code generation |
+
+### Optional — retired AI features
+
+Leave these unset unless you are bringing the AI back (see [Retired features](#retired-features)).
+
+| Variable | Description |
+|---|---|
+| `GOOGLE_API_KEY` | Google API key for Gemini chat and embedding models |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Google Generative AI key (kept alongside `GOOGLE_API_KEY`) |
+| `GOOGLE_AI_VERSION` | Gemini model version. Defaults to `gemini-2.5-flash` |
+| `OPENAI_API_KEY` | OpenAI key for Whisper voice-note transcription |
+| `QDRANT_URL` | Qdrant HTTP URL (e.g. `http://localhost:6333`). Also needs `GOOGLE_API_KEY` |
+| `QDRANT_API_KEY` | Qdrant API key (required for cloud instances) |
+| `QDRANT_HOST` | Qdrant host, for the legacy setup where `QDRANT_URL` holds only a port |
 
 > **Firebase `private_key` format**: Copy the key from your service account JSON exactly as-is, including `\n` sequences. Do **not** convert them to real newlines in `.envrc`. The service handles the conversion internally.
 
@@ -399,8 +435,7 @@ direnv allow
 #    Redis
 redis-server
 
-#    Qdrant
-docker run -d -p 6333:6333 qdrant/qdrant
+#    Qdrant is not needed (retired AI features only)
 
 # 5. Start the dev server
 pnpm start:dev
