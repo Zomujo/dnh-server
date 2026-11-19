@@ -493,6 +493,48 @@ describe('ChronicCareAuthService', () => {
 			);
 		});
 
+		it('counts case and space variants of an email as one', async () => {
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue(null),
+			} as any);
+
+			await expect(
+				service.login({ email: ' Doc@Example.COM ', password: 'x' }),
+			).rejects.toThrow(UnauthorizedException);
+			expect(attemptLimiter.consume).toHaveBeenCalledWith(
+				expect.anything(),
+				'doc@example.com',
+			);
+			expect(personnelAccountModel.findOne).toHaveBeenCalledWith({
+				provider: PersonnelProviders.EMAIL,
+				email: 'doc@example.com',
+			});
+		});
+
+		it('clears the count once the email is verified', async () => {
+			const account = {
+				email: 'doc@example.com',
+				verificationStatus: PersonnelAccountVerificationStatus.UNVERIFIED,
+				save: vi.fn().mockResolvedValue(true),
+			};
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue(account),
+			} as any);
+			otpService.verify.mockResolvedValue(true);
+
+			await service.verifyOnboardOtp({
+				identifier: 'doc@example.com',
+				code: 123456,
+			});
+			expect(account.verificationStatus).toBe(
+				PersonnelAccountVerificationStatus.VERIFIED,
+			);
+			expect(attemptLimiter.reset).toHaveBeenCalledWith(
+				expect.objectContaining({ name: 'login-attempt' }),
+				'doc@example.com',
+			);
+		});
+
 		it('does not count Google sign-in', async () => {
 			personnelAccountModel.findOne.mockReturnValue({
 				populate: vi.fn().mockResolvedValue(null),

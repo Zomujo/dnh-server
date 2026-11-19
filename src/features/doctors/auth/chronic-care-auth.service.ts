@@ -281,11 +281,14 @@ export class ChronicCareAuthService {
 		// PersonnelAccount rows, even when they share an email — never
 		// disambiguate by email alone (see 2.4 in the audit).
 		const isGoogleLogin = !!dto.providerUserId;
+		// The DTO already normalises it; done again so the lookup and the
+		// attempt count always use the same key, whoever calls this.
+		const email = dto.email?.trim().toLowerCase();
 
 		if (!isGoogleLogin) {
 			// Counted before the password is checked, whether or not the email
 			// has an account, so the limit caps how many guesses are tried.
-			await this.attemptLimiter.consume(LOGIN_ATTEMPT_LIMIT, dto.email);
+			await this.attemptLimiter.consume(LOGIN_ATTEMPT_LIMIT, email);
 		}
 
 		const personnelAccount = await this.personnelAccountModel
@@ -295,7 +298,7 @@ export class ChronicCareAuthService {
 							provider: PersonnelProviders.GOOGLE,
 							providerUserId: dto.providerUserId,
 						}
-					: { provider: PersonnelProviders.EMAIL, email: dto.email },
+					: { provider: PersonnelProviders.EMAIL, email },
 			)
 			.populate({
 				path: 'personnel',
@@ -328,7 +331,7 @@ export class ChronicCareAuthService {
 			if (!passwordMatch) {
 				throw new UnauthorizedException('Invalid credentials');
 			}
-			await this.attemptLimiter.reset(LOGIN_ATTEMPT_LIMIT, dto.email);
+			await this.attemptLimiter.reset(LOGIN_ATTEMPT_LIMIT, email);
 		}
 
 		const personnel = personnelAccount.personnel as any;
@@ -543,6 +546,9 @@ export class ChronicCareAuthService {
 
 		account.verificationStatus = PersonnelAccountVerificationStatus.VERIFIED;
 		await (account as any).save();
+		// Sign-in attempts made before verifying were refused as unverified,
+		// not checked, so they must not lock an account that can now sign in.
+		await this.attemptLimiter.reset(LOGIN_ATTEMPT_LIMIT, account.email);
 	}
 
 	private sendVerificationCodeMail(payload: {
