@@ -10,6 +10,7 @@ import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
 import { DecodedIdToken } from 'firebase-admin/auth';
 import { AUTHORIZE_KEY, USER_TYPE_KEY } from '@/common/decorators';
+import { markAuthRequired } from '../../audit/audit.markers';
 import { CacheService } from '../../caching/caching.service';
 import { FirebaseService } from '../../firebase/firebase.service';
 import { AuthService } from '../auth.service';
@@ -40,6 +41,9 @@ export class AuthGuard implements CanActivate {
 		if (!authorize) {
 			return true;
 		}
+
+		// Lets the audit trail record this request if it is rejected below.
+		markAuthRequired(context.switchToHttp().getRequest(), tokenAudience);
 
 		let verifyToken: (
 			token: string,

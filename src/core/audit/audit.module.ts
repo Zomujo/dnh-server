@@ -1,8 +1,15 @@
-import { Global, Module } from '@nestjs/common';
+import {
+	Global,
+	MiddlewareConsumer,
+	Module,
+	NestModule,
+	RequestMethod,
+} from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuditInterceptor } from './audit.interceptor';
 import { AuditService } from './audit.service';
+import { AuditDeniedMiddleware } from './audit-denied.middleware';
 import { AuditLog, AuditLogSchema } from './entities/audit-log.entity';
 
 @Global()
@@ -21,4 +28,10 @@ import { AuditLog, AuditLogSchema } from './entities/audit-log.entity';
 	],
 	exports: [AuditService],
 })
-export class AuditModule {}
+export class AuditModule implements NestModule {
+	configure(consumer: MiddlewareConsumer) {
+		consumer
+			.apply(AuditDeniedMiddleware)
+			.forRoutes({ path: '{*splat}', method: RequestMethod.ALL });
+	}
+}
