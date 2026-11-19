@@ -47,18 +47,21 @@ export async function upsertOverallAdherencePattern(
 			targetName: 'Overview',
 			adherenceRate: adherenceRate || 0,
 			lastLoggedAt: log.takenAt,
-			notes,
+			// Kept as is when the AI call failed (undefined).
+			...(notes !== undefined && { notes }),
 		},
 		{ upsert: true, returnDocument: 'after' },
 	);
 }
 
 /**
- * AI-written notes on the pattern. Optional: without the (retired) AI, or
- * when the call fails, the pattern is saved with no notes, so the rate is
- * still recorded.
+ * AI-written notes on the pattern. Optional, so the rate is always saved:
+ * '' (clears the notes) when the (retired) AI is off, undefined (keeps the
+ * existing notes) when the AI call fails.
  */
-async function patternNotes(adherenceLogs: AdherenceLog[]): Promise<string> {
+async function patternNotes(
+	adherenceLogs: AdherenceLog[],
+): Promise<string | undefined> {
 	if (!isAiConfigured()) return '';
 	try {
 		const llm = createGeminiChatModel({ temperature: 0.7 });
@@ -76,6 +79,6 @@ async function patternNotes(adherenceLogs: AdherenceLog[]): Promise<string> {
 		new Logger('AdherencePattern').warn(
 			`Adherence notes skipped: ${error instanceof Error ? error.message : String(error)}`,
 		);
-		return '';
+		return undefined;
 	}
 }

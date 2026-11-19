@@ -102,4 +102,25 @@ describe('NotificationsConsumer with the AI not configured', () => {
 			expect.objectContaining({ userId: 'user-1' }),
 		);
 	});
+
+	it('falls back to plain text when the AI is configured but its call fails', async () => {
+		vi.stubEnv('GOOGLE_API_KEY', 'test-key');
+		const invoke = vi.fn().mockRejectedValue(new Error('429 from Gemini'));
+		(consumer as any).llmInstance = { invoke };
+
+		await consumer.notifyPatient({
+			notificationId: 'n-1',
+			groupedNotifications: [
+				{ goal: 'Check your BP', targetName: 'BP', targetType: 'vitals' },
+			],
+		});
+
+		expect(invoke).toHaveBeenCalled();
+		expect(pushService.sendAugurNotification).toHaveBeenCalledWith({
+			userId: 'user-1',
+			title: 'Yelima AI',
+			body: 'Hi Ama, a reminder: Check your BP.',
+			payload: { notification_type: PushNotificationType.AI_CHAT },
+		});
+	});
 });
