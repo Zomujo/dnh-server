@@ -131,5 +131,5 @@ export FORBID_UNKNOWN_FIELDS=
 # Audit logs
 # =========================
 # Days audit_logs entries are kept before MongoDB expires them.
-# Unset = 730 (2 years).
+# Unset = 730 (2 years); the default still needs GHS sign-off.
 export AUDIT_LOG_TTL_DAYS=
