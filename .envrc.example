@@ -27,7 +27,6 @@ export REDIS_URL=redis://localhost:6379/5
 export JWT_SECRET=<your-jwt-secret>
 export JWT_TTL=1d
 export OTP_TTL=600000
-export JWT_TOKEN_AUDIENCE=<jwt-token-audience>
 export JWT_TOKEN_ISSUER=<jwt-token-issuer>
 # OAuth client ID the mobile app's Google sign-in tokens are issued for.
 export GOOGLE_CLIENT_ID=<google-oauth-client-id>
