@@ -126,6 +126,24 @@ describe('ChatService', () => {
 	});
 
 	describe('withSignedMedia', () => {
+		it('masks a populated parent deleted for everyone on a hydrated doc', async () => {
+			firebaseService.objectPathFromUrl.mockReturnValue(null);
+			const doc = {
+				toJSON: () => ({
+					roomId: 'room-1',
+					content: 'reply',
+					parentMessageId: {
+						id: 'p1',
+						roomId: 'room-1',
+						content: 'secret',
+						deletedForEveryone: true,
+					},
+				}),
+			};
+			const result = await service.withSignedMedia(doc);
+			expect(result.parentMessageId.content).toBe('This message was deleted');
+		});
+
 		const media = (path: string) => ({
 			roomId: 'room-1',
 			messageType: MessageType.AUDIO,
