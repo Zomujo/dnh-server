@@ -16,7 +16,7 @@ import {
 	ValidateNested,
 } from 'class-validator';
 import { AgeOrDateOfBirthConstraint } from '@/core/auth/dto/age.validators';
-import { ConsentInputDto } from './consent.dto';
+import { StaffConsentInputDto } from './consent.dto';
 import { PatientDto } from './patient.dto';
 
 export class UpdatePatientDto extends PartialType(
@@ -65,15 +65,15 @@ export class UpdatePatientDto extends PartialType(
 	facility?: string;
 
 	@ApiPropertyOptional({
-		type: ConsentInputDto,
+		type: StaffConsentInputDto,
 		description:
 			'Send when the patient has agreed to the privacy notice in front of ' +
 			'you. Recorded as consent granted, captured by the calling personnel.',
 	})
 	@IsOptional()
 	@ValidateNested()
-	@Type(() => ConsentInputDto)
-	consent?: ConsentInputDto;
+	@Type(() => StaffConsentInputDto)
+	consent?: StaffConsentInputDto;
 }
 
 export class CreatePharmacyPatientDto extends OmitType(UpdatePatientDto, [

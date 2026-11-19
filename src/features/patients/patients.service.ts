@@ -1,6 +1,10 @@
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { PromptTemplate } from '@langchain/core/prompts';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+	ConflictException,
+	Injectable,
+	NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { differenceInYears } from 'date-fns';
 import { HydratedDocument, Model, Types } from 'mongoose';
@@ -32,6 +36,7 @@ import {
 	FilterPatientsDto,
 	FilterPatientsNoPaginateDto,
 	PatientQueryFilter,
+	StaffConsentInputDto,
 	UpdatePatientDto,
 } from './dto';
 import {
@@ -71,22 +76,19 @@ export class PatientsService {
 	 * those as unknown fields), so the parts are joined into it. A part left
 	 * out is kept from the current name, split at its first space, the same
 	 * way onboarding joined it. Blank parts never clear the stored name.
+	 *
+	 * Consent sent with the update is recorded only after the profile update
+	 * succeeds, and only when it changes something (see staffConsentChange).
 	 */
 	async updatePatient(id: string, dto: UpdatePatientDto, personnelId?: string) {
 		const patient = await this.findPatientById(id);
 		if (!patient) throw new NotFoundException('Patient not found');
 		const { firstname, lastname, consent, ...rest } = dto;
-		if (consent) {
-			await this.recordConsent(
-				{ _id: patient._id },
-				consentRecord(
-					ConsentStatus.GRANTED,
-					consent.policyVersion,
-					ConsentChannel.HCP,
-					personnelId,
-				),
-			);
-		}
+		// Checked before writing anything, so a rejected consent leaves the
+		// profile untouched too.
+		const consentToRecord = consent
+			? staffConsentChange(patient.consent, consent, personnelId)
+			: undefined;
 		const update: Record<string, unknown> = { ...rest };
 		if (firstname !== undefined || lastname !== undefined) {
 			const [currentFirst = '', ...currentLast] = (patient.name ?? '').split(
@@ -103,6 +105,9 @@ export class PatientsService {
 		}
 		if (Object.keys(update).length > 0) {
 			await this.updatePatientById(id, { $set: update });
+		}
+		if (consentToRecord) {
+			await this.recordConsent({ _id: patient._id }, consentToRecord);
 		}
 		// The doctor-facing summary embeds the patient record.
 		await this.summaryCacheService.delete(summaryCacheKey(id));
@@ -711,6 +716,43 @@ function isDuplicateUserIdError(error: unknown) {
 
 function summaryCacheKey(userId: string) {
 	return `chronic-care:doctors:patients:summary:${userId}`;
+}
+
+/**
+ * The consent record a staff member's update should add, or undefined when
+ * there is nothing to record:
+ * - already granted under the same policy version: no change, no write;
+ * - withdrawn by the patient (any channel but staff): kept, and the update
+ *   is rejected with 409 unless `overrideWithdrawal` is set, in which case
+ *   the re-grant is recorded and marked as overriding the withdrawal.
+ */
+export function staffConsentChange(
+	current: ConsentRecord | undefined,
+	input: StaffConsentInputDto,
+	personnelId?: string,
+): ConsentRecord | undefined {
+	if (
+		current?.status === ConsentStatus.GRANTED &&
+		current.policyVersion === input.policyVersion
+	) {
+		return undefined;
+	}
+	const patientWithdrew =
+		current?.status === ConsentStatus.WITHDRAWN &&
+		current.channel !== ConsentChannel.HCP;
+	if (patientWithdrew && !input.overrideWithdrawal) {
+		throw new ConflictException(
+			'The patient withdrew consent. Send consent.overrideWithdrawal: true only if they have agreed again in front of you.',
+		);
+	}
+	const record = consentRecord(
+		ConsentStatus.GRANTED,
+		input.policyVersion,
+		ConsentChannel.HCP,
+		personnelId,
+	);
+	if (patientWithdrew) record.overridesWithdrawal = true;
+	return record;
 }
 
 export function consentRecord(

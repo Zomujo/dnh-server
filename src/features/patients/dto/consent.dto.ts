@@ -3,7 +3,13 @@ import {
 	ApiPropertyOptional,
 	ApiResponseProperty,
 } from '@nestjs/swagger';
-import { IsBoolean, IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import {
+	IsBoolean,
+	IsNotEmpty,
+	IsOptional,
+	IsString,
+	MaxLength,
+} from 'class-validator';
 import { ConsentChannel, ConsentStatus } from '../entities/consent.entity';
 
 /**
@@ -21,6 +27,24 @@ export class ConsentInputDto {
 	@IsNotEmpty()
 	@MaxLength(32)
 	policyVersion: string;
+}
+
+/**
+ * Consent captured by a clinician or pharmacy user on a patient's record.
+ * A withdrawal the patient made themselves is kept unless the staff member
+ * explicitly overrides it (the patient has since agreed again in person).
+ */
+export class StaffConsentInputDto extends ConsentInputDto {
+	@ApiPropertyOptional({
+		description:
+			'Set true only when the patient withdrew consent earlier and has now ' +
+			'agreed again in front of you. Without it, a withdrawal is kept and ' +
+			'the request is rejected with 409.',
+		example: false,
+	})
+	@IsOptional()
+	@IsBoolean()
+	overrideWithdrawal?: boolean;
 }
 
 /** PUT /client/consent: the patient grants or withdraws consent. */

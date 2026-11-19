@@ -45,6 +45,12 @@ export class ConsentRecord {
 		description: 'Personnel who captured the consent (channel hcp only)',
 	})
 	recordedBy?: Types.ObjectId;
+
+	@Prop({
+		description:
+			'Set when staff re-granted consent over an earlier withdrawal by the patient',
+	})
+	overridesWithdrawal?: boolean;
 }
 
 export const ConsentRecordSchema = SchemaFactory.createForClass(ConsentRecord);
