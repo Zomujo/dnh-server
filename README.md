@@ -552,6 +552,10 @@ The `Dockerfile` builds a production image (Node 22, runs as the non-root `node`
 
 **TLS**: the API speaks plain HTTP. Terminate TLS at a reverse proxy (nginx, Caddy or the GHS load balancer) in front of it, and don't expose port `4815` publicly.
 
+### VPS deployment (staging and production)
+
+For a VPS where MongoDB is hosted elsewhere, use [`deploy/`](deploy/RUNBOOK.md): on the server, `/opt/dnh-server/deploy.sh <staging|production>` clones the environment's branch, builds the image and swaps the running container, and `deploy/compose.yml` runs each environment's API with its own Redis beside it. Follow [deploy/RUNBOOK.md](deploy/RUNBOOK.md) for set-up, deploys and rollbacks. The rest of this section covers the single-host compose stack and running the image by hand.
+
 ### Configuration
 
 Create `.env.production` from `.envrc.example`: remove each `export ` prefix so every line is a plain `KEY=value`, then fill in the values. Keep the escaped `\n` sequences in `FIREBASE_BASE_PRIVATE_KEY` on one line. The file is ignored by git and by the Docker build. At minimum set:
