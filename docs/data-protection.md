@@ -44,7 +44,7 @@ What the code now provides:
 | Right to correction | Existing: `PATCH /client/patient` (name, gender) and `PATCH /hcp/patients/:id` (all profile fields) |
 | Right to erasure | Existing `DELETE /client/clean` (app users; covers every collection, Firestore, Storage and the Firebase Auth user). **Added** `dist/scripts/erase-patient.js` for patients without an app account |
 | No personal data in logs | **Fixed**: request logging sent headers (bearer tokens) and bodies (health readings, names, passwords, OTPs) to BetterStack; push, mail and error logs leaked tokens, message content and duplicate-key values. See [section 7](#7-security-safeguards) |
-| Audit trail of who accessed what | Separate PR `feat/audit-logs` (`audit_logs` collection: actor, action, route, resource, outcome, IP; no bodies or secrets; TTL `AUDIT_LOG_TTL_DAYS`) |
+| Audit trail of who accessed what | Separate PR `feat/audit-logs` (`audit_logs` collection: actor, action, route, resource, outcome, IP; no bodies or secrets; TTL `AUDIT_LOG_TTL_DAYS`). USSD readings are audited too: each save (or its refusal for an unknown number) is recorded against the patient, never the phone number |
 | Registration with the DPC, data protection supervisor, privacy notice, DPIA, processor agreements, retention schedule | **GHS organisational items**, [section 11](#11-checklist-for-ghs-organisational-items) |
 
 AI features (Gemini, OpenAI, Qdrant) and real-time chat are **retired** and will not be
@@ -90,7 +90,8 @@ All MongoDB collections live in the database named by `DB_NAME` on the cluster i
 | Profile mirror (name, phone) and in-app notification feed | Firestore `clients/{uid}` (+ `notifications` subcollection), `users/{uid}` | App display | no (see gap G6) | yes |
 | Name and phone (cache, 50 min) | Redis | Request handling | no | yes |
 | USSD session (vital type, value, time; 5 min) | Redis `ussd:session:*` | Multi-step USSD entry | no | expires |
-| Retired: AI chat messages, AI conversation state, voice notes; chat rooms/messages/media | `clientaichats`, `checkpoints`, `checkpoint_writes`, Firebase Storage, `chatrooms`, `chatmessages` | Not deployed for GHS | AI messages only, when the module is loaded (see gap G7) | yes |
+| Conversation history: dose reminder texts (and AI chat turns when the assistant is on), with a copy of name, phone and language | `checkpoints`, `checkpoint_writes` (LangGraph, thread = userId) | Written by every dose reminder, AI on or off | yes (`conversationHistory`) | yes |
+| Retired: AI chat messages, voice notes; chat rooms/messages/media | `clientaichats`, Firebase Storage, `chatrooms`, `chatmessages` | Not deployed for GHS | AI messages only, when the module is loaded (see gap G7) | yes |
 
 ### Staff (clinicians and pharmacy users)
 
@@ -229,7 +230,7 @@ Gaps and recommendations (technical):
 | G4 | Error logs can still include whole error objects (for example a database validation error quoting a value) | Self-host the log service (OpenObserve) so logs stay under GHS control, restrict access to it and set a short retention |
 | G5 | No automatic retention for clinical data ([section 8](#8-retention)) | Decide a schedule; implement as TTL indexes or a scheduled purge |
 | G6 | The data export does not include the Firestore profile mirror or the Firebase Auth record | Both hold only data the patient entered and sees in the app (name, phone, email, notification feed); GHS can export them from the Firebase console on request |
-| G7 | Retired chat and AI: the data export leaves out chat rooms and messages and the AI's LangGraph conversation checkpoints (erasure does delete them, room media in Storage included) | Only relevant if chat or AI is re-enabled; add them to the export first |
+| G7 | Retired chat: the data export leaves out chat rooms and messages (erasure does delete them, room media in Storage included) | Only relevant if chat is re-enabled; add them to the export first |
 | G8 | Patients cannot correct phone number or date of birth themselves | Through a clinician for now. A self-service phone change needs verification, because the phone number links USSD readings to the record |
 
 ## 8. Retention

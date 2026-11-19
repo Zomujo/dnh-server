@@ -24,7 +24,8 @@ Notes on the ERD:
 - `LANGGRAPH_CHECKPOINT` stands for the `checkpoints` and `checkpoint_writes`
   collections. Dose reminders are written there even with the AI assistant
   switched off, and they hold the patient's name and phone number. Erasure
-  deletes them; the patient data export does not include them.
+  deletes them and the patient data export includes them
+  (`conversationHistory`).
 - `CHAT_ROOM`, `CHAT_MESSAGE` and `CLIENT_AI_CHAT` belong to retired features;
   the collections remain so the features can return.
 - Only key fields are shown. The schemas in `src/**/entities/*.entity.ts` are

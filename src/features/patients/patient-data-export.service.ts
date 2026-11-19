@@ -1,3 +1,5 @@
+import type { BaseMessage } from '@langchain/core/messages';
+import { MongoDBSaver } from '@langchain/langgraph-checkpoint-mongodb';
 import {
 	ForbiddenException,
 	Injectable,
@@ -110,12 +112,18 @@ export const EXPORT_MODEL_NAMES = [
  * models so it sees each collection without depending on every feature
  * module; a model that isn't registered (a retired module) is skipped.
  *
+ * Also exported: the conversation history LangGraph keeps per patient in
+ * `checkpoints` (thread_id = userId). Dose reminders are written there
+ * whether or not the AI assistant is switched on.
+ *
  * Not exported: the retired clinician-patient chat (rooms and messages),
- * the AI assistant's LangGraph conversation checkpoints, the Firestore
- * profile mirror and the Firebase Auth record. See docs/data-protection.md.
+ * the Firestore profile mirror and the Firebase Auth record. See
+ * docs/data-protection.md.
  */
 @Injectable()
 export class PatientDataExportService {
+	private checkpointer?: MongoDBSaver;
+
 	constructor(@InjectConnection() private readonly connection: Connection) {}
 
 	/** The patient's own export (GET /client/data-export). */
@@ -187,6 +195,41 @@ export class PatientDataExportService {
 			exportedAt: new Date().toISOString(),
 			patient,
 			...data,
+			// A staff-registered patient has no app, so their thread holds only
+			// dose reminders: nothing beyond what the clinician profile shows.
+			conversationHistory: await this.conversationHistory(ctx.userId),
+		};
+	}
+
+	/**
+	 * The latest LangGraph checkpoint for the patient's thread, decoded:
+	 * every message on the thread (dose reminders, and AI chat turns when
+	 * the assistant is on) and the profile copy the graph keeps (name,
+	 * phone, language). Empty when the patient has no thread.
+	 */
+	async conversationHistory(userId: string) {
+		this.checkpointer ??= new MongoDBSaver({
+			client: this.connection.getClient() as any,
+			dbName: this.connection.db?.databaseName,
+		});
+		const tuple = await this.checkpointer.getTuple({
+			configurable: { thread_id: userId },
+		});
+		const values = (tuple?.checkpoint.channel_values ?? {}) as {
+			messages?: BaseMessage[];
+			user?: Record<string, unknown> | null;
+		};
+		// Per-message send times aren't recoverable: the checkpoint serializer
+		// stores the Date in additional_kwargs as an empty object. When each
+		// reminder was due is in the `reminders` section.
+		return {
+			updatedAt: tuple?.checkpoint.ts ?? null,
+			profile: values.user ?? null,
+			messages: (values.messages ?? []).map((message) => ({
+				id: message.id,
+				role: message.getType(),
+				content: message.content,
+			})),
 		};
 	}
 
