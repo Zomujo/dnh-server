@@ -459,7 +459,7 @@ After any change to `.envrc`, run `direnv allow` again to reload.
 | `REDIS_URL` | Yes | Redis connection URL (used by both cache and BullMQ) |
 | `JWT_SECRET` | Yes | Secret for signing/verifying personnel JWT tokens |
 | `JWT_TTL` | Yes | JWT expiry duration (e.g. `1d`, `7d`) |
-| `JWT_TOKEN_ISSUER` | No | JWT issuer claim |
+| `JWT_TOKEN_ISSUER` | Yes | Issuer claim on personnel tokens, e.g. `dnh-server-production`; staff login fails with a 500 without it. Use a different value per environment |
 | `FIREBASE_BASE_PROJECT_ID` | Yes | Firebase project ID |
 | `FIREBASE_BASE_PRIVATE_KEY_ID` | Yes | Firebase service account private key ID |
 | `FIREBASE_BASE_PRIVATE_KEY` | Yes | Firebase private key — store with literal `\n` (not real newlines) |
@@ -565,7 +565,7 @@ Create `.env.production` from `.envrc.example`: remove each `export ` prefix so 
 | `NODE_ENV` | `production` |
 | `DB_NAME`, `DB_CONNECTION_STRING` | MongoDB ≥ 6 (compose sets the connection string) |
 | `REDIS_URL` | Redis ≥ 7 (compose sets it) |
-| `JWT_SECRET`, `JWT_TTL`, `OTP_TTL` | Personnel auth |
+| `JWT_SECRET`, `JWT_TTL`, `OTP_TTL`, `JWT_TOKEN_ISSUER` | Personnel auth; staff login fails with a 500 if `JWT_TOKEN_ISSUER` is unset |
 | `FIREBASE_BASE_*`, `BASE_STORAGE_BUCKET` | Firebase service account and storage bucket |
 | `EMAIL_*` | SMTP for verification emails |
 | `CORS_ORIGINS` | Browser origins allowed to call the API (the HCP web app) |

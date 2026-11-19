@@ -230,6 +230,7 @@ Copy `compose.yml` and `deploy.sh` as in section 6. Fill in `.env.<env>` from `d
 - `NODE_ENV` is the environment's name.
 - `REDIS_URL` is `redis://dnh-redis-<env>:6379`.
 - `DB_CONNECTION_STRING` and `DB_NAME` point at this environment's own database.
+- `JWT_TOKEN_ISSUER` is `dnh-server-<env>`.
 - `TRUST_PROXY=1` for a reverse proxy on this VPS.
 - Every secret is generated separately for each environment.
 
@@ -238,6 +239,9 @@ Copy `compose.yml` and `deploy.sh` as in section 6. Fill in `.env.<env>` from `d
 ```bash
 sudo bash /opt/dnh-server/deploy.sh staging        # or production
 ```
+
+Deploy staging first and check it before the first production deploy: the
+same build, settings layout and proxy are then known to work.
 
 Then run the checks in section 4 against `127.0.0.1`.
 

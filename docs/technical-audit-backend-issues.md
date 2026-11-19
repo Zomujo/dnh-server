@@ -262,13 +262,12 @@ downstream ever checked them, so they were purely decorative. Now verifies both,
 using the same `UserType.CHRONIC_CARE` audience and `JWT_TOKEN_ISSUER` config value
 used at sign time.
 
-The audit's claim that `JWT_TOKEN_ISSUER` is missing from `.envrc.example` is stale —
-it's present. It *is* missing from the actual local `.envrc` in this environment, which
-means locally-issued tokens currently sign with `issuer: undefined`; `jsonwebtoken`
-skips the issuer check entirely when the verify option is unset, so this doesn't break
-local login, it just means the issuer check isn't doing real work here yet. That's a
-personal `.envrc` addition, not a code change — flagging for the next `direnv` touch,
-not fixed in this repo.
+`JWT_TOKEN_ISSUER` is required. When it is unset, `jsonwebtoken` refuses to sign
+(`"issuer" must be a string`), so staff login fails with a 500. `deploy.sh` refuses a
+settings file without it, and each environment uses its own value
+(`dnh-server-staging`, `dnh-server-production`) so one environment's staff tokens are
+refused by the other. `JWT_TOKEN_AUDIENCE` was never read; the audience is fixed to
+`UserType.CHRONIC_CARE`, and the variable has been removed from the examples.
 
 No revocation path was the bigger gap: `deletePersonnel()` removed the DB records but
 never invalidated the personnel's existing tokens, which stayed valid for up to their
