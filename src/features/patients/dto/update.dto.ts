@@ -4,7 +4,7 @@ import {
 	PartialType,
 	PickType,
 } from '@nestjs/swagger';
-import { Expose } from 'class-transformer';
+import { Expose, Type } from 'class-transformer';
 import {
 	IsMongoId,
 	IsNotEmpty,
@@ -13,8 +13,10 @@ import {
 	IsString,
 	Min,
 	Validate,
+	ValidateNested,
 } from 'class-validator';
 import { AgeOrDateOfBirthConstraint } from '@/core/auth/dto/age.validators';
+import { ConsentInputDto } from './consent.dto';
 import { PatientDto } from './patient.dto';
 
 export class UpdatePatientDto extends PartialType(
@@ -61,6 +63,17 @@ export class UpdatePatientDto extends PartialType(
 	@IsMongoId()
 	@Expose({ name: 'facilityId' })
 	facility?: string;
+
+	@ApiPropertyOptional({
+		type: ConsentInputDto,
+		description:
+			'Send when the patient has agreed to the privacy notice in front of ' +
+			'you. Recorded as consent granted, captured by the calling personnel.',
+	})
+	@IsOptional()
+	@ValidateNested()
+	@Type(() => ConsentInputDto)
+	consent?: ConsentInputDto;
 }
 
 export class CreatePharmacyPatientDto extends OmitType(UpdatePatientDto, [

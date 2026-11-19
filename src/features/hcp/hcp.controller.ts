@@ -52,6 +52,7 @@ import {
 	GetPersonnelPatientsDto,
 	UpdatePatientDto,
 } from '@/features/patients/dto';
+import { PatientDataExportService } from '@/features/patients/patient-data-export.service';
 import {
 	BpTrendsQueryDto,
 	BpTrendsResponseDto,
@@ -72,7 +73,10 @@ import { HcpService } from './hcp.service';
 export class HcpController {
 	private logger = new Logger(HcpController.name);
 
-	constructor(private readonly hcpService: HcpService) {}
+	constructor(
+		private readonly hcpService: HcpService,
+		private readonly patientDataExportService: PatientDataExportService,
+	) {}
 
 	@CustomApiResponse(['created', 'authorizeChronicCare'], {
 		message: 'Vitals stored successfully',
@@ -284,6 +288,28 @@ export class HcpController {
 		}
 	}
 
+	// Right of access for a patient without the app (USSD or registered at a
+	// facility): the clinician hands them this export. Clinicians can already
+	// read every part of it, so it widens no access.
+	@CustomApiResponse(['success', 'notfound', 'authorizeChronicCare'], {
+		message: 'Patient data exported successfully',
+	})
+	@Roles(PersonnelRoles.CLINICIAN)
+	@Get('patients/:id/data-export')
+	async exportPatientData(@Param('id', ParseMongoIdPipe) id: string) {
+		try {
+			const response =
+				await this.patientDataExportService.exportByPatientId(id);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				'Patient data exported successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
 	@CustomApiResponse(['success', 'authorizeChronicCare'], {
 		type: GetPersonnelPatientDto,
 		message: 'Patient fetched successfully',
@@ -337,9 +363,14 @@ export class HcpController {
 	async updatePatient(
 		@Param('id', ParseMongoIdPipe) id: string,
 		@Body() dto: UpdatePatientDto,
+		@GetUser('sub') personnelId: string,
 	) {
 		try {
-			const response = await this.hcpService.updatePatient(id, dto);
+			const response = await this.hcpService.updatePatient(
+				id,
+				dto,
+				personnelId,
+			);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,

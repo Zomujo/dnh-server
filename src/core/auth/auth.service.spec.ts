@@ -87,6 +87,50 @@ describe('AuthService', () => {
 			);
 			expect(result).toEqual({ patientId: mockId, created: true });
 		});
+
+		it('records consent from the app when the request carries it', async () => {
+			patientsService.create.mockResolvedValue({
+				patientId: new Types.ObjectId(),
+				created: true,
+			});
+
+			await service.onboarding('user-123', {
+				firstname: 'John',
+				lastname: 'Doe',
+				age: 40,
+				gender: 'male' as any,
+				chronicConditions: ['diabetes'],
+				consent: { policyVersion: '2026-11' },
+			} as any);
+
+			expect(patientsService.recordConsent).toHaveBeenCalledWith(
+				{ userId: 'user-123' },
+				expect.objectContaining({
+					status: 'granted',
+					policyVersion: '2026-11',
+					channel: 'app',
+					recordedAt: expect.any(Date),
+				}),
+				{ onlyIfAbsent: true },
+			);
+		});
+
+		it('still onboards an older app build that sends no consent', async () => {
+			patientsService.create.mockResolvedValue({
+				patientId: new Types.ObjectId(),
+				created: true,
+			});
+
+			await service.onboarding('user-123', {
+				firstname: 'John',
+				lastname: 'Doe',
+				age: 40,
+				gender: 'male' as any,
+				chronicConditions: [],
+			} as any);
+
+			expect(patientsService.recordConsent).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('signToken', () => {

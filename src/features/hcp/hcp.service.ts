@@ -548,8 +548,8 @@ export class HcpService {
 		return this.patientsService.createByPersonnel(dto, personnelId, facilityId);
 	}
 
-	async updatePatient(id: string, dto: UpdatePatientDto) {
-		return this.patientsService.updatePatient(id, dto);
+	async updatePatient(id: string, dto: UpdatePatientDto, personnelId?: string) {
+		return this.patientsService.updatePatient(id, dto, personnelId);
 	}
 
 	async findOnePatient(id: string) {

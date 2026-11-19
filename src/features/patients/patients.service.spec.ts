@@ -5,9 +5,13 @@ import { Model, Types } from 'mongoose';
 import { CacheService } from '@/core/caching/caching.service';
 import { VitalHistory } from '@/features/vital-histories/entities/vital-history.entity';
 import { ChronicConditionsService } from '../chronic-conditions/chronic-conditions.service';
-import { Patient } from './entities/patient.entity';
+import {
+	ConsentChannel,
+	ConsentStatus,
+	Patient,
+} from './entities/patient.entity';
 import { Summary } from './entities/summary.entity';
-import { PatientsService } from './patients.service';
+import { consentRecord, PatientsService } from './patients.service';
 
 describe('PatientsService', () => {
 	let service: PatientsService;
@@ -113,6 +117,129 @@ describe('PatientsService', () => {
 			expect(patientModel.findByIdAndUpdate).toHaveBeenCalledWith(id, {
 				$set: { gender: 'female' },
 			});
+		});
+	});
+
+	describe('consent', () => {
+		const id = new Types.ObjectId();
+		const personnelId = new Types.ObjectId().toString();
+
+		it('records a decision as current and appends it to the history', async () => {
+			patientModel.updateOne.mockResolvedValue({ matchedCount: 1 } as any);
+			const record = consentRecord(
+				ConsentStatus.WITHDRAWN,
+				'2026-11',
+				ConsentChannel.APP,
+			);
+
+			const updated = await service.recordConsent({ userId: 'u1' }, record);
+
+			expect(updated).toBe(true);
+			expect(patientModel.updateOne).toHaveBeenCalledWith(
+				{ userId: 'u1' },
+				{ $set: { consent: record }, $push: { consentHistory: record } },
+			);
+		});
+
+		it('with onlyIfAbsent, only matches a patient with no decision yet', async () => {
+			patientModel.updateOne.mockResolvedValue({ matchedCount: 0 } as any);
+			const record = consentRecord(
+				ConsentStatus.GRANTED,
+				'2026-11',
+				ConsentChannel.APP,
+			);
+
+			const updated = await service.recordConsent({ userId: 'u1' }, record, {
+				onlyIfAbsent: true,
+			});
+
+			expect(updated).toBe(false);
+			expect(patientModel.updateOne).toHaveBeenCalledWith(
+				{ userId: 'u1', consent: { $exists: false } },
+				expect.anything(),
+			);
+		});
+
+		it('records who captured consent when a clinician updates the patient', async () => {
+			patientModel.findById.mockReturnValue({
+				select: vi.fn().mockResolvedValue({ _id: id, name: 'Ama Mensah' }),
+			} as any);
+			patientModel.updateOne.mockResolvedValue({ matchedCount: 1 } as any);
+
+			await service.updatePatient(
+				id.toString(),
+				{ consent: { policyVersion: '2026-11' } },
+				personnelId,
+			);
+
+			expect(patientModel.updateOne).toHaveBeenCalledWith(
+				{ _id: id },
+				expect.objectContaining({
+					$set: {
+						consent: expect.objectContaining({
+							status: 'granted',
+							channel: 'hcp',
+							recordedBy: new Types.ObjectId(personnelId),
+						}),
+					},
+				}),
+			);
+			// consent is not written as a plain field, and nothing else changed
+			expect(patientModel.findByIdAndUpdate).not.toHaveBeenCalled();
+		});
+
+		it('stores consent captured while a clinician registers the patient', async () => {
+			patientModel.create.mockResolvedValue({
+				_id: id,
+				userId: 'hcp-x',
+			} as any);
+			patientModel.exists.mockResolvedValue(null);
+
+			await service.createByPersonnel(
+				{ firstname: 'Ama', consent: { policyVersion: '2026-11' } },
+				personnelId,
+			);
+
+			const created = patientModel.create.mock.calls[0][0] as any;
+			expect(created.consent).toMatchObject({
+				status: 'granted',
+				policyVersion: '2026-11',
+				channel: 'hcp',
+				recordedBy: new Types.ObjectId(personnelId),
+			});
+			expect(created.consentHistory).toEqual([created.consent]);
+		});
+
+		it('registers a patient without consent as before', async () => {
+			patientModel.create.mockResolvedValue({
+				_id: id,
+				userId: 'hcp-x',
+			} as any);
+			patientModel.exists.mockResolvedValue(null);
+
+			await service.createByPersonnel({ firstname: 'Ama' }, personnelId);
+
+			const created = patientModel.create.mock.calls[0][0] as any;
+			expect(created.consent).toBeUndefined();
+			expect(created.consentHistory).toBeUndefined();
+		});
+
+		it('returns the current decision and history, or 404 for no patient', async () => {
+			const lean = (value: unknown) => ({
+				select: vi.fn().mockReturnValue({
+					lean: vi.fn().mockResolvedValue(value),
+				}),
+			});
+			patientModel.findOne.mockReturnValue(lean({}) as any);
+			await expect(service.findConsentByUserId('u1')).resolves.toEqual({
+				consent: null,
+				history: [],
+			});
+
+			patientModel.findOne.mockReturnValue(lean(null) as any);
+			await expect(service.findConsentByUserId('u1')).rejects.toBeInstanceOf(
+				NotFoundException,
+			);
 		});
 	});
 

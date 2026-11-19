@@ -16,7 +16,9 @@ import {
 	Min,
 	MinLength,
 	Validate,
+	ValidateNested,
 } from 'class-validator';
+import { ConsentInputDto } from '@/features/patients/dto/consent.dto';
 import { GenderEnum } from '@/features/patients/entities/patient.entity';
 import {
 	AgeOrDateOfBirthConstraint,
@@ -126,6 +128,17 @@ export class OnboardDto {
 	@IsOptional()
 	@IsPhoneNumber()
 	phoneNumber?: string;
+
+	@ApiPropertyOptional({
+		type: ConsentInputDto,
+		description:
+			'The privacy notice version the patient agreed to during onboarding. ' +
+			'Optional for older app builds; recorded as consent granted (channel app).',
+	})
+	@IsOptional()
+	@ValidateNested()
+	@Type(() => ConsentInputDto)
+	consent?: ConsentInputDto;
 }
 
 export class GoogleLoginDto {

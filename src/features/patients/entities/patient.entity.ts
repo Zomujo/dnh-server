@@ -6,6 +6,14 @@ import { Facility } from '@/features/facilities/entities/facility.entity';
 import { AdherenceStatus } from '../dto';
 import { myEmitter } from '../utils/summary.event';
 import { Sections } from '../utils/summary.util';
+import { ConsentRecord, ConsentRecordSchema } from './consent.entity';
+
+export {
+	ConsentChannel,
+	ConsentRecord,
+	ConsentRecordSchema,
+	ConsentStatus,
+} from './consent.entity';
 
 export enum GenderEnum {
 	MALE = 'male',
@@ -204,6 +212,21 @@ export class Patient extends BaseDH {
 
 	@Prop({ description: 'Age of the patient in years' })
 	age: number;
+
+	@Prop({
+		type: ConsentRecordSchema,
+		description:
+			'Current consent decision. Absent for patients registered before ' +
+			'consent was recorded.',
+	})
+	consent?: ConsentRecord;
+
+	@Prop({
+		type: [ConsentRecordSchema],
+		default: [],
+		description: 'Every consent decision, oldest first (accountability trail)',
+	})
+	consentHistory: ConsentRecord[];
 
 	bmi: number;
 

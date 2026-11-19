@@ -4,7 +4,14 @@ import { JwtService } from '@nestjs/jwt';
 import { differenceInYears } from 'date-fns';
 import { OAuth2Client } from 'google-auth-library';
 import { CacheService } from '@/core/caching/caching.service';
-import { PatientsService } from '@/features/patients/patients.service';
+import {
+	ConsentChannel,
+	ConsentStatus,
+} from '@/features/patients/entities/patient.entity';
+import {
+	consentRecord,
+	PatientsService,
+} from '@/features/patients/patients.service';
 import { FirebaseService } from '../firebase/firebase.service';
 import { CreateAuthDto, LocalAuthUserPayload, OnboardDto } from './dto';
 import { UserType } from './enums';
@@ -54,7 +61,7 @@ export class AuthService {
 			age = differenceInYears(new Date(), dateOfBirth);
 		}
 
-		return this.patientsService.create({
+		const result = await this.patientsService.create({
 			userId: userId,
 			name: `${dto.firstname} ${dto.lastname}`,
 			gender: dto.gender,
@@ -64,6 +71,22 @@ export class AuthService {
 			facility: dto.facility,
 			phoneNumber: dto.phoneNumber,
 		});
+
+		// Older app builds don't send consent; onboarding still succeeds.
+		// onlyIfAbsent: a retried onboarding must not add a second record.
+		if (dto.consent) {
+			await this.patientsService.recordConsent(
+				{ userId },
+				consentRecord(
+					ConsentStatus.GRANTED,
+					dto.consent.policyVersion,
+					ConsentChannel.APP,
+				),
+				{ onlyIfAbsent: true },
+			);
+		}
+
+		return result;
 		// yearOfBirth: dto.yearOfBirth,
 		// ghanaCardNumber: dto.ghanaCardNumber,
 		// nhisNumber: dto.nhisNumber,

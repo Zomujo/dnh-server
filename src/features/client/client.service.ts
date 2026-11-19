@@ -51,7 +51,15 @@ import { MedicationsService } from '@/features/medications/medications.service';
 import { SeededMedsService } from '@/features/medications/seeded-meds/seeded-meds.service';
 import { NotificationsService } from '@/features/notifications/notifications.service';
 import { PushService } from '@/features/notifications/push/push.service';
-import { PatientsService } from '@/features/patients/patients.service';
+import type { UpdateConsentDto } from '@/features/patients/dto';
+import {
+	ConsentChannel,
+	ConsentStatus,
+} from '@/features/patients/entities/patient.entity';
+import {
+	consentRecord,
+	PatientsService,
+} from '@/features/patients/patients.service';
 import { VitalHistoriesService } from '@/features/vital-histories/vital-histories.service';
 import { DhVectorsService } from '../dh-vectors/dh-vectors.service';
 import {
@@ -942,6 +950,28 @@ export class ClientService {
 				authUser,
 			},
 		};
+	}
+
+	async fetchConsent(userId: string) {
+		return this.patientsService.findConsentByUserId(userId);
+	}
+
+	/**
+	 * The patient grants or withdraws consent from the app. Withdrawal is
+	 * recorded, not acted on: erasing their data is a separate, explicit
+	 * request (DELETE /client/clean).
+	 */
+	async updateConsent(userId: string, dto: UpdateConsentDto) {
+		const updated = await this.patientsService.recordConsent(
+			{ userId },
+			consentRecord(
+				dto.granted ? ConsentStatus.GRANTED : ConsentStatus.WITHDRAWN,
+				dto.policyVersion,
+				ConsentChannel.APP,
+			),
+		);
+		if (!updated) throw new NotFoundException('Patient not found');
+		return this.patientsService.findConsentByUserId(userId);
 	}
 
 	async createMedication(dto: CreateMedicationDto, userId: string) {
