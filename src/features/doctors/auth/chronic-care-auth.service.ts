@@ -7,11 +7,13 @@ import {
 	UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { ThrottlerException } from '@nestjs/throttler';
 import * as bcrypt from 'bcrypt';
 import { isValidObjectId, Model } from 'mongoose';
 import { AuthService } from '@/core/auth/auth.service';
 import { GoogleLoginDto } from '@/core/auth/dto';
 import { UserType } from '@/core/auth/enums';
+import { AttemptLimit, AttemptLimiter } from '@/core/caching/attempt-limiter';
 import { CommunicationsService } from '@/core/communications/communications.service';
 import { GenerateOtpDto, VerifyOtpDto } from '@/core/security/otp/dto';
 import { OtpService } from '@/core/security/otp/otp.service';
@@ -32,6 +34,20 @@ import {
 // instead of VERIFIED, so they stay findable and can be pushed through real
 // verification later just by adding PersonnelRoles.PHARMACY here.
 const OTP_REQUIRED_ROLES: PersonnelRoles[] = [PersonnelRoles.CLINICIAN];
+
+/**
+ * Email/password sign-ins allowed per email in the window; a correct one
+ * resets the count, so in practice this limits wrong passwords. Counted per
+ * email, not per IP, so spreading guesses across addresses does not help.
+ * Someone could lock a known staff email on purpose; it unlocks on its own,
+ * and Google sign-in is unaffected.
+ */
+export const LOGIN_ATTEMPT_LIMIT: AttemptLimit = {
+	name: 'login-attempt',
+	max: 5,
+	windowMs: 15 * 60 * 1000,
+	blockMs: 15 * 60 * 1000,
+};
 
 // Whether a personnel has been through onboarding, after which their profile
 // only changes with their own token. Profiles onboarded before onboardedAt
@@ -82,6 +98,7 @@ export class ChronicCareAuthService {
 		private readonly otpService: OtpService,
 		private readonly communicationsService: CommunicationsService,
 		private readonly facilitiesService: FacilitiesService,
+		private readonly attemptLimiter: AttemptLimiter,
 	) {}
 
 	async create(dto: CreatePersonnelAccountInput) {
@@ -234,15 +251,22 @@ export class ChronicCareAuthService {
 			account.verificationStatus !== PersonnelAccountVerificationStatus.VERIFIED
 		) {
 			if (OTP_REQUIRED_ROLES.includes(personnel.role as PersonnelRoles)) {
-				const code = await this.otpService.generate({
-					identifier: `${account.email}`,
-				});
+				// The profile is already saved, so a send limit reached through
+				// re-send must not fail onboarding; a code sent earlier still works.
+				const code = await this.otpService
+					.generate({ identifier: `${account.email}` })
+					.catch((error) => {
+						if (error instanceof ThrottlerException) return undefined;
+						throw error;
+					});
 
-				this.sendVerificationCodeMail({
-					mail: account.email,
-					fullName: personnel.userName,
-					code: code,
-				});
+				if (code !== undefined) {
+					this.sendVerificationCodeMail({
+						mail: account.email,
+						fullName: personnel.userName,
+						code: code,
+					});
+				}
 			} else {
 				account.verificationStatus = PersonnelAccountVerificationStatus.EXEMPT;
 				await (account as any).save();
@@ -257,6 +281,15 @@ export class ChronicCareAuthService {
 		// PersonnelAccount rows, even when they share an email — never
 		// disambiguate by email alone (see 2.4 in the audit).
 		const isGoogleLogin = !!dto.providerUserId;
+		// The DTO already normalises it; done again so the lookup and the
+		// attempt count always use the same key, whoever calls this.
+		const email = dto.email?.trim().toLowerCase();
+
+		if (!isGoogleLogin) {
+			// Counted before the password is checked, whether or not the email
+			// has an account, so the limit caps how many guesses are tried.
+			await this.attemptLimiter.consume(LOGIN_ATTEMPT_LIMIT, email);
+		}
 
 		const personnelAccount = await this.personnelAccountModel
 			.findOne(
@@ -265,7 +298,7 @@ export class ChronicCareAuthService {
 							provider: PersonnelProviders.GOOGLE,
 							providerUserId: dto.providerUserId,
 						}
-					: { provider: PersonnelProviders.EMAIL, email: dto.email },
+					: { provider: PersonnelProviders.EMAIL, email },
 			)
 			.populate({
 				path: 'personnel',
@@ -298,6 +331,7 @@ export class ChronicCareAuthService {
 			if (!passwordMatch) {
 				throw new UnauthorizedException('Invalid credentials');
 			}
+			await this.attemptLimiter.reset(LOGIN_ATTEMPT_LIMIT, email);
 		}
 
 		const personnel = personnelAccount.personnel as any;
@@ -512,6 +546,9 @@ export class ChronicCareAuthService {
 
 		account.verificationStatus = PersonnelAccountVerificationStatus.VERIFIED;
 		await (account as any).save();
+		// Sign-in attempts made before verifying were refused as unverified,
+		// not checked, so they must not lock an account that can now sign in.
+		await this.attemptLimiter.reset(LOGIN_ATTEMPT_LIMIT, account.email);
 	}
 
 	private sendVerificationCodeMail(payload: {

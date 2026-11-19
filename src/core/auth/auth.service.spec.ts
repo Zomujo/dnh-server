@@ -1,7 +1,11 @@
-import { UnauthorizedException } from '@nestjs/common';
+import {
+	ServiceUnavailableException,
+	UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { type Mocked, TestBed } from '@suites/unit';
+import { OAuth2Client } from 'google-auth-library';
 import { Types } from 'mongoose';
 import { CacheService } from '@/core/caching/caching.service';
 import { PatientsService } from '@/features/patients/patients.service';
@@ -37,6 +41,48 @@ describe('AuthService', () => {
 
 	it('should be defined', () => {
 		expect(service).toBeDefined();
+	});
+
+	describe('googleLogin', () => {
+		const withClientIds = (value?: string) =>
+			new AuthService(
+				firebaseService,
+				jwtService,
+				{
+					get: (key: string) =>
+						key === 'GOOGLE_CLIENT_ID' ? value : undefined,
+				} as any,
+				patientsService,
+				tokenDenylistCache,
+			);
+
+		it('refuses when no client ID is configured', async () => {
+			const verify = vi.spyOn(OAuth2Client.prototype, 'verifyIdToken');
+
+			await expect(withClientIds(undefined).googleLogin('tok')).rejects.toThrow(
+				ServiceUnavailableException,
+			);
+			await expect(withClientIds(' , ').googleLogin('tok')).rejects.toThrow(
+				ServiceUnavailableException,
+			);
+			expect(verify).not.toHaveBeenCalled();
+		});
+
+		it('checks the token against every configured client ID', async () => {
+			const verify = vi
+				.spyOn(OAuth2Client.prototype, 'verifyIdToken')
+				.mockResolvedValue({
+					getPayload: () => ({ email: 'doc@example.com' }),
+				} as any);
+
+			await expect(
+				withClientIds('android-id, ios-id,web-id').googleLogin('tok'),
+			).resolves.toMatchObject({ email: 'doc@example.com' });
+			expect(verify).toHaveBeenCalledWith({
+				idToken: 'tok',
+				audience: ['android-id', 'ios-id', 'web-id'],
+			});
+		});
 	});
 
 	describe('signup', () => {

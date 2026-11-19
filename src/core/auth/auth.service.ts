@@ -1,4 +1,9 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+	Injectable,
+	Logger,
+	ServiceUnavailableException,
+	UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { differenceInYears } from 'date-fns';
@@ -27,7 +32,7 @@ const CHRONIC_CARE_TOKEN_LIFETIME_MS = 24 * 60 * 60 * 1000;
 export class AuthService {
 	private logger = new Logger(AuthService.name);
 	private googleClient: OAuth2Client;
-	private readonly googleClientId: string;
+	private readonly googleClientIds: string[];
 
 	constructor(
 		private firebaseService: FirebaseService,
@@ -36,8 +41,15 @@ export class AuthService {
 		private readonly patientsService: PatientsService,
 		private readonly tokenDenylistCache: CacheService<number>,
 	) {
-		this.googleClientId = this.configService.get('GOOGLE_CLIENT_ID')!;
-		this.googleClient = new OAuth2Client(this.googleClientId);
+		// Comma-separated: the Android, iOS and web apps each have their own
+		// OAuth client ID.
+		this.googleClientIds = (
+			this.configService.get<string>('GOOGLE_CLIENT_ID') ?? ''
+		)
+			.split(',')
+			.map((id) => id.trim())
+			.filter(Boolean);
+		this.googleClient = new OAuth2Client();
 	}
 
 	async signup(dto: CreateAuthDto) {
@@ -150,10 +162,17 @@ export class AuthService {
 		if (!idToken) {
 			throw new UnauthorizedException('Google ID Token is missing.');
 		}
+		// Without an audience, verifyIdToken accepts a Google token issued to
+		// any app, so a token a third-party app collected would sign in here.
+		if (this.googleClientIds.length === 0) {
+			throw new ServiceUnavailableException(
+				'Google sign-in is not configured.',
+			);
+		}
 		try {
 			const ticket = await this.googleClient.verifyIdToken({
 				idToken: idToken,
-				audience: this.googleClientId,
+				audience: this.googleClientIds,
 			});
 
 			const payload = ticket.getPayload();

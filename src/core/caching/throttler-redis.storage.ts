@@ -99,4 +99,12 @@ export class RedisThrottlerStorage
 			timeToBlockExpire: Math.ceil(timeToBlockExpireMs / 1000),
 		};
 	}
+
+	/** Clears the hit count and any block for a key. */
+	async reset(key: string, throttlerName: string): Promise<void> {
+		await this.client.del([
+			`throttle:${throttlerName}:${key}`,
+			`throttle:block:${throttlerName}:${key}`,
+		]);
+	}
 }

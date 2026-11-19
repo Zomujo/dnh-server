@@ -5,11 +5,13 @@ import {
 	UnauthorizedException,
 } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
+import { ThrottlerException } from '@nestjs/throttler';
 import { type Mocked, TestBed } from '@suites/unit';
 import * as bcrypt from 'bcrypt';
 import { Model, Types } from 'mongoose';
 import { AuthService } from '@/core/auth/auth.service';
 import { UserType } from '@/core/auth/enums';
+import { AttemptLimiter } from '@/core/caching/attempt-limiter';
 import { CommunicationsService } from '@/core/communications/communications.service';
 import { OtpService } from '@/core/security/otp/otp.service';
 import { Appointment } from '@/features/appointments/entities/appointment.entity';
@@ -33,6 +35,7 @@ describe('ChronicCareAuthService', () => {
 	let otpService: Mocked<OtpService>;
 	let communicationsService: Mocked<CommunicationsService>;
 	let facilitiesService: Mocked<FacilitiesService>;
+	let attemptLimiter: Mocked<AttemptLimiter>;
 
 	beforeAll(async () => {
 		const { unit, unitRef } = await TestBed.solitary(
@@ -56,10 +59,12 @@ describe('ChronicCareAuthService', () => {
 		otpService = unitRef.get(OtpService);
 		communicationsService = unitRef.get(CommunicationsService);
 		facilitiesService = unitRef.get(FacilitiesService);
+		attemptLimiter = unitRef.get(AttemptLimiter);
 	});
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		attemptLimiter.consume.mockResolvedValue(undefined);
 	});
 
 	it('should be defined', () => {
@@ -118,6 +123,29 @@ describe('ChronicCareAuthService', () => {
 	});
 
 	describe('onboard', () => {
+		it('still onboards when the address has had too many codes', async () => {
+			const validPersonnelId = new Types.ObjectId().toString();
+			mockExisting({ _id: validPersonnelId });
+			personnelAccountModel.exists.mockResolvedValue(null);
+			personnelModel.findOneAndUpdate.mockReturnValue({
+				populate: vi.fn().mockResolvedValue({
+					_id: validPersonnelId,
+					role: PersonnelRoles.CLINICIAN,
+					personnelAccounts: [
+						{
+							email: 'doc@example.com',
+							verificationStatus: PersonnelAccountVerificationStatus.UNVERIFIED,
+						},
+					],
+				}),
+			} as any);
+			otpService.generate.mockRejectedValue(new ThrottlerException());
+
+			await expect(
+				service.onboard({ personnelId: validPersonnelId } as any),
+			).resolves.toBe(validPersonnelId);
+			expect(communicationsService.sendMail).not.toHaveBeenCalled();
+		});
 		it('should onboard personnel and send verification code mail for OTP required roles', async () => {
 			const validPersonnelId = new Types.ObjectId().toString();
 			mockExisting({ _id: validPersonnelId });
@@ -395,6 +423,127 @@ describe('ChronicCareAuthService', () => {
 			await expect(
 				service.login({ email: 'doc@example.com', providerUserId: 'g-123' }),
 			).rejects.toThrow(NotFoundException);
+		});
+	});
+
+	describe('login lockout', () => {
+		it('refuses an email over its limit before looking up the account', async () => {
+			attemptLimiter.consume.mockRejectedValue(new ThrottlerException());
+
+			await expect(
+				service.login({ email: 'doc@example.com', password: 'x' }),
+			).rejects.toThrow(ThrottlerException);
+			expect(attemptLimiter.consume).toHaveBeenCalledWith(
+				expect.objectContaining({ name: 'login-attempt' }),
+				'doc@example.com',
+			);
+			expect(personnelAccountModel.findOne).not.toHaveBeenCalled();
+		});
+
+		it('counts an unknown email the same way', async () => {
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue(null),
+			} as any);
+
+			await expect(
+				service.login({ email: 'ghost@example.com', password: 'x' }),
+			).rejects.toThrow(UnauthorizedException);
+			expect(attemptLimiter.consume).toHaveBeenCalledWith(
+				expect.anything(),
+				'ghost@example.com',
+			);
+		});
+
+		it('keeps the count after a wrong password', async () => {
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue({
+					email: 'doc@example.com',
+					password: await bcrypt.hash('validPassword', 4),
+					verificationStatus: PersonnelAccountVerificationStatus.VERIFIED,
+				}),
+			} as any);
+
+			await expect(
+				service.login({ email: 'doc@example.com', password: 'nope' }),
+			).rejects.toThrow(UnauthorizedException);
+			expect(attemptLimiter.reset).not.toHaveBeenCalled();
+		});
+
+		it('clears the count after the right password', async () => {
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue({
+					email: 'doc@example.com',
+					password: await bcrypt.hash('validPassword', 4),
+					verificationStatus: PersonnelAccountVerificationStatus.VERIFIED,
+					personnel: {
+						_id: new Types.ObjectId(),
+						role: PersonnelRoles.CLINICIAN,
+					},
+				}),
+			} as any);
+			authService.signToken.mockResolvedValue('t' as any);
+
+			await service.login({
+				email: 'doc@example.com',
+				password: 'validPassword',
+			});
+			expect(attemptLimiter.reset).toHaveBeenCalledWith(
+				expect.objectContaining({ name: 'login-attempt' }),
+				'doc@example.com',
+			);
+		});
+
+		it('counts case and space variants of an email as one', async () => {
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue(null),
+			} as any);
+
+			await expect(
+				service.login({ email: ' Doc@Example.COM ', password: 'x' }),
+			).rejects.toThrow(UnauthorizedException);
+			expect(attemptLimiter.consume).toHaveBeenCalledWith(
+				expect.anything(),
+				'doc@example.com',
+			);
+			expect(personnelAccountModel.findOne).toHaveBeenCalledWith({
+				provider: PersonnelProviders.EMAIL,
+				email: 'doc@example.com',
+			});
+		});
+
+		it('clears the count once the email is verified', async () => {
+			const account = {
+				email: 'doc@example.com',
+				verificationStatus: PersonnelAccountVerificationStatus.UNVERIFIED,
+				save: vi.fn().mockResolvedValue(true),
+			};
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue(account),
+			} as any);
+			otpService.verify.mockResolvedValue(true);
+
+			await service.verifyOnboardOtp({
+				identifier: 'doc@example.com',
+				code: 123456,
+			});
+			expect(account.verificationStatus).toBe(
+				PersonnelAccountVerificationStatus.VERIFIED,
+			);
+			expect(attemptLimiter.reset).toHaveBeenCalledWith(
+				expect.objectContaining({ name: 'login-attempt' }),
+				'doc@example.com',
+			);
+		});
+
+		it('does not count Google sign-in', async () => {
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue(null),
+			} as any);
+
+			await expect(
+				service.login({ providerUserId: 'g-1' } as any),
+			).rejects.toThrow(NotFoundException);
+			expect(attemptLimiter.consume).not.toHaveBeenCalled();
 		});
 	});
 

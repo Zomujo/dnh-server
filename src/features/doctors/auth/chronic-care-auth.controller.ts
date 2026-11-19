@@ -10,6 +10,7 @@ import {
 	Post,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { seconds, Throttle } from '@nestjs/throttler';
 import { Authorize, CustomApiResponse, GetUser } from '@/common/decorators';
 import {
 	ApiSuccessResponseDto,
@@ -27,6 +28,8 @@ import {
 	LoginPersonnelResponseDto,
 } from './dto';
 
+// The public auth routes get tighter per-IP limits than the app-wide 100 a
+// minute. The per-email limits (login lockout, OTP sends) are in the services.
 @ApiTags('Dnh Personnels')
 @Controller('personnel/auth')
 export class ChronicCareAuthController {
@@ -40,6 +43,7 @@ export class ChronicCareAuthController {
 		message: 'Personnel signed up successfully',
 	})
 	@HttpCode(HttpStatus.OK)
+	@Throttle({ default: { limit: 5, ttl: seconds(60) } })
 	@Post('signup')
 	async create(@Body() dto: LoginPersonnelDto) {
 		try {
@@ -83,6 +87,7 @@ export class ChronicCareAuthController {
 		message: 'Personnel logged in successfully',
 	})
 	@HttpCode(HttpStatus.OK)
+	@Throttle({ default: { limit: 10, ttl: seconds(60) } })
 	@Post('login')
 	async update(@Body() dto: LoginPersonnelDto) {
 		try {
@@ -120,6 +125,7 @@ export class ChronicCareAuthController {
 		message: 'OTP sent successfully',
 	})
 	@HttpCode(HttpStatus.OK)
+	@Throttle({ default: { limit: 3, ttl: seconds(60) } })
 	@Post('otp/re-send')
 	async sendOtp(@Body() dto: GenerateOtpDto) {
 		try {
@@ -137,6 +143,7 @@ export class ChronicCareAuthController {
 		message: 'OTP verified successfully',
 	})
 	@HttpCode(HttpStatus.OK)
+	@Throttle({ default: { limit: 10, ttl: seconds(60) } })
 	@Post('otp/verify')
 	async verifyOtp(@Body() dto: VerifyOtpDto) {
 		try {
