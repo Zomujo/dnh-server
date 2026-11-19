@@ -138,7 +138,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 				payload.messageType ?? MessageType.TEXT,
 				payload.parentMessageId,
 			);
-			this.server.to(payload.roomId).emit('newMessage', savedMsg);
+			const message = await this.chatService.withSignedMedia(savedMsg);
+			this.server.to(payload.roomId).emit('newMessage', message);
 
 			this.chatService.sendPushNotificationForMessage({
 				senderId: userId,

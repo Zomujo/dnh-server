@@ -62,7 +62,10 @@ export class ChatService {
 		const signed = await this.signContent(plain);
 		const parent = signed.parentMessageId;
 		if (parent && typeof parent === 'object' && 'content' in parent) {
-			return { ...signed, parentMessageId: await this.signContent(parent) };
+			const visible = parent.deletedForEveryone
+				? { ...parent, content: 'This message was deleted' }
+				: await this.signContent(parent);
+			return { ...signed, parentMessageId: visible };
 		}
 		return signed;
 	}
@@ -108,7 +111,12 @@ export class ChatService {
 		if (!parentMessageId) return;
 		const inRoom =
 			isValidObjectId(parentMessageId) &&
-			(await this.messageModel.exists({ _id: parentMessageId, roomId }));
+			(await this.messageModel.exists({
+				_id: parentMessageId,
+				roomId,
+				// Replying to a deleted message would return its content.
+				deletedForEveryone: { $ne: true },
+			}));
 		if (!inRoom) {
 			throw new NotFoundException('Parent message not found');
 		}
@@ -233,13 +241,6 @@ export class ChatService {
 			};
 			if (row.deletedForEveryone) {
 				row.content = 'This message was deleted';
-			}
-			const parent = row.parentMessageId;
-			if (parent && typeof parent === 'object' && parent.deletedForEveryone) {
-				row.parentMessageId = {
-					...parent,
-					content: 'This message was deleted',
-				};
 			}
 			return row;
 		});
