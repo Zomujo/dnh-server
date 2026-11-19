@@ -94,4 +94,13 @@ async function bootstrap() {
 	console.info(`ACCESS SWAGGER DOCUMENTATION AT http://localhost:${PORT}/docs`);
 	return;
 }
-bootstrap();
+
+// A startup failure (e.g. a module's init hook rejecting inside listen())
+// would otherwise land in the unhandledRejection handler above and leave a
+// process that is alive but never listens. Exit so the platform restarts it.
+bootstrap().catch((error) => {
+	// Logs are buffered until the app starts; print what was held first.
+	Logger.flush();
+	console.error('Server failed to start', error);
+	process.exit(1);
+});
