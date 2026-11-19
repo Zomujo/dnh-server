@@ -41,6 +41,28 @@ async function bootstrap() {
 	// without this, req.ip (rate limiting, logs) is the same for everyone.
 	app.set('trust proxy', resolveTrustProxy());
 
+	// Baseline security headers for a JSON API. No content security policy
+	// beyond frame-ancestors: the Swagger UI on staging needs its scripts.
+	app.disable('x-powered-by');
+	app.use(
+		(
+			_req: unknown,
+			res: { setHeader: (k: string, v: string) => void },
+			next: () => void,
+		) => {
+			res.setHeader('X-Content-Type-Options', 'nosniff');
+			res.setHeader('X-Frame-Options', 'DENY');
+			res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+			res.setHeader('Referrer-Policy', 'no-referrer');
+			res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+			if (environment === NodeEnvs.PRODUCTION) {
+				// Production is only served over HTTPS (TLS ends at the proxy).
+				res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+			}
+			next();
+		},
+	);
+
 	// The mobile app isn't a browser and doesn't need CORS; only browser
 	// clients (the HCP web app) do, so production should list them.
 	const corsOrigins = resolveCorsOrigins();

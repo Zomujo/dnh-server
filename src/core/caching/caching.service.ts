@@ -23,4 +23,21 @@ export class CacheService<T> {
 		const response = await this.cacheManager.del(key);
 		return response;
 	}
+
+	/**
+	 * Reads a value and deletes it, returning it only to the caller whose
+	 * delete removed the key. Redis DEL is atomic, so of several concurrent
+	 * callers exactly one gets the value. cache-manager's own del() always
+	 * reports true, so this asks the underlying Keyv stores directly.
+	 */
+	async take(key: string): Promise<T | null> {
+		const value = await this.get(key);
+		if (value === null) {
+			return null;
+		}
+		const removed = await Promise.all(
+			this.cacheManager.stores.map((store) => store.delete(key)),
+		);
+		return removed.some(Boolean) ? value : null;
+	}
 }

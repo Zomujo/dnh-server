@@ -99,6 +99,34 @@ export class ChatService {
 		}
 	}
 
+	/**
+	 * A reply's parent must be a message in the same room. Without this, a
+	 * participant of one room could reply to any message id and get that
+	 * message's content and sender back, populated, from another room.
+	 */
+	async assertParentInRoom(roomId: string, parentMessageId?: string) {
+		if (!parentMessageId) return;
+		const inRoom =
+			isValidObjectId(parentMessageId) &&
+			(await this.messageModel.exists({ _id: parentMessageId, roomId }));
+		if (!inRoom) {
+			throw new NotFoundException('Parent message not found');
+		}
+	}
+
+	/**
+	 * How a reply's parent is populated. `match` drops a parent from another
+	 * room (replies written before assertParentInRoom existed), and roomId is
+	 * selected so signContent can sign a media parent.
+	 */
+	private parentPopulate(roomId: string) {
+		return {
+			path: 'parentMessageId',
+			select: 'content senderId messageType roomId deletedForEveryone',
+			match: { roomId },
+		};
+	}
+
 	async saveMessage(
 		senderId: string,
 		roomId: string,
@@ -115,16 +143,14 @@ export class ChatService {
 		};
 
 		if (parentMessageId) {
+			await this.assertParentInRoom(roomId, parentMessageId);
 			payload.parentMessageId = new Types.ObjectId(parentMessageId);
 		}
 
 		const message = await this.messageModel.create(payload);
 
 		if (parentMessageId) {
-			return message.populate({
-				path: 'parentMessageId',
-				select: 'content senderId messageType',
-			});
+			return message.populate(this.parentPopulate(roomId));
 		}
 
 		return message;
@@ -195,10 +221,7 @@ export class ChatService {
 			.sort({ createdAt: -1 })
 			.skip(pageFilter.offset)
 			.limit(pageFilter.limit)
-			.populate({
-				path: 'parentMessageId',
-				select: 'content senderId messageType',
-			})
+			.populate(this.parentPopulate(roomId))
 			.lean();
 
 		const plainRows = messages.map((msg: any) => {
@@ -210,6 +233,13 @@ export class ChatService {
 			};
 			if (row.deletedForEveryone) {
 				row.content = 'This message was deleted';
+			}
+			const parent = row.parentMessageId;
+			if (parent && typeof parent === 'object' && parent.deletedForEveryone) {
+				row.parentMessageId = {
+					...parent,
+					content: 'This message was deleted',
+				};
 			}
 			return row;
 		});

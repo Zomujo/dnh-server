@@ -38,6 +38,92 @@ describe('ChatService', () => {
 		expect(service).toBeDefined();
 	});
 
+	describe('saveMessage reply parent', () => {
+		it('refuses a parent message from another room', async () => {
+			messageModel.exists.mockResolvedValue(null);
+			const parent = '6aff6f5a67dcbf4c51d3665a';
+
+			await expect(
+				service.saveMessage(
+					'patient-a',
+					'room-a',
+					'hi',
+					MessageType.TEXT,
+					parent,
+				),
+			).rejects.toThrow('Parent message not found');
+			expect(messageModel.exists).toHaveBeenCalledWith({
+				_id: parent,
+				roomId: 'room-a',
+			});
+			expect(messageModel.create).not.toHaveBeenCalled();
+		});
+
+		it('refuses a malformed parent id without querying', async () => {
+			await expect(
+				service.assertParentInRoom('room-a', 'not-an-id'),
+			).rejects.toThrow('Parent message not found');
+			expect(messageModel.exists).not.toHaveBeenCalled();
+		});
+
+		it('accepts a parent in the same room', async () => {
+			messageModel.exists.mockResolvedValue({ _id: 'p' } as any);
+			await expect(
+				service.assertParentInRoom('room-a', '6aff6f5a67dcbf4c51d3665a'),
+			).resolves.toBeUndefined();
+		});
+	});
+
+	describe('getPaginatedMessages reply parents', () => {
+		const rows = (msgs: any[]) => {
+			const chain: any = {
+				sort: vi.fn().mockReturnThis(),
+				skip: vi.fn().mockReturnThis(),
+				limit: vi.fn().mockReturnThis(),
+				populate: vi.fn().mockReturnThis(),
+				lean: vi.fn().mockResolvedValue(msgs),
+			};
+			messageModel.find.mockReturnValue(chain);
+			messageModel.countDocuments.mockResolvedValue(msgs.length as any);
+			roomModel.exists.mockResolvedValue({ _id: 'room' } as any);
+			firebaseService.objectPathFromUrl.mockReturnValue(null);
+			return chain;
+		};
+		const roomId = '6aff6f5a67dcbf4c51d3665a';
+
+		it('populates only parents from the same room', async () => {
+			const chain = rows([]);
+			await service.getPaginatedMessages(roomId, 'u1', {} as any);
+			expect(chain.populate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					path: 'parentMessageId',
+					match: { roomId },
+				}),
+			);
+		});
+
+		it('masks a parent deleted for everyone', async () => {
+			rows([
+				{
+					_id: 'm2',
+					roomId,
+					content: 'reply',
+					parentMessageId: {
+						content: 'secret',
+						deletedForEveryone: true,
+						roomId,
+					},
+				},
+			]);
+			const { rows: out } = await service.getPaginatedMessages(
+				roomId,
+				'u1',
+				{} as any,
+			);
+			expect(out[0].parentMessageId.content).toBe('This message was deleted');
+		});
+	});
+
 	describe('withSignedMedia', () => {
 		const media = (path: string) => ({
 			roomId: 'room-1',
