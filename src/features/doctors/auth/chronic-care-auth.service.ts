@@ -40,6 +40,12 @@ function isOnboarded(personnel: { onboardedAt?: Date; userName?: string }) {
 	return !!personnel.onboardedAt || !!personnel.userName?.trim();
 }
 
+/** Mongo filter matching what isOnboarded() treats as not onboarded. */
+const NOT_ONBOARDED = {
+	onboardedAt: null,
+	userName: { $not: /\S/ },
+};
+
 // Appointments in these states still need a host. Only the host can modify an
 // appointment, so deleting the host would strand them — deletion is refused
 // until they're completed, cancelled, or handed off.
@@ -94,6 +100,13 @@ export class ChronicCareAuthService {
 			// Drop the orphaned row instead of resurrecting the dead id.
 			await this.personnelAccountModel.deleteOne({ _id: existingAccount!._id });
 			personnelId = undefined;
+		}
+
+		if (personnelId) {
+			// Never attach a new credential to someone else's personnel: signing
+			// up with a Google user's email would otherwise add a password of the
+			// caller's choosing to that user's profile.
+			throw new ConflictException('Account with this email already exists');
 		}
 
 		if (!personnelId) {
@@ -158,10 +171,25 @@ export class ChronicCareAuthService {
 			throw new NotFoundException('Personnel not found');
 		}
 
-		if (actorPersonnelId === undefined && isOnboarded(existing)) {
-			throw new UnauthorizedException(
-				'This profile is already onboarded; sign in to change it',
-			);
+		const tokenless = actorPersonnelId === undefined;
+		if (tokenless) {
+			if (isOnboarded(existing)) {
+				throw new UnauthorizedException(
+					'This profile is already onboarded; sign in to change it',
+				);
+			}
+			// Tokenless onboarding is for an email signup that cannot log in yet.
+			// Once any of its accounts can log in (verified, exempt or Google), the
+			// owner has a token and must use it.
+			const canLogIn = await this.personnelAccountModel.exists({
+				personnel: existing._id,
+				verificationStatus: {
+					$ne: PersonnelAccountVerificationStatus.UNVERIFIED,
+				},
+			});
+			if (canLogIn) {
+				throw new UnauthorizedException('Sign in to onboard this account');
+			}
 		}
 
 		if (dto.facility) {
@@ -170,8 +198,12 @@ export class ChronicCareAuthService {
 		}
 
 		const personnel = await this.personnelModel
-			.findByIdAndUpdate(
-				dto.personnelId,
+			.findOneAndUpdate(
+				// Without a token, the not-onboarded check is part of the write, so
+				// two concurrent tokenless calls cannot both succeed.
+				tokenless
+					? { _id: dto.personnelId, ...NOT_ONBOARDED }
+					: { _id: dto.personnelId },
 				{
 					$set: {
 						userName: `${dto.firstname ?? ''} ${dto.lastname ?? ''}`.trim(),
@@ -187,7 +219,10 @@ export class ChronicCareAuthService {
 			.populate({ path: 'personnelAccounts' });
 
 		if (!personnel) {
-			throw new NotFoundException('Personnel not found');
+			// It existed a moment ago, so a concurrent tokenless onboarding won.
+			throw new UnauthorizedException(
+				'This profile is already onboarded; sign in to change it',
+			);
 		}
 
 		const account = (personnel.personnelAccounts as any)?.[0] as
@@ -207,7 +242,6 @@ export class ChronicCareAuthService {
 					mail: account.email,
 					fullName: personnel.userName,
 					code: code,
-					phoneNumber: personnel.phoneNumber,
 				});
 			} else {
 				account.verificationStatus = PersonnelAccountVerificationStatus.EXEMPT;
@@ -457,7 +491,6 @@ export class ChronicCareAuthService {
 			mail: account.email,
 			fullName: personnel?.userName,
 			code: code,
-			phoneNumber: personnel?.phoneNumber,
 		});
 	}
 
@@ -485,9 +518,11 @@ export class ChronicCareAuthService {
 		mail: string;
 		fullName: string;
 		code: number;
-		phoneNumber?: string;
 	}) {
-		const { mail, fullName, code, phoneNumber } = payload;
+		// Email only: this code proves the email address. The phone number comes
+		// from the unauthenticated onboarding request, so an SMS copy would let
+		// anyone verify an email they do not own.
+		const { mail, fullName, code } = payload;
 		const emailPayload = {
 			recipient: mail,
 			subject: 'Email OTP - Yelima',
@@ -501,12 +536,5 @@ export class ChronicCareAuthService {
 		};
 
 		this.communicationsService.sendMail(emailPayload);
-
-		if (phoneNumber) {
-			this.communicationsService.sendSms({
-				recipient: [phoneNumber],
-				message: `Hi ${fullName}, your OTP is ${code}. It is valid for 10 minutes.`,
-			});
-		}
 	}
 }

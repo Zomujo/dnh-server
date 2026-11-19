@@ -8,7 +8,6 @@ import {
 	HttpStatus,
 	Logger,
 	Post,
-	UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Authorize, CustomApiResponse, GetUser } from '@/common/decorators';
@@ -186,19 +185,22 @@ export class ChronicCareAuthController {
 		}
 	}
 
+	/**
+	 * The personnel id from an onboarding request's staff token, if it has a
+	 * valid one. A missing, malformed or stale token falls back to the
+	 * tokenless rules, which only allow a first onboarding of an account that
+	 * cannot log in yet; so this never grants more than no token would.
+	 */
 	private async optionalPersonnelId(
 		authorization?: string,
 	): Promise<string | undefined> {
-		if (!authorization) return undefined;
-		const [type, token] = authorization.split(' ');
-		if (type !== 'Bearer' || !token) {
-			throw new UnauthorizedException();
-		}
+		const [type, token] = authorization?.split(' ') ?? [];
+		if (type !== 'Bearer' || !token) return undefined;
 		try {
 			const payload = await this.tokenService.verifyChronicCareToken(token);
 			return payload.sub;
 		} catch {
-			throw new UnauthorizedException();
+			return undefined;
 		}
 	}
 }
