@@ -96,7 +96,6 @@ export class NotificationsConsumer extends WorkerHost {
 		if (!notification) {
 			throw new NotFoundException('Notification not found');
 		}
-		const goals = data.groupedNotifications.map((not) => not.goal);
 
 		const text = await this.composeReminder(
 			notification,
