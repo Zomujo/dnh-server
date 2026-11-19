@@ -1,5 +1,7 @@
+import { ThrottlerException } from '@nestjs/throttler';
 import { type Mocked, TestBed } from '@suites/unit';
 import * as bcrypt from 'bcrypt';
+import { AttemptLimiter } from '../../caching/attempt-limiter';
 import { CacheService } from '../../caching/caching.service';
 import { OtpService } from './otp.service';
 
@@ -7,11 +9,13 @@ describe('OtpService', () => {
 	let service: OtpService;
 	let cache: Mocked<CacheService<string>>;
 	let store: Map<string, string>;
+	let limiter: Mocked<AttemptLimiter>;
 
 	beforeEach(async () => {
 		const { unit, unitRef } = await TestBed.solitary(OtpService).compile();
 		service = unit;
 		cache = unitRef.get(CacheService);
+		limiter = unitRef.get(AttemptLimiter);
 		store = new Map();
 		cache.set.mockImplementation(async (k: string, v: string) => {
 			store.set(k, v);
@@ -21,6 +25,19 @@ describe('OtpService', () => {
 			const v = store.get(k) ?? null;
 			return store.delete(k) ? v : null;
 		});
+	});
+
+	it('refuses a new code once the address hit its send limit', async () => {
+		limiter.assertAllowed.mockRejectedValue(new ThrottlerException());
+
+		await expect(
+			service.generate({ identifier: 'A@example.com' }),
+		).rejects.toThrow(ThrottlerException);
+		expect(store.size).toBe(0);
+		expect(limiter.assertAllowed).toHaveBeenCalledWith(
+			expect.objectContaining({ name: 'otp-send' }),
+			'a@example.com',
+		);
 	});
 
 	it('accepts the generated code once', async () => {

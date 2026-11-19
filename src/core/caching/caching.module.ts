@@ -4,6 +4,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { seconds, ThrottlerModule } from '@nestjs/throttler';
+import { AttemptLimiter } from './attempt-limiter';
 import { CacheService } from './caching.service';
 import { IdempotencyStore } from './idempotency.store';
 import { RedisThrottlerStorage } from './throttler-redis.storage';
@@ -12,6 +13,7 @@ import { RedisThrottlerStorageModule } from './throttler-redis-storage.module';
 @Global()
 @Module({
 	imports: [
+		RedisThrottlerStorageModule,
 		CacheModule.registerAsync({
 			isGlobal: true,
 			imports: [ConfigModule],
@@ -43,6 +45,7 @@ import { RedisThrottlerStorageModule } from './throttler-redis-storage.module';
 	],
 	providers: [
 		CacheService,
+		AttemptLimiter,
 		IdempotencyStore,
 		// The ThrottlerGuard itself is registered in AuthModule (as
 		// UserThrottlerGuard) so it runs after AuthGuard and can rate-limit
@@ -68,6 +71,6 @@ import { RedisThrottlerStorageModule } from './throttler-redis-storage.module';
 		// 	useClass: CustomCacheInterceptor,
 		// },
 	],
-	exports: [CacheService, IdempotencyStore],
+	exports: [CacheService, IdempotencyStore, AttemptLimiter],
 })
 export class CachingModule {}

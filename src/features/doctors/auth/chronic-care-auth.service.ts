@@ -7,11 +7,17 @@ import {
 	UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { ThrottlerException } from '@nestjs/throttler';
 import * as bcrypt from 'bcrypt';
 import { isValidObjectId, Model } from 'mongoose';
 import { AuthService } from '@/core/auth/auth.service';
 import { GoogleLoginDto } from '@/core/auth/dto';
 import { UserType } from '@/core/auth/enums';
+import {
+	AttemptLimit,
+	AttemptLimiter,
+	tooMany,
+} from '@/core/caching/attempt-limiter';
 import { CommunicationsService } from '@/core/communications/communications.service';
 import { GenerateOtpDto, VerifyOtpDto } from '@/core/security/otp/dto';
 import { OtpService } from '@/core/security/otp/otp.service';
@@ -32,6 +38,19 @@ import {
 // instead of VERIFIED, so they stay findable and can be pushed through real
 // verification later just by adding PersonnelRoles.PHARMACY here.
 const OTP_REQUIRED_ROLES: PersonnelRoles[] = [PersonnelRoles.CLINICIAN];
+
+/**
+ * Wrong passwords allowed per email before email login is locked. Counted
+ * per email, not per IP, so spreading guesses across addresses does not help.
+ * Someone could lock a known staff email on purpose; it unlocks on its own,
+ * and Google sign-in is unaffected.
+ */
+export const LOGIN_FAILURE_LIMIT: AttemptLimit = {
+	name: 'login-failure',
+	max: 5,
+	windowMs: 15 * 60 * 1000,
+	blockMs: 15 * 60 * 1000,
+};
 
 // Whether a personnel has been through onboarding, after which their profile
 // only changes with their own token. Profiles onboarded before onboardedAt
@@ -82,6 +101,7 @@ export class ChronicCareAuthService {
 		private readonly otpService: OtpService,
 		private readonly communicationsService: CommunicationsService,
 		private readonly facilitiesService: FacilitiesService,
+		private readonly attemptLimiter: AttemptLimiter,
 	) {}
 
 	async create(dto: CreatePersonnelAccountInput) {
@@ -234,15 +254,22 @@ export class ChronicCareAuthService {
 			account.verificationStatus !== PersonnelAccountVerificationStatus.VERIFIED
 		) {
 			if (OTP_REQUIRED_ROLES.includes(personnel.role as PersonnelRoles)) {
-				const code = await this.otpService.generate({
-					identifier: `${account.email}`,
-				});
+				// The profile is already saved, so a send limit reached through
+				// re-send must not fail onboarding; a code sent earlier still works.
+				const code = await this.otpService
+					.generate({ identifier: `${account.email}` })
+					.catch((error) => {
+						if (error instanceof ThrottlerException) return undefined;
+						throw error;
+					});
 
-				this.sendVerificationCodeMail({
-					mail: account.email,
-					fullName: personnel.userName,
-					code: code,
-				});
+				if (code !== undefined) {
+					this.sendVerificationCodeMail({
+						mail: account.email,
+						fullName: personnel.userName,
+						code: code,
+					});
+				}
 			} else {
 				account.verificationStatus = PersonnelAccountVerificationStatus.EXEMPT;
 				await (account as any).save();
@@ -257,6 +284,10 @@ export class ChronicCareAuthService {
 		// PersonnelAccount rows, even when they share an email — never
 		// disambiguate by email alone (see 2.4 in the audit).
 		const isGoogleLogin = !!dto.providerUserId;
+
+		if (!isGoogleLogin) {
+			await this.attemptLimiter.assertAllowed(LOGIN_FAILURE_LIMIT, dto.email);
+		}
 
 		const personnelAccount = await this.personnelAccountModel
 			.findOne(
@@ -278,7 +309,7 @@ export class ChronicCareAuthService {
 				// separately whether to create one.
 				throw new NotFoundException('Personnel not found');
 			}
-			throw new UnauthorizedException('Invalid credentials');
+			throw await this.loginFailure(dto.email);
 		}
 
 		if (
@@ -296,8 +327,9 @@ export class ChronicCareAuthService {
 				personnelAccount.password ?? '',
 			);
 			if (!passwordMatch) {
-				throw new UnauthorizedException('Invalid credentials');
+				throw await this.loginFailure(dto.email);
 			}
+			await this.attemptLimiter.reset(LOGIN_FAILURE_LIMIT, dto.email);
 		}
 
 		const personnel = personnelAccount.personnel as any;
@@ -335,6 +367,20 @@ export class ChronicCareAuthService {
 		);
 
 		return { personnelId: personnel._id.toString(), token };
+	}
+
+	/**
+	 * Counts a wrong email or password against the email, whether or not an
+	 * account has it, so the lockout does not reveal which emails exist.
+	 */
+	private async loginFailure(email: string) {
+		const blockedFor = await this.attemptLimiter.record(
+			LOGIN_FAILURE_LIMIT,
+			email,
+		);
+		return blockedFor > 0
+			? tooMany(blockedFor)
+			: new UnauthorizedException('Invalid credentials');
 	}
 
 	async googleAuth(dto: GoogleLoginDto) {

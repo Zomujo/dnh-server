@@ -99,4 +99,20 @@ export class RedisThrottlerStorage
 			timeToBlockExpire: Math.ceil(timeToBlockExpireMs / 1000),
 		};
 	}
+
+	/** Seconds left on a block made by increment(), or 0 when not blocked. */
+	async blockedFor(key: string, throttlerName: string): Promise<number> {
+		const pttl = await this.client.pTTL(
+			`throttle:block:${throttlerName}:${key}`,
+		);
+		return pttl > 0 ? Math.ceil(pttl / 1000) : 0;
+	}
+
+	/** Clears the hit count and any block for a key. */
+	async reset(key: string, throttlerName: string): Promise<void> {
+		await this.client.del([
+			`throttle:${throttlerName}:${key}`,
+			`throttle:block:${throttlerName}:${key}`,
+		]);
+	}
 }

@@ -310,6 +310,16 @@ To secure a route:
 
 Personnel roles: `clinician`, `pharmacy`.
 
+### Rate limits on staff sign-in
+
+| Limit | Applies to | When reached |
+|---|---|---|
+| 5 wrong passwords per email in 15 minutes | `POST /personnel/auth/login` with email and password, whether or not the email has an account | That email's password sign-in returns 429 for 15 minutes, even with the right password. A correct sign-in resets the count. Google sign-in is unaffected |
+| 5 verification codes per email per hour | Every code sent: onboarding and `POST /personnel/auth/otp/re-send` | `otp/re-send` returns 429 until the hour is up. Onboarding still succeeds; a code sent earlier still works |
+| Per IP, per minute: signup 5, login 10, `otp/re-send` 3, `otp/verify` 10 | Those routes | 429 |
+
+The per-email counts live in Redis (`throttle:login-failure:<email>`, `throttle:otp-send:<email>`). To unlock an email early, delete its `throttle:*` and `throttle:block:*` keys.
+
 ---
 
 ## Audit Logs
@@ -467,7 +477,7 @@ After any change to `.envrc`, run `direnv allow` again to reload.
 | `FIREBASE_BASE_CLIENT_ID` | Yes | Firebase client ID |
 | `FIREBASE_BASE_CLIENT_CERT_URL` | Yes | Firebase client certificate URL |
 | `BASE_STORAGE_BUCKET` | Yes | Firebase Storage bucket name |
-| `GOOGLE_CLIENT_ID` | Yes | Google OAuth client ID (for personnel Google login) |
+| `GOOGLE_CLIENT_ID` | Yes | OAuth client IDs the staff app's Google sign-in tokens are issued for, comma-separated (Android, iOS, web). Google sign-in returns 503 while it is empty |
 | `LOGTAIL_SOURCE_TOKEN` | Staging/Prod | BetterStack source token |
 | `LOGTAIL_HOST` | Staging/Prod | BetterStack ingestion endpoint |
 | `QUEUE_TLS` | No | Set to `true` to enable TLS for the Redis/BullMQ connection |
