@@ -8,6 +8,7 @@ import {
 } from '../vital-histories/entities/vital-history.entity';
 import { Patient, PatientSchema } from './entities/patient.entity';
 import { Summary, SummarySchema } from './entities/summary.entity';
+import { PatientDataExportService } from './patient-data-export.service';
 import { PatientsController } from './patients.controller';
 import { PatientsService } from './patients.service';
 
@@ -22,7 +23,7 @@ import { PatientsService } from './patients.service';
 		ChronicConditionsModule,
 	],
 	controllers: [PatientsController],
-	providers: [PatientsService],
-	exports: [PatientsService],
+	providers: [PatientsService, PatientDataExportService],
+	exports: [PatientsService, PatientDataExportService],
 })
 export class PatientsModule {}

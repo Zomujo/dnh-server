@@ -21,14 +21,14 @@ export function throwError(logger: Logger, error: any): void {
 	// Handle duplicate key (unique constraint)
 	if (error.name === MongoServerError.name && error.code === 11000) {
 		const field = Object.keys(error.keyValue)[0];
-		const value = error.keyValue[field];
-		logger.warn(`duplicate key violation — field: ${field}, value: ${value}`);
+		// Never the value: it can be a phone number or ID number.
+		logger.warn(`duplicate key violation — field: ${field}`);
 		throw new BadRequestException(`forbidden: ${field}`);
 	}
 
 	// Handle invalid ObjectId or invalid referenced value
 	if (error instanceof mongoose.Error.CastError) {
-		logger.warn(`Invalid value for ${error.path}: ${error.value}`);
+		logger.warn(`Invalid value for ${error.path}`);
 		throw new BadRequestException(
 			`${error.path} has invalid value: ${error.value}`,
 		);

@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Message, Messaging } from 'firebase-admin/messaging';
 import { Model, Types } from 'mongoose';
+import { backgroundJobsEnabled } from '@/common/utils/background-jobs';
 import { UserType } from '@/core/auth/enums';
 import { FirebaseService } from '@/core/firebase/firebase.service';
 import { IUserPayload } from '@/core/firebase/interface/user.interface';
@@ -58,9 +59,10 @@ export class PushService implements OnModuleInit {
 	 * Collapses rows left over from the old (userId, fcmToken) keying, where a
 	 * token could belong to several users, keeping the most recently
 	 * registered owner; then builds the unique fcmToken index that depends
-	 * on it. Idempotent, and never fails startup.
+	 * on it. Idempotent, and never fails startup. Skipped by one-off scripts.
 	 */
 	async onModuleInit() {
+		if (!backgroundJobsEnabled()) return;
 		try {
 			const shared = await this.userTokenModel.aggregate<{
 				_id: string;
@@ -222,8 +224,7 @@ export class PushService implements OnModuleInit {
 				...message,
 				token,
 			});
-			this.logger.log(`notification sent to token:${token}`);
-			console.log(notification);
+			this.logger.log(`notification sent: ${notification}`);
 		} catch (error) {
 			this.logger.log('Error sending message:', error);
 		}
@@ -380,11 +381,7 @@ export class PushService implements OnModuleInit {
 		for (const token of fcmTokens) {
 			try {
 				const response = await messaging.send({ ...message, token });
-				this.logger.log(`Notification Message:`, message);
-				this.logger.log(
-					`Notification sent successfully: ${response}`,
-					response,
-				);
+				this.logger.log(`Notification sent successfully: ${response}`);
 			} catch (error: any) {
 				if (
 					error.code === 'messaging/invalid-registration-token' ||
@@ -392,9 +389,7 @@ export class PushService implements OnModuleInit {
 					error.message ===
 						'The registration token is not a valid FCM registration token'
 				) {
-					this.logger.debug(
-						`Removing invalid FCM token for user ${userId}: ${token}`,
-					);
+					this.logger.debug(`Removing invalid FCM token for user ${userId}`);
 					await this.userTokenModel.deleteOne({
 						userId,
 						fcmToken: token,
@@ -433,11 +428,7 @@ export class PushService implements OnModuleInit {
 						},
 					},
 				});
-				this.logger.debug(`Token: ${token} Notification Message:`, message);
-				this.logger.debug(
-					`Notification sent successfully: ${response}`,
-					response,
-				);
+				this.logger.debug(`Notification sent successfully: ${response}`);
 			} catch (error: any) {
 				if (
 					error.code === 'messaging/invalid-registration-token' ||
@@ -445,9 +436,7 @@ export class PushService implements OnModuleInit {
 					error.message ===
 						'The registration token is not a valid FCM registration token'
 				) {
-					this.logger.debug(
-						`Removing invalid FCM token for user ${userId}: ${token}`,
-					);
+					this.logger.debug(`Removing invalid FCM token for user ${userId}`);
 					await this.userTokenModel.deleteOne({
 						userId,
 						fcmToken: token,
@@ -466,10 +455,8 @@ export class PushService implements OnModuleInit {
 	) {
 		try {
 			const response = await messaging.send({ ...message, topic });
-			this.logger.log(`Notification Message:`, message);
 			this.logger.log(
 				`Notification sent successfully to topic ${topic} : ${response}`,
-				response,
 			);
 		} catch (error: any) {
 			this.logger.error('Error sending notification to topic:', error);
@@ -496,8 +483,6 @@ export class PushService implements OnModuleInit {
 				image: null,
 			});
 
-		this.logger.log(
-			`Added ${message.notification?.title} notification to Firebase`,
-		);
+		this.logger.log(`Added ${notificationType} notification to Firebase`);
 	}
 }

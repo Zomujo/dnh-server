@@ -1,6 +1,7 @@
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger, OnModuleInit } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
+import { backgroundJobsEnabled } from '@/common/utils/background-jobs';
 import { AdherencesService } from './adherences.service';
 
 export const MISSED_DOSES_QUEUE = 'MissedDoses';
@@ -13,7 +14,7 @@ export const MISSED_DOSES_QUEUE = 'MissedDoses';
  * schedulers rather than in-process crons, so each runs once however many
  * server instances are up.
  */
-@Processor(MISSED_DOSES_QUEUE)
+@Processor(MISSED_DOSES_QUEUE, { autorun: backgroundJobsEnabled() })
 export class MissedDosesProcessor extends WorkerHost implements OnModuleInit {
 	private logger = new Logger(MissedDosesProcessor.name);
 
@@ -28,6 +29,7 @@ export class MissedDosesProcessor extends WorkerHost implements OnModuleInit {
 	// schedulers live in Redis, so ones registered by an earlier boot keep
 	// running.
 	async onModuleInit() {
+		if (!backgroundJobsEnabled()) return;
 		try {
 			await this.queue.upsertJobScheduler(
 				'record-missed-doses',

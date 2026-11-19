@@ -75,7 +75,12 @@ import {
 	UpdateMedicationDto,
 } from '@/features/medications/dto';
 import { GetSeededMedDto } from '@/features/medications/seeded-meds/dto';
-import { GetPatientDto } from '@/features/patients/dto';
+import {
+	ConsentStateDto,
+	GetPatientDto,
+	UpdateConsentDto,
+} from '@/features/patients/dto';
+import { PatientDataExportService } from '@/features/patients/patient-data-export.service';
 import {
 	BpTrendsQueryDto,
 	BpTrendsResponseDto,
@@ -108,7 +113,10 @@ const MAX_VOICE_NOTE_BYTES = 10 * 1024 * 1024;
 @Controller('client')
 export class ClientController {
 	private logger = new Logger(ClientController.name);
-	constructor(private readonly clientService: ClientService) {}
+	constructor(
+		private readonly clientService: ClientService,
+		private readonly patientDataExportService: PatientDataExportService,
+	) {}
 
 	@Post('chat')
 	@Idempotent()
@@ -193,7 +201,6 @@ export class ClientController {
 				language,
 				audioId,
 			);
-			this.logger.log('ai audio response', response);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,
@@ -652,6 +659,65 @@ export class ClientController {
 				paginated,
 				HttpStatus.OK,
 				'Adherence patterns fetched successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['success', 'notfound', 'authorize'], {
+		type: ConsentStateDto,
+		message: 'Consent fetched successfully',
+	})
+	@Get('consent')
+	async fetchConsent(@GetUser('sub') userId: string) {
+		try {
+			const response = await this.clientService.fetchConsent(userId);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				'Consent fetched successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	@CustomApiResponse(['updated', 'notfound', 'authorize'], {
+		type: ConsentStateDto,
+		message: 'Consent recorded successfully',
+	})
+	@Put('consent')
+	async updateConsent(
+		@GetUser('sub') userId: string,
+		@Body() dto: UpdateConsentDto,
+	) {
+		try {
+			const response = await this.clientService.updateConsent(userId, dto);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				'Consent recorded successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
+	// Right of access / portability: everything stored about the patient,
+	// as one JSON document.
+	@CustomApiResponse(['success', 'notfound', 'authorize'], {
+		message: 'Patient data exported successfully',
+	})
+	@Get('data-export')
+	async exportPatientData(@GetUser('sub') userId: string) {
+		try {
+			const response =
+				await this.patientDataExportService.exportByUserId(userId);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				'Patient data exported successfully',
 			);
 		} catch (error) {
 			throwError(this.logger, error);

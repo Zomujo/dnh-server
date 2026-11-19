@@ -11,6 +11,7 @@ import {
 	createGeminiChatModel,
 	isAiConfigured,
 } from '@/common/utils/ai-features';
+import { backgroundJobsEnabled } from '@/common/utils/background-jobs';
 import { TargetType } from '@/features/adherences/dto/target-type.enum';
 import { AUGURY_PROMPT } from '@/features/client/ai/agents/augury/state';
 import { ExtClientAIService } from '@/features/client/ai/ai-ext.service';
@@ -20,7 +21,7 @@ import { Frequency, PushNotificationType, RepetitionType } from './dto';
 import { AugurNotification } from './entities/notification.entity';
 import { PushService } from './push/push.service';
 
-@Processor(AugurNotification.name)
+@Processor(AugurNotification.name, { autorun: backgroundJobsEnabled() })
 export class NotificationsConsumer extends WorkerHost {
 	private logger = new Logger(NotificationsConsumer.name);
 	// Built on first AI-written reminder: the (retired) AI may be off.
@@ -95,8 +96,6 @@ export class NotificationsConsumer extends WorkerHost {
 		if (!notification) {
 			throw new NotFoundException('Notification not found');
 		}
-		const goals = data.groupedNotifications.map((not) => not.goal);
-		this.logger.log('goals', { goals });
 
 		const text = await this.composeReminder(
 			notification,
@@ -191,7 +190,6 @@ export class NotificationsConsumer extends WorkerHost {
 		// 		updatedAt: addSeconds(timestamp, 1),
 		// 	},
 		// ]);
-		this.logger.log('Ai Output: ' + text);
 		return;
 	}
 

@@ -1,6 +1,10 @@
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { PromptTemplate } from '@langchain/core/prompts';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+	ConflictException,
+	Injectable,
+	NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { differenceInYears } from 'date-fns';
 import { HydratedDocument, Model, Types } from 'mongoose';
@@ -32,9 +36,15 @@ import {
 	FilterPatientsDto,
 	FilterPatientsNoPaginateDto,
 	PatientQueryFilter,
+	StaffConsentInputDto,
 	UpdatePatientDto,
 } from './dto';
-import { Patient } from './entities/patient.entity';
+import {
+	ConsentChannel,
+	ConsentRecord,
+	ConsentStatus,
+	Patient,
+} from './entities/patient.entity';
 import { Summary } from './entities/summary.entity';
 import { SUMMARY_PROMPT } from './utils/summary.prompt';
 
@@ -66,11 +76,19 @@ export class PatientsService {
 	 * those as unknown fields), so the parts are joined into it. A part left
 	 * out is kept from the current name, split at its first space, the same
 	 * way onboarding joined it. Blank parts never clear the stored name.
+	 *
+	 * Consent sent with the update is recorded only after the profile update
+	 * succeeds, and only when it changes something (see staffConsentChange).
 	 */
-	async updatePatient(id: string, dto: UpdatePatientDto) {
+	async updatePatient(id: string, dto: UpdatePatientDto, personnelId?: string) {
 		const patient = await this.findPatientById(id);
 		if (!patient) throw new NotFoundException('Patient not found');
-		const { firstname, lastname, ...rest } = dto;
+		const { firstname, lastname, consent, ...rest } = dto;
+		// Checked before writing anything, so a rejected consent leaves the
+		// profile untouched too.
+		const consentToRecord = consent
+			? staffConsentChange(patient.consent, consent, personnelId)
+			: undefined;
 		const update: Record<string, unknown> = { ...rest };
 		if (firstname !== undefined || lastname !== undefined) {
 			const [currentFirst = '', ...currentLast] = (patient.name ?? '').split(
@@ -85,7 +103,12 @@ export class PatientsService {
 				.join(' ');
 			if (name) update.name = name;
 		}
-		await this.updatePatientById(id, { $set: update });
+		if (Object.keys(update).length > 0) {
+			await this.updatePatientById(id, { $set: update });
+		}
+		if (consentToRecord) {
+			await this.recordConsent({ _id: patient._id }, consentToRecord);
+		}
 		// The doctor-facing summary embeds the patient record.
 		await this.summaryCacheService.delete(summaryCacheKey(id));
 		return patient._id.toString();
@@ -264,6 +287,7 @@ export class PatientsService {
 			facility: _facility,
 			age,
 			dateOfBirth,
+			consent,
 			...rest
 		} = dto;
 
@@ -271,6 +295,15 @@ export class PatientsService {
 		const computedAge =
 			age ??
 			(dateOfBirth ? differenceInYears(new Date(), dateOfBirth) : undefined);
+
+		const granted =
+			consent &&
+			consentRecord(
+				ConsentStatus.GRANTED,
+				consent.policyVersion,
+				ConsentChannel.HCP,
+				personnelId,
+			);
 
 		const patient = await this.patientModel.create({
 			...rest,
@@ -281,6 +314,7 @@ export class PatientsService {
 			age: computedAge,
 			createdBy: new Types.ObjectId(personnelId),
 			...(facilityId && { facility: new Types.ObjectId(facilityId) }),
+			...(granted && { consent: granted, consentHistory: [granted] }),
 		} as any);
 
 		if (dto.chronicConditions?.length) {
@@ -534,6 +568,12 @@ export class PatientsService {
 		return this.patientModel.findOne({ userId }).select(projection || '');
 	}
 
+	async findPatientByCode(patientCode: string, projection?: string) {
+		return this.patientModel
+			.findOne({ patientCode: patientCode.trim().toUpperCase() })
+			.select(projection || '');
+	}
+
 	async findPatientByPhoneNumber(
 		phoneNumber: string,
 		projection?: string,
@@ -561,6 +601,40 @@ export class PatientsService {
 			if (existing) return existing;
 			throw error;
 		}
+	}
+
+	/**
+	 * Records a consent decision as the patient's current consent and appends
+	 * it to their history. With `onlyIfAbsent`, does nothing when a decision
+	 * is already recorded (so a retried onboarding can't add a duplicate).
+	 * An updateOne, not findOneAndUpdate: the summary hook has nothing to do
+	 * for a consent change. Returns whether a patient was updated.
+	 */
+	async recordConsent(
+		filter: { userId: string } | { _id: Types.ObjectId | string },
+		record: ConsentRecord,
+		options: { onlyIfAbsent?: boolean } = {},
+	): Promise<boolean> {
+		const { matchedCount } = await this.patientModel.updateOne(
+			{
+				...filter,
+				...(options.onlyIfAbsent && { consent: { $exists: false } }),
+			},
+			{ $set: { consent: record }, $push: { consentHistory: record } },
+		);
+		return matchedCount > 0;
+	}
+
+	async findConsentByUserId(userId: string) {
+		const patient = await this.patientModel
+			.findOne({ userId })
+			.select('consent consentHistory')
+			.lean();
+		if (!patient) throw new NotFoundException('Patient not found');
+		return {
+			consent: patient.consent ?? null,
+			history: patient.consentHistory ?? [],
+		};
 	}
 
 	async removePatientsByUserId(userId: string) {
@@ -595,10 +669,13 @@ export class PatientsService {
 				.findOne({
 					$or: [{ patient: patientId }, { userId }],
 				})
+				// This record goes into an LLM prompt: national ID numbers and
+				// contact details are never needed for a clinical summary.
 				.populate({
 					path: 'patient',
 					select:
-						'-createdAt -userId -language -timezone -emergencyContactName -emergencyContactPhone -updatedAt -__v',
+						'-createdAt -userId -language -timezone -emergencyContactName -emergencyContactPhone -updatedAt -__v ' +
+						'-ghanaCardNumber -nhisNumber -phoneNumber -consent -consentHistory',
 				})
 				.lean();
 
@@ -639,4 +716,59 @@ function isDuplicateUserIdError(error: unknown) {
 
 function summaryCacheKey(userId: string) {
 	return `chronic-care:doctors:patients:summary:${userId}`;
+}
+
+/**
+ * The consent record a staff member's update should add, or undefined when
+ * there is nothing to record:
+ * - already granted under the same policy version: no change, no write;
+ * - withdrawn by the patient (any channel but staff): kept, and the update
+ *   is rejected with 409 unless `overrideWithdrawal` is set, in which case
+ *   the re-grant is recorded and marked as overriding the withdrawal.
+ */
+export function staffConsentChange(
+	current: ConsentRecord | undefined,
+	input: StaffConsentInputDto,
+	personnelId?: string,
+): ConsentRecord | undefined {
+	if (
+		current?.status === ConsentStatus.GRANTED &&
+		current.policyVersion === input.policyVersion
+	) {
+		return undefined;
+	}
+	const patientWithdrew =
+		current?.status === ConsentStatus.WITHDRAWN &&
+		current.channel !== ConsentChannel.HCP;
+	if (patientWithdrew && !input.overrideWithdrawal) {
+		throw new ConflictException(
+			'The patient withdrew consent. Send consent.overrideWithdrawal: true only if they have agreed again in front of you.',
+		);
+	}
+	const record = consentRecord(
+		ConsentStatus.GRANTED,
+		input.policyVersion,
+		ConsentChannel.HCP,
+		personnelId,
+	);
+	if (patientWithdrew) record.overridesWithdrawal = true;
+	return record;
+}
+
+export function consentRecord(
+	status: ConsentStatus,
+	policyVersion: string,
+	channel: ConsentChannel,
+	recordedBy?: string,
+): ConsentRecord {
+	return {
+		status,
+		policyVersion,
+		channel,
+		recordedAt: new Date(),
+		...(recordedBy &&
+			Types.ObjectId.isValid(recordedBy) && {
+				recordedBy: new Types.ObjectId(recordedBy),
+			}),
+	} as ConsentRecord;
 }

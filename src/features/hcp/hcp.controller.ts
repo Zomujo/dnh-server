@@ -11,7 +11,7 @@ import {
 	Put,
 	Query,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { CustomApiResponse, GetUser, Roles } from '@/common/decorators';
 import { ParseMongoIdPipe } from '@/common/decorators/validators/pipes';
 import {
@@ -52,6 +52,7 @@ import {
 	GetPersonnelPatientsDto,
 	UpdatePatientDto,
 } from '@/features/patients/dto';
+import { PatientDataExportService } from '@/features/patients/patient-data-export.service';
 import {
 	BpTrendsQueryDto,
 	BpTrendsResponseDto,
@@ -72,7 +73,10 @@ import { HcpService } from './hcp.service';
 export class HcpController {
 	private logger = new Logger(HcpController.name);
 
-	constructor(private readonly hcpService: HcpService) {}
+	constructor(
+		private readonly hcpService: HcpService,
+		private readonly patientDataExportService: PatientDataExportService,
+	) {}
 
 	@CustomApiResponse(['created', 'authorizeChronicCare'], {
 		message: 'Vitals stored successfully',
@@ -284,6 +288,40 @@ export class HcpController {
 		}
 	}
 
+	// Right of access for a patient without the app (registered at a facility
+	// or pharmacy, or USSD only), who has no other way to get their data: the
+	// clinician hands them this export. 403 for a patient with an app account,
+	// who exports their own data (GET /client/data-export). Clinician profile:
+	// no AI chat or device rows, and only appointment requests made to the
+	// caller's facility.
+	@CustomApiResponse(['success', 'notfound', 'authorizeChronicCare'], {
+		message: 'Patient data exported successfully',
+	})
+	@ApiForbiddenResponse({
+		description:
+			'The patient has an app account and exports their own data from the app',
+	})
+	@Roles(PersonnelRoles.CLINICIAN)
+	@Get('patients/:id/data-export')
+	async exportPatientData(
+		@Param('id', ParseMongoIdPipe) id: string,
+		@GetUser('facility') facilityId: string,
+	) {
+		try {
+			const response = await this.patientDataExportService.exportByPatientId(
+				id,
+				facilityId,
+			);
+			return new ApiSuccessResponseDto(
+				response,
+				HttpStatus.OK,
+				'Patient data exported successfully',
+			);
+		} catch (error) {
+			throwError(this.logger, error);
+		}
+	}
+
 	@CustomApiResponse(['success', 'authorizeChronicCare'], {
 		type: GetPersonnelPatientDto,
 		message: 'Patient fetched successfully',
@@ -337,9 +375,14 @@ export class HcpController {
 	async updatePatient(
 		@Param('id', ParseMongoIdPipe) id: string,
 		@Body() dto: UpdatePatientDto,
+		@GetUser('sub') personnelId: string,
 	) {
 		try {
-			const response = await this.hcpService.updatePatient(id, dto);
+			const response = await this.hcpService.updatePatient(
+				id,
+				dto,
+				personnelId,
+			);
 			return new ApiSuccessResponseDto(
 				response,
 				HttpStatus.OK,

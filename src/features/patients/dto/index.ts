@@ -1,3 +1,10 @@
+export {
+	ConsentDto,
+	ConsentInputDto,
+	ConsentStateDto,
+	StaffConsentInputDto,
+	UpdateConsentDto,
+} from './consent.dto';
 export { CreatePatientDto } from './create.dto';
 export {
 	FilterBy,
