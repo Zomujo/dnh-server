@@ -1,6 +1,10 @@
 import { PromptTemplate } from '@langchain/core/prompts';
-import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import { Logger } from '@nestjs/common';
 import { Model } from 'mongoose';
+import {
+	createGeminiChatModel,
+	isAiConfigured,
+} from '@/common/utils/ai-features';
 import { AdherenceLog, TargetType } from '../entities/adherence-log.entity';
 import {
 	AdherencePattern,
@@ -49,20 +53,29 @@ export async function upsertOverallAdherencePattern(
 	);
 }
 
-async function patternNotes(adherenceLogs: AdherenceLog[]) {
-	const llm = new ChatGoogleGenerativeAI({
-		model: process.env.GOOGLE_AI_VERSION ?? 'gemini-2.5-flash',
-		temperature: 0.7,
-	});
+/**
+ * AI-written notes on the pattern. Optional: without the (retired) AI, or
+ * when the call fails, the pattern is saved with no notes, so the rate is
+ * still recorded.
+ */
+async function patternNotes(adherenceLogs: AdherenceLog[]): Promise<string> {
+	if (!isAiConfigured()) return '';
+	try {
+		const llm = createGeminiChatModel({ temperature: 0.7 });
+		const promptTemplate = PromptTemplate.fromTemplate(
+			ADHERENCE_OVERVIEW_NOTE_PROMPT,
+		);
 
-	const promptTemplate = PromptTemplate.fromTemplate(
-		ADHERENCE_OVERVIEW_NOTE_PROMPT,
-	);
+		const prompt = await promptTemplate.invoke({
+			adherenceLogs: JSON.stringify(adherenceLogs),
+		});
 
-	const prompt = await promptTemplate.invoke({
-		adherenceLogs: JSON.stringify(adherenceLogs),
-	});
-
-	const output = await llm.invoke(prompt);
-	return output.content as string;
+		const output = await llm.invoke(prompt);
+		return output.content as string;
+	} catch (error) {
+		new Logger('AdherencePattern').warn(
+			`Adherence notes skipped: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		return '';
+	}
 }
