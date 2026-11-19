@@ -226,19 +226,33 @@ describe('DhVectorsService without a vector store', () => {
 		await expect(service.cleanOrphans('u1')).resolves.toBeUndefined();
 	});
 
-	it('stays off when Qdrant is set but Gemini (for embeddings) is not', async () => {
+	it('with Qdrant but no Gemini: no indexing or search, but still erases', async () => {
 		vi.stubEnv('GOOGLE_API_KEY', '');
 		vi.stubEnv('QDRANT_URL', 'http://qdrant.test:6333');
 		const qdrant = mockDeep<QdrantClient>();
+		qdrant.delete.mockResolvedValue({} as any);
 		const service = new DhVectorsService(qdrant);
 
 		service.onModuleInit();
-		await expect(service.cleanOrphans('u1')).resolves.toBeUndefined();
+		await expect(service.index(dto as any)).resolves.toBeUndefined();
+		await expect(
+			service.findSimilar({ ...dto, query: 'metformin' }),
+		).resolves.toEqual([]);
 		expect(qdrant.getCollections).not.toHaveBeenCalled();
-		expect(qdrant.delete).not.toHaveBeenCalled();
+		expect(qdrant.upsert).not.toHaveBeenCalled();
+		expect(qdrant.query).not.toHaveBeenCalled();
+
+		await service.cleanOrphans('u1');
+		expect(qdrant.delete).toHaveBeenCalledWith('dh_vectors', {
+			filter: { must: [{ key: 'userId', match: { value: 'u1' } }] },
+		});
+		await service.deleteByDocumentId('doc-123');
+		expect(qdrant.delete).toHaveBeenCalledWith('dh_vectors', {
+			filter: { must: [{ key: 'documentId', match: { value: 'doc-123' } }] },
+		});
 	});
 
-	it('does not fail startup when Qdrant is unreachable, and skips calls', async () => {
+	it('does not fail startup when Qdrant is unreachable, and skips writes and searches', async () => {
 		vi.stubEnv('GOOGLE_API_KEY', 'test-key');
 		vi.stubEnv('QDRANT_URL', 'http://127.0.0.1:6399');
 		const qdrant = mockDeep<QdrantClient>();
@@ -250,9 +264,19 @@ describe('DhVectorsService without a vector store', () => {
 			service.findSimilar({ ...dto, query: 'metformin' }),
 		).resolves.toEqual([]);
 		await expect(service.index(dto as any)).resolves.toBeUndefined();
-		await expect(service.cleanOrphans('u1')).resolves.toBeUndefined();
 		expect(qdrant.query).not.toHaveBeenCalled();
 		expect(qdrant.upsert).not.toHaveBeenCalled();
-		expect(qdrant.delete).not.toHaveBeenCalled();
+	});
+
+	it('fails the purge when Qdrant is configured but the erase fails', async () => {
+		vi.stubEnv('GOOGLE_API_KEY', '');
+		vi.stubEnv('QDRANT_URL', 'http://127.0.0.1:6399');
+		const qdrant = mockDeep<QdrantClient>();
+		qdrant.delete.mockRejectedValue(new Error('ECONNREFUSED'));
+		const service = new DhVectorsService(qdrant);
+
+		await expect(service.cleanOrphans('u1')).rejects.toThrow(
+			/Erasure incomplete/,
+		);
 	});
 });

@@ -31,7 +31,15 @@ export function isTranscriptionConfigured(): boolean {
  * which makes the embeddings that are stored and searched.
  */
 export function isVectorStoreConfigured(): boolean {
-	return !!process.env.QDRANT_URL?.trim() && isAiConfigured();
+	return isQdrantConfigured() && isAiConfigured();
+}
+
+/**
+ * Qdrant itself is configured (QDRANT_URL is set). Enough to erase stored
+ * vectors, even when Gemini is off and nothing new can be indexed.
+ */
+export function isQdrantConfigured(): boolean {
+	return !!process.env.QDRANT_URL?.trim();
 }
 
 /** Throws a 503 when the Gemini features are not configured. */

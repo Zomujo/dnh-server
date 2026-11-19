@@ -50,6 +50,7 @@ export class DhVectorsService implements OnModuleInit {
 		@Inject(QDRANT_CLIENT)
 		private readonly qdrant: QdrantClient | null,
 	) {
+		// Indexing and search also need Gemini for the embeddings.
 		this.state =
 			this.qdrant && isVectorStoreConfigured() ? 'pending' : 'disabled';
 		if (this.state !== 'disabled') {
@@ -190,10 +191,19 @@ export class DhVectorsService implements OnModuleInit {
 		return points;
 	}
 
+	// Deletes depend only on Qdrant being configured, not on Gemini or on
+	// startup setup having succeeded: vectors written while the AI was on
+	// must still be erasable after it is turned off. With no Qdrant at all
+	// no vectors can exist, so they are a no-op.
+
+	/**
+	 * Removes one record's vectors. Best-effort: the record itself is only
+	 * soft-deleted (see MedicationsService.remove), so this is not erasure.
+	 */
 	async deleteByDocumentId(documentId: string) {
-		if (!(await this.isAvailable())) return;
+		if (!this.qdrant) return;
 		try {
-			await this.store.qdrant.delete(COLLECTION, {
+			await this.qdrant.delete(COLLECTION, {
 				filter: {
 					must: [{ key: 'documentId', match: { value: documentId } }],
 				},
@@ -203,17 +213,25 @@ export class DhVectorsService implements OnModuleInit {
 		}
 	}
 
+	/**
+	 * Erases every vector of a user (account purge). Fails closed: if Qdrant
+	 * is configured but the delete fails, this throws so the purge reports
+	 * that erasure did not complete.
+	 */
 	async cleanOrphans(userId: string) {
-		if (!(await this.isAvailable())) return;
+		if (!this.qdrant) return;
 		try {
-			await this.store.qdrant.delete(COLLECTION, {
+			await this.qdrant.delete(COLLECTION, {
 				filter: {
 					must: [{ key: 'userId', match: { value: userId } }],
 				},
 			});
 		} catch (e) {
-			console.error('clean cleanOrphans error', e);
-			throw e;
+			this.logger.error(`Could not erase vectors of user ${userId}`, e);
+			throw new Error(
+				'Erasure incomplete: could not delete the user’s vectors from Qdrant',
+				{ cause: e },
+			);
 		}
 	}
 
@@ -284,7 +302,9 @@ export class DhVectorsService implements OnModuleInit {
 	onModuleInit() {
 		if (this.state === 'disabled') {
 			this.logger.log(
-				'Vector store disabled: Qdrant or Gemini is not configured.',
+				this.qdrant
+					? 'Semantic search disabled: Gemini is not configured (Qdrant is kept for erasure only).'
+					: 'Vector store disabled: Qdrant is not configured.',
 			);
 			return;
 		}

@@ -216,7 +216,7 @@ See [`docs/chat-backend.md`](docs/chat-backend.md) for the full technical refere
 
 #### DhVectorsModule
 
-> Retired, optional: with no Qdrant (or no `GOOGLE_API_KEY` for embeddings) configured, indexing is a no-op and searches return nothing. A configured but unreachable Qdrant is logged and retried; it never blocks startup.
+> Retired, optional: with no Qdrant (or no `GOOGLE_API_KEY` for embeddings) configured, indexing is a no-op and searches return nothing. A configured but unreachable Qdrant is logged and retried; it never blocks startup. Erasure only needs Qdrant: while `QDRANT_URL` is set, the account purge deletes the user's vectors even without Gemini, and fails (so it can be retried) if that delete fails.
 
 Manages the Qdrant vector collection `dh_vectors`. On module init (`OnModuleInit`) it ensures the collection and keyword indexes (`userId`, `patient`, `documentType`) exist. Uses `gemini-embedding-001` (3072-dimensional vectors) for embedding and Fuse.js for client-side fuzzy re-ranking of semantic search results.
 
@@ -236,7 +236,7 @@ None of the AI env vars are needed. Each AI client is built only when its key is
 |---|---|
 | `GOOGLE_API_KEY` | `POST /client/chat`, `POST /client/chat/audio` and the pharmacy patient summary SSE answer **503** "AI features are not enabled on this server". Medication/notification reminders are sent with a plain template ("Hi Ama, a reminder: Take Metformin.") instead of AI-written text. Adherence patterns are still computed, with empty notes. |
 | `OPENAI_API_KEY` | `POST /client/chat/audio` answers 503. |
-| `QDRANT_URL` (or `GOOGLE_API_KEY`) | The vector store is off: indexing is skipped and similarity lookups find nothing, so callers use their exact-match lookups. |
+| `QDRANT_URL` (or `GOOGLE_API_KEY`) | The vector store is off: indexing is skipped and similarity lookups find nothing, so callers use their exact-match lookups. With `QDRANT_URL` set but no `GOOGLE_API_KEY`, Qdrant is still used to erase vectors on account purge. |
 
 To bring the AI back, set the variables in the "Optional — retired AI features" section of `.envrc.example`.
 

@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { QdrantClient, QdrantClientParams } from '@qdrant/js-client-rest';
-import { isVectorStoreConfigured } from '@/common/utils/ai-features';
+import { isQdrantConfigured } from '@/common/utils/ai-features';
 // import { DhVectorsController } from './dh-vectors.controller';
 import { DhVectorsService, QDRANT_CLIENT } from './dh-vectors.service';
 
@@ -12,10 +12,11 @@ const QDRANT_REQUEST_TIMEOUT_MS = 15_000;
 	providers: [
 		{
 			provide: QDRANT_CLIENT,
-			// null when the (retired) vector store isn't configured; the
-			// service then turns every operation into a no-op.
+			// null when Qdrant isn't configured; the service then turns every
+			// operation into a no-op. Built even without Gemini, so vectors
+			// stored earlier can still be erased.
 			useFactory: (): QdrantClient | null => {
-				if (!isVectorStoreConfigured()) return null;
+				if (!isQdrantConfigured()) return null;
 
 				const qdrantOptions: QdrantClientParams = {};
 				const url = process.env.QDRANT_URL!;
