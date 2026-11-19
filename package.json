@@ -58,7 +58,7 @@
 		"google-auth-library": "^11.3.1",
 		"js-convert-case": "^4.2.0",
 		"mongodb": "^7.7.0",
-		"mongoose": "^9.11.3",
+		"mongoose": "^9.11.4",
 		"nodemailer": "^10.2.1",
 		"pug": "^3.0.4",
 		"reflect-metadata": "^0.2.2",
