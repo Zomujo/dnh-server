@@ -1,0 +1,127 @@
+# Reference copy of /opt/dnh-server/compose.yml on the VPS.
+#
+# deploy.sh builds and tags the API images; this file only runs them. See
+# deploy/RUNBOOK.md for the whole procedure. The root docker-compose.yml is a
+# self-contained single-host stack (it bundles MongoDB) and is not used here.
+#
+# Each environment has its own Redis, next to its API on an internal network:
+# no published port and no route out, so only that environment's API can
+# reach it and staging can never touch production's queues, OTPs or sessions.
+# MongoDB is not run here: DB_CONNECTION_STRING in each settings file points
+# at the database server, which may be another VPS. Each API also joins its
+# own egress network so it can reach MongoDB, Firebase, Africa's Talking,
+# SMTP and BetterStack.
+#
+# The APIs publish on loopback only (Docker-published ports bypass ufw); a
+# reverse proxy on the VPS (nginx, Caddy or a Cloudflare Tunnel) terminates
+# TLS and forwards to them:
+#   production  127.0.0.1:4815, built from main
+#   staging     127.0.0.1:4816, built from staging
+#
+# Every env_file is required: false because Compose reads all of them on
+# every command: otherwise production could not deploy until .env.staging
+# existed. deploy.sh refuses to run without the file of the environment it
+# deploys. Needs Docker Engine 25+ and Compose 2.24+.
+
+name: dnh-server
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+x-redis: &redis
+  image: redis:7-alpine
+  restart: unless-stopped
+  # appendonly: queued BullMQ jobs survive a Redis restart.
+  command: ["redis-server", "--appendonly", "yes"]
+  healthcheck:
+    test: ["CMD", "redis-cli", "ping"]
+    interval: 10s
+    timeout: 5s
+    retries: 10
+  logging: *logging
+
+# The API image carries its own health check on GET /. Only its timing is
+# changed here: probe every 2s while starting, so a deploy sees "healthy" as
+# soon as the API answers instead of after the first 30s interval.
+x-api: &api
+  restart: unless-stopped
+  pull_policy: never
+  init: true
+  # Lets Nest's shutdown hooks close queue workers and connections.
+  stop_grace_period: 30s
+  environment:
+    PORT: "4815"
+    # The bundled Redis has no TLS, and any non-empty value turns TLS on.
+    QUEUE_TLS: ""
+  healthcheck:
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 90s
+    start_interval: 2s
+  logging: *logging
+
+services:
+  # --- staging: built from the staging branch ---
+
+  dnh-redis-staging:
+    <<: *redis
+    container_name: dnh-redis-staging
+    networks: [staging]
+    volumes:
+      - redis_staging:/data
+
+  api-staging:
+    <<: *api
+    image: dnh-api:staging
+    container_name: dnh-api-staging
+    env_file:
+      - path: .env.staging
+        required: false
+    networks: [staging, staging-egress]
+    ports:
+      - "127.0.0.1:4816:4815"
+    depends_on:
+      dnh-redis-staging:
+        condition: service_healthy
+
+  # --- production: built from main ---
+
+  dnh-redis-production:
+    <<: *redis
+    container_name: dnh-redis-production
+    networks: [production]
+    volumes:
+      - redis_production:/data
+
+  api-production:
+    <<: *api
+    image: dnh-api:production
+    container_name: dnh-api-production
+    env_file:
+      - path: .env.production
+        required: false
+    networks: [production, production-egress]
+    ports:
+      - "127.0.0.1:4815:4815"
+    depends_on:
+      dnh-redis-production:
+        condition: service_healthy
+
+networks:
+  # internal: no route out, and nothing but that environment's API and Redis.
+  staging:
+    internal: true
+  production:
+    internal: true
+  # Outbound access for each API, kept apart so the two APIs never share a
+  # network.
+  staging-egress:
+  production-egress:
+
+volumes:
+  redis_staging:
+  redis_production:

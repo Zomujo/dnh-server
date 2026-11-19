@@ -42,3 +42,6 @@ docs
 Dockerfile
 .dockerignore
 docker-compose*.yml
+
+# VPS deploy files
+deploy
