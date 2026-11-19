@@ -2,7 +2,7 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { getModelToken } from '@nestjs/mongoose';
 import { type Mocked, TestBed } from '@suites/unit';
 import type { Queue } from 'bullmq';
-import { Model, Types } from 'mongoose';
+import { Types } from 'mongoose';
 import { mockDeep } from 'vitest-mock-extended';
 import { ExtClientAIService } from '@/features/client/ai/ai-ext.service';
 import { PushNotificationType } from './dto';
@@ -39,7 +39,6 @@ describe('fallbackReminderText', () => {
 
 describe('NotificationsConsumer with the AI not configured', () => {
 	let consumer: NotificationsConsumer;
-	let notificationModel: Mocked<Model<AugurNotification>>;
 	let pushService: Mocked<PushService>;
 	let extClientAiService: Mocked<ExtClientAIService>;
 
@@ -50,10 +49,13 @@ describe('NotificationsConsumer with the AI not configured', () => {
 			.final(mockDeep<Queue>())
 			.compile();
 		consumer = unit;
-		notificationModel = unitRef.get(getModelToken(AugurNotification.name));
 		pushService = unitRef.get(PushService);
 		extClientAiService = unitRef.get(ExtClientAIService);
 
+		// Loosely typed: Mocked<Model<...>> is too deep for the compiler.
+		const notificationModel = unitRef.get(
+			getModelToken(AugurNotification.name),
+		) as unknown as { findById: ReturnType<typeof vi.fn> };
 		const notificationId = new Types.ObjectId().toString();
 		notificationModel.findById.mockReturnValue({
 			populate: vi.fn().mockResolvedValue({
