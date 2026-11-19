@@ -12,7 +12,11 @@ import {
 	SystemMessagePromptTemplate,
 } from '@langchain/core/prompts';
 import { Runnable } from '@langchain/core/runnables';
-import { ToolRuntime, tool } from '@langchain/core/tools';
+import {
+	DynamicStructuredTool,
+	ToolRuntime,
+	tool,
+} from '@langchain/core/tools';
 import {
 	ChatGoogleGenerativeAI,
 	GoogleGenerativeAIChatCallOptions,
@@ -33,6 +37,10 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import { z } from 'zod';
 import {
+	assertAiConfigured,
+	createGeminiChatModel,
+} from '@/common/utils/ai-features';
+import {
 	ConversationPrompts,
 	ConversationScope,
 	ConversationScopes,
@@ -52,13 +60,33 @@ export class ClientAIService {
 	// (see 7.1/7.2 fix notes) instead of opening a dedicated connection pool.
 	private checkpointer: MongoDBSaver;
 	// private memory = new MemorySaver();
-	private model: Runnable<
-		BaseLanguageModelInput,
-		AIMessageChunk,
-		GoogleGenerativeAIChatCallOptions
-	>;
-	private counter: ChatGoogleGenerativeAI;
+	private tools: DynamicStructuredTool[];
 	private toolNode: ToolNode;
+	// Built on first chat: the (retired) AI may not be configured.
+	private llm?: {
+		model: Runnable<
+			BaseLanguageModelInput,
+			AIMessageChunk,
+			GoogleGenerativeAIChatCallOptions
+		>;
+		counter: ChatGoogleGenerativeAI;
+	};
+
+	private get model() {
+		return this.loadLlm().model;
+	}
+
+	private get counter() {
+		return this.loadLlm().counter;
+	}
+
+	private loadLlm() {
+		if (!this.llm) {
+			const model = createGeminiChatModel({ temperature: 0.7 });
+			this.llm = { model: model.bindTools(this.tools), counter: model };
+		}
+		return this.llm;
+	}
 
 	constructor(
 		@InjectModel(ClientAIChat.name)
@@ -76,15 +104,8 @@ export class ClientAIService {
 		const toolsByName = this.memoryScribeService.memoryTools;
 		toolsByName[this.changeConversationScope.name] =
 			this.changeConversationScope;
-		const tools = Object.values(toolsByName);
-		const model = new ChatGoogleGenerativeAI({
-			model: process.env.GOOGLE_AI_VERSION ?? 'gemini-2.5-flash',
-			temperature: 0.7,
-		});
-
-		this.model = model.bindTools(tools);
-		this.counter = model;
-		this.toolNode = new ToolNode(tools);
+		this.tools = Object.values(toolsByName);
+		this.toolNode = new ToolNode(this.tools);
 	}
 
 	private get trimmer() {
@@ -113,6 +134,7 @@ export class ClientAIService {
 	}
 
 	async bulkCompletion(payload: ClientAICompletionInput) {
+		assertAiConfigured();
 		const messageId = new Types.ObjectId();
 		const now = new Date();
 

@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { type Mocked, TestBed } from '@suites/unit';
 import { Model, Types } from 'mongoose';
@@ -287,6 +287,16 @@ describe('PatientsService', () => {
 				'chronic-care:doctors:patients:summary:user-123',
 			);
 			expect(observable).toBeDefined();
+		});
+
+		it('answers 503 when there is no cached summary and the AI is off', async () => {
+			vi.stubEnv('GOOGLE_API_KEY', '');
+			summaryCacheService.get.mockResolvedValue(undefined);
+
+			await expect(service.generateSummary('user-123')).rejects.toThrow(
+				ServiceUnavailableException,
+			);
+			vi.unstubAllEnvs();
 		});
 	});
 

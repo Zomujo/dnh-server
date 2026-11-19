@@ -4,10 +4,11 @@ import {
 	MessagesPlaceholder,
 } from '@langchain/core/prompts';
 import { DynamicStructuredTool } from '@langchain/core/tools';
-import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import type { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
+import { createGeminiChatModel } from '@/common/utils/ai-features';
 import { AdherencesService } from '@/features/adherences/adherences.service';
 import {
 	AdherenceLogAISchema,
@@ -64,7 +65,12 @@ import { MEMORY_SCRIBE_PROMPT } from './state';
 @Injectable()
 export class MemoryScribeService {
 	private logger = new Logger(MemoryScribeService.name);
-	private model: ChatGoogleGenerativeAI;
+	// Built on first use: the (retired) AI may not be configured.
+	private modelInstance?: ChatGoogleGenerativeAI;
+	private get model() {
+		this.modelInstance ??= createGeminiChatModel({ temperature: 0.5 });
+		return this.modelInstance;
+	}
 
 	constructor(
 		private readonly adherencesService: AdherencesService,
@@ -76,12 +82,7 @@ export class MemoryScribeService {
 		private readonly notificationsService: NotificationsService,
 		private readonly vigilSentinelService: VigilSentinelService,
 		private readonly eventEmitter: EventEmitter2,
-	) {
-		this.model = new ChatGoogleGenerativeAI({
-			model: process.env.GOOGLE_AI_VERSION ?? 'gemini-2.5-flash',
-			temperature: 0.5,
-		});
-	}
+	) {}
 
 	// private get model() {
 	// 	return new ChatGoogleGenerativeAI({
