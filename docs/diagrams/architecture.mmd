@@ -16,12 +16,12 @@ flowchart LR
     end
     subgraph DB["Database server (private network)"]
       M[("MongoDB ≥ 6<br/>app data + audit logs")]
-      R[("Redis ≥ 7<br/>cache · rate limits · job queues")]
+      R[("Redis ≥ 7<br/>cache · rate limits · OTPs ·<br/>idempotency keys · USSD sessions ·<br/>job queues")]
     end
   end
 
   subgraph EXT["External services"]
-    FB["Firebase (GHS project)<br/>Auth · Storage · Push (FCM)"]
+    FB["Firebase (GHS project)<br/>Auth · Firestore · Storage · Push (FCM)"]
     AT["Africa's Talking<br/>SMS · USSD"]
     SM["SMTP email"]
     GO["Google OAuth<br/>(staff sign-in)"]
@@ -37,7 +37,7 @@ flowchart LR
   API <--> R
   W <--> R
   W <--> M
-  API -- verify tokens, files, push --> FB
+  API -- tokens, files, push, profile docs --> FB
   P -- sign-in --> FB
   W -- push notifications --> FB
   FB -. push .-> P

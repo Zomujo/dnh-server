@@ -9,17 +9,17 @@ erDiagram
   }
   PERSONNEL {
     ObjectId _id PK
-    string userName
+    string userName "PII"
     string phoneNumber "PII"
     string personnelIdNumber
-    string role "clinician / pharmacist"
+    string role "clinician / pharmacy"
     string referralCode UK
     ObjectId facility FK
     ObjectId_array personnelAccounts FK
   }
   PERSONNEL_ACCOUNT {
     ObjectId _id PK
-    string provider "local / google"
+    string provider "email / google"
     string providerUserId
     string email "PII"
     string password "bcrypt hash"
@@ -50,10 +50,10 @@ erDiagram
     ObjectId _id PK
     ObjectId patient FK
     string userId
-    string name
+    string name "health"
     string dosage
     object frequency
-    object morning_afternoon_evening "dosing schedule"
+    object morning_afternoon_evening "dosing schedule; each refs AugurNotification"
     object_array scheduleHistory
     date startDate
     date endDate
@@ -101,7 +101,7 @@ erDiagram
     ObjectId _id PK
     ObjectId patient FK
     ObjectId host FK "facility"
-    string concernType "symptom, side effect..."
+    string concernType "health: symptom, side effect..."
     string severity
     boolean resolved
   }
@@ -134,7 +134,8 @@ erDiagram
   AUGUR_NOTIFICATION {
     ObjectId _id PK
     ObjectId patient FK
-    string notificationType "dose / appointment reminder"
+    string notificationType "reminder"
+    string targetType "medication"
     string targetName
     string channel
     date toBeNotifiedAt
@@ -164,6 +165,12 @@ erDiagram
     number statusCode
     string outcome
     string ip
+  }
+  LANGGRAPH_CHECKPOINT {
+    string thread_id "= patient userId"
+    string checkpoint_ns
+    string checkpoint_id
+    object checkpoint "reminder / chat messages, name, phone (PII)"
   }
   CHAT_ROOM {
     ObjectId _id PK
@@ -208,4 +215,5 @@ erDiagram
   PATIENT ||..o{ AUDIT_LOG : "subject of (patientId)"
   PERSONNEL ||..o{ AUDIT_LOG : "actor (personnelId)"
   CHAT_ROOM ||..o{ CHAT_MESSAGE : "contains (roomId)"
+  PATIENT ||..o{ LANGGRAPH_CHECKPOINT : "reminder history (thread_id)"
   PATIENT ||..o{ CLIENT_AI_CHAT : "chats (by userId)"
