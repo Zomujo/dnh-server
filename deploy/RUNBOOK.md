@@ -138,7 +138,7 @@ It re-points the API at a kept image (the five newest per environment are kept) 
 ```bash
 P=http://127.0.0.1:4815                    # 4816 for staging; or the public https:// address
 curl -s "$P/"                              # 200, the health route the container checks
-curl -s -o /dev/null -w '%{http_code}\n' "$P/api/v1/patients/me"   # 401 without a token
+curl -s -o /dev/null -w "%{http_code}\n" "$P/api/v1/personnel/pharmacies/patients"   # 401 without a token
 ```
 
 On the VPS:
@@ -285,6 +285,6 @@ Any of these is one proxy hop: `TRUST_PROXY=1`. Then register the USSD callback 
 - **No `export ` prefix in the settings files.** A copy of `.envrc` has them; `deploy.sh` refuses such a file.
 - **Staging and production must not share a database.** Both run the reminder and notification jobs, so staging on production data would message real patients. `deploy.sh` refuses two files with the same `DB_NAME` on the same host.
 - **Redis data is persistent** (`redis_<env>` volume, append-only file): queued jobs survive restarts. Removing the volume drops queued jobs, OTPs and USSD sessions, nothing else.
-- **Logs** are rotated by Docker (5 × 10 MB per container). Errors and warnings also go to BetterStack when `LOGTAIL_*` are set.
+- **Logs** are rotated by Docker (5 × 10 MB per container). Errors and warnings also go to BetterStack; `LOGTAIL_SOURCE_TOKEN` is required, the API does not start without it.
 - **Database backups** are the database server's job, not this VPS's.
 - **Avoid `$` and ` #` in setting values.** Compose expands `$VAR` and treats ` #` as a comment in unquoted values; `openssl rand -hex 32` makes safe secrets. Wrap a value that needs them in single quotes.

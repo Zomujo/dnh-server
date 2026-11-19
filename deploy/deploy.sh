@@ -132,7 +132,8 @@ check_env_file() {
   [ "$(env_value "$ENV_FILE" NODE_ENV)" = "$ENV_NAME" ] \
     || problems+=("NODE_ENV must be $ENV_NAME")
 
-  for key in DB_CONNECTION_STRING DB_NAME JWT_SECRET TRUST_PROXY; do
+  # The API won't start outside development without the Logtail token.
+  for key in DB_CONNECTION_STRING DB_NAME JWT_SECRET TRUST_PROXY LOGTAIL_SOURCE_TOKEN; do
     [ -n "$(env_value "$ENV_FILE" "$key")" ] || problems+=("$key must be set")
   done
 
