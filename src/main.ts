@@ -21,6 +21,9 @@ async function bootstrap() {
 	const app = await NestFactory.create<NestExpressApplication>(AppModule, {
 		bufferLogs: true,
 	});
+	// On SIGTERM (docker stop, redeploys) run Nest's shutdown hooks so queue
+	// workers and the Mongo/Redis connections close before the process exits.
+	app.enableShutdownHooks();
 
 	if (environment !== NodeEnvs.DEVELOPMENT) {
 		app.useLogger(app.get(DomainLogger));

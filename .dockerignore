@@ -1,0 +1,44 @@
+# The image is built from package manifests, build config and src/ only.
+
+# Secrets: env files never enter the build context
+.env*
+.envrc*
+
+# Dependencies and build output (rebuilt inside the image)
+node_modules
+dist
+build
+coverage
+.nyc_output
+*.tsbuildinfo
+
+# VCS, editors, tooling
+.git
+.gitignore
+.husky
+.idea
+.vscode
+.claude
+.codegraph
+.DS_Store
+biome.json
+
+# Tests and local tools
+test
+**/*.spec.ts
+vitest.config.ts
+tsconfig.test.json
+chat-test
+tasks
+
+# Docs
+docs
+*.md
+
+# Logs
+*.log
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose*.yml

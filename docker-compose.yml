@@ -1,0 +1,85 @@
+# Self-contained stack: API + MongoDB + Redis. See "Running with Docker" in
+# README.md.
+#
+#   1. cp .env.compose.example .env        # stack settings + DB/Redis passwords
+#   2. Create .env.production from .envrc.example (app settings, KEY=value
+#      lines without `export `). Both files are git- and docker-ignored.
+#   3. docker compose up -d --build
+#
+# DB_CONNECTION_STRING and REDIS_URL from .env.production are overridden below
+# to point at the bundled, password-protected services. MongoDB and Redis are
+# reachable only inside the compose network. The API is published on
+# 127.0.0.1 only: put a TLS-terminating reverse proxy in front of it.
+
+services:
+  api:
+    build: .
+    image: dnh-api:latest
+    init: true
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: 4815
+      DB_CONNECTION_STRING: mongodb://${MONGO_ROOT_USERNAME:?set in .env}:${MONGO_ROOT_PASSWORD:?set in .env}@mongo:27017/?authSource=admin
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set in .env}@redis:6379
+      # The bundled Redis has no TLS. Any non-empty value (even "false")
+      # turns TLS on, so this must stay empty.
+      QUEUE_TLS: ""
+      # Number of proxies in front of the API (0 if none). A higher value
+      # lets clients spoof X-Forwarded-For and bypass per-IP limits.
+      TRUST_PROXY: ${TRUST_PROXY:?set in .env}
+    ports:
+      # Loopback only by default: Docker-published ports bypass host
+      # firewalls such as ufw. Set API_BIND_ADDRESS when the proxy runs on
+      # another host.
+      - "${API_BIND_ADDRESS:-127.0.0.1}:4815:4815"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?set in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set in .env}
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # Connects through the service name, so the temporary localhost-only
+      # mongod used during first-run initialisation doesn't count as healthy.
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet "mongodb://mongo:27017/admin"
+          -u "$$MONGO_INITDB_ROOT_USERNAME" -p "$$MONGO_INITDB_ROOT_PASSWORD"
+          --eval "db.adminCommand('ping').ok" | grep -q 1
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      # Read by redis-cli in the healthcheck.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?set in .env}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$REDISCLI_AUTH"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mongo-data:
+  redis-data:
