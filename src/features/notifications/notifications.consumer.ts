@@ -11,6 +11,7 @@ import {
 	createGeminiChatModel,
 	isAiConfigured,
 } from '@/common/utils/ai-features';
+import { backgroundJobsEnabled } from '@/common/utils/background-jobs';
 import { TargetType } from '@/features/adherences/dto/target-type.enum';
 import { AUGURY_PROMPT } from '@/features/client/ai/agents/augury/state';
 import { ExtClientAIService } from '@/features/client/ai/ai-ext.service';
@@ -20,7 +21,7 @@ import { Frequency, PushNotificationType, RepetitionType } from './dto';
 import { AugurNotification } from './entities/notification.entity';
 import { PushService } from './push/push.service';
 
-@Processor(AugurNotification.name)
+@Processor(AugurNotification.name, { autorun: backgroundJobsEnabled() })
 export class NotificationsConsumer extends WorkerHost {
 	private logger = new Logger(NotificationsConsumer.name);
 	// Built on first AI-written reminder: the (retired) AI may be off.

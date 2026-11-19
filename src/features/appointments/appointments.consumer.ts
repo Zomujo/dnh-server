@@ -3,13 +3,14 @@ import { Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Job } from 'bullmq';
 import { Model } from 'mongoose';
+import { backgroundJobsEnabled } from '@/common/utils/background-jobs';
 import { PushNotificationType } from '@/features/notifications/dto';
 import { PushService } from '@/features/notifications/push/push.service';
 import { APPOINTMENT_REMINDER_QUEUE } from './appointments.constants';
 import { AppointmentStatus } from './dto';
 import { Appointment } from './entities/appointment.entity';
 
-@Processor(APPOINTMENT_REMINDER_QUEUE)
+@Processor(APPOINTMENT_REMINDER_QUEUE, { autorun: backgroundJobsEnabled() })
 export class AppointmentsConsumer extends WorkerHost {
 	private logger = new Logger(AppointmentsConsumer.name);
 
