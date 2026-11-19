@@ -103,14 +103,6 @@ env_value() {
   printf '%s' "$value"
 }
 
-# The host list of a MongoDB connection string: what sits between the
-# credentials and the database path or options.
-mongo_hosts() {
-  local uri="${1#*://}"
-  uri="${uri##*@}"
-  printf '%s' "${uri%%[/?]*}"
-}
-
 # Refuses an env file that could leak, that was written for the other
 # environment, or that points this environment's API at anything but its own
 # Redis, or at the other environment's database. Runs before anything is built.
@@ -132,22 +124,26 @@ check_env_file() {
   [ "$(env_value "$ENV_FILE" NODE_ENV)" = "$ENV_NAME" ] \
     || problems+=("NODE_ENV must be $ENV_NAME")
 
-  # The API won't start outside development without the Logtail token.
   for key in DB_CONNECTION_STRING DB_NAME JWT_SECRET TRUST_PROXY LOGTAIL_SOURCE_TOKEN; do
     [ -n "$(env_value "$ENV_FILE" "$key")" ] || problems+=("$key must be set")
   done
+
+  # The API won't start outside development without the Logtail token, and the
+  # endpoint replaces the library's default: unset, the API crashes on start;
+  # empty, every log send fails silently.
+  [[ "$(env_value "$ENV_FILE" LOGTAIL_HOST)" =~ ^https:// ]] \
+    || problems+=("LOGTAIL_HOST must be the BetterStack source's https:// ingesting host")
 
   url="$(env_value "$ENV_FILE" REDIS_URL)"
   [[ "$url" =~ ^redis://$REDIS_SERVICE:6379(/[0-9]+)?$ ]] \
     || problems+=("REDIS_URL must be redis://$REDIS_SERVICE:6379")
 
   # Both APIs run the reminder and notification jobs, so staging pointed at
-  # production's database would message real patients.
+  # production's database would message real patients. Hosts are not compared:
+  # one server can be spelled many ways (port, case, IP, SRV record).
   if [ -r "$OTHER_ENV_FILE" ] \
-    && [ "$(env_value "$ENV_FILE" DB_NAME)" = "$(env_value "$OTHER_ENV_FILE" DB_NAME)" ] \
-    && [ "$(mongo_hosts "$(env_value "$ENV_FILE" DB_CONNECTION_STRING)")" \
-      = "$(mongo_hosts "$(env_value "$OTHER_ENV_FILE" DB_CONNECTION_STRING)")" ]; then
-    problems+=("DB_NAME and the database host are the same as in $OTHER_ENV_FILE; each environment needs its own database")
+    && [ "$(env_value "$ENV_FILE" DB_NAME)" = "$(env_value "$OTHER_ENV_FILE" DB_NAME)" ]; then
+    problems+=("DB_NAME is the same as in $OTHER_ENV_FILE; give each environment its own database name")
   fi
 
   if [ "${#problems[@]}" -gt 0 ]; then

@@ -190,7 +190,12 @@ If `compose.yml` changed the Redis service, apply it with `sudo docker compose -
 
 ## 7. Setting up the VPS (one time)
 
-### 7.1 Repository access
+### 7.1 Directory and repository access
+
+```bash
+sudo install -d -o root -g root -m 755 /opt/dnh-server
+```
+
 
 The VPS needs to clone the repository as root. Use a read-only deploy key, so the VPS can read this one repository and nothing else:
 
@@ -219,10 +224,6 @@ echo 'REPO=git@github.com-dnh-server:<owner>/dnh-server.git' | sudo tee /opt/dnh
 ```
 
 ### 7.2 Files
-
-```bash
-sudo install -d -o root -g root -m 755 /opt/dnh-server
-```
 
 Copy `compose.yml` and `deploy.sh` as in section 6. Fill in `.env.<env>` from `deploy/.env.example` and upload it as in section 5. In it:
 
@@ -283,8 +284,8 @@ Any of these is one proxy hop: `TRUST_PROXY=1`. Then register the USSD callback 
 
 - **Always use `sudo` for `docker compose` on the VPS.** The settings files are root-only and `compose.yml` marks them `required: false`, so without root Compose silently starts the API with no settings.
 - **No `export ` prefix in the settings files.** A copy of `.envrc` has them; `deploy.sh` refuses such a file.
-- **Staging and production must not share a database.** Both run the reminder and notification jobs, so staging on production data would message real patients. `deploy.sh` refuses two files with the same `DB_NAME` on the same host.
+- **Staging and production must not share a database.** Both run the reminder and notification jobs, so staging on production data would message real patients. `deploy.sh` refuses two files with the same `DB_NAME`.
 - **Redis data is persistent** (`redis_<env>` volume, append-only file): queued jobs survive restarts. Removing the volume drops queued jobs, OTPs and USSD sessions, nothing else.
-- **Logs** are rotated by Docker (5 × 10 MB per container). Errors and warnings also go to BetterStack; `LOGTAIL_SOURCE_TOKEN` is required, the API does not start without it.
+- **Logs** are rotated by Docker (5 × 10 MB per container). Errors and warnings also go to BetterStack; `LOGTAIL_SOURCE_TOKEN` and `LOGTAIL_HOST` (with `https://`) are required.
 - **Database backups** are the database server's job, not this VPS's.
 - **Avoid `$` and ` #` in setting values.** Compose expands `$VAR` and treats ` #` as a comment in unquoted values; `openssl rand -hex 32` makes safe secrets. Wrap a value that needs them in single quotes.
