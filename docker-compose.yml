@@ -1,0 +1,60 @@
+# Self-contained stack: API + MongoDB + Redis.
+#
+#   1. Create .env.production from .envrc.example (drop the `export ` prefixes,
+#      one KEY=value per line, values unquoted). It is git- and docker-ignored.
+#   2. docker compose up -d --build
+#
+# DB_CONNECTION_STRING and REDIS_URL from .env.production are overridden below
+# to point at the bundled services. MongoDB and Redis are reachable only from
+# inside the compose network; only the API is published on the host.
+
+services:
+  api:
+    build: .
+    image: dnh-api:latest
+    init: true
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: 4815
+      DB_CONNECTION_STRING: mongodb://mongo:27017
+      REDIS_URL: redis://redis:6379
+      # The bundled Redis has no TLS. Any non-empty value (even "false")
+      # turns TLS on, so this must stay empty.
+      QUEUE_TLS: ""
+    ports:
+      - "4815:4815"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mongo-data:
+  redis-data:

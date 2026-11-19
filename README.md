@@ -25,6 +25,7 @@ Built with **NestJS 12**, **MongoDB/Mongoose**, **Firebase**, and **Redis**.
 - [Environment Variables](#environment-variables)
 - [Local Setup](#local-setup)
 - [Running the Server](#running-the-server)
+- [Running with Docker](#running-with-docker)
 - [API Documentation](#api-documentation)
 - [Running Tests](#running-tests)
 - [Code Quality](#code-quality)
@@ -466,6 +467,59 @@ pnpm start:prod
 ```
 
 > **Production note**: `start:prod` forces `TZ=UTC` to ensure consistent date handling regardless of the host system timezone.
+
+---
+
+## Running with Docker
+
+The `Dockerfile` builds a production image (Node 22, runs as the non-root `node` user, `NODE_ENV=production`, `TZ=Africa/Accra`, port `4815`). Its `HEALTHCHECK` calls `GET /`, which answers `{"status":"OK"}`. The image holds no secrets: configuration comes from environment variables at run time. Qdrant and the AI providers aren't part of this deployment.
+
+### Configuration
+
+Create `.env.production` from `.envrc.example`: remove each `export ` prefix so every line is a plain `KEY=value`, then fill in the values. Don't wrap values in quotes: `docker run --env-file` keeps quotes as part of the value. Keep the escaped `\n` sequences in `FIREBASE_BASE_PRIVATE_KEY` on one line. The file is ignored by git and by the Docker build. At minimum set:
+
+| Variable | Notes |
+|---|---|
+| `NODE_ENV` | `production` |
+| `DB_NAME`, `DB_CONNECTION_STRING` | MongoDB ≥ 6 (overridden by compose, see below) |
+| `REDIS_URL` | Redis ≥ 7 (overridden by compose) |
+| `JWT_SECRET`, `JWT_TTL`, `OTP_TTL` | Personnel auth |
+| `FIREBASE_BASE_*`, `BASE_STORAGE_BUCKET` | Firebase service account and storage bucket |
+| `EMAIL_*` | SMTP for verification emails |
+| `CORS_ORIGINS`, `TRUST_PROXY` | Browser origins allowed; proxy hops in front of the API |
+
+See [Environment Variables](#environment-variables) for the full list. Leave `QUEUE_TLS` empty unless Redis uses TLS: any non-empty value, even `false`, turns TLS on.
+
+### Docker Compose (API + MongoDB + Redis)
+
+```bash
+docker compose up -d --build     # build the image and start everything
+docker compose ps                # api shows "healthy" once GET / answers
+curl http://localhost:4815/      # {"status":"OK"}
+```
+
+Compose points the API at the bundled services (`DB_CONNECTION_STRING=mongodb://mongo:27017`, `REDIS_URL=redis://redis:6379`), whatever `.env.production` says. Data persists in the `mongo-data` and `redis-data` volumes (Redis runs with `appendonly`). MongoDB and Redis aren't published on the host; only the API is, on port `4815`. The API starts after both report healthy.
+
+### Image only (external MongoDB and Redis)
+
+```bash
+docker build -t dnh-api .
+docker run -d --name dnh-api --init --restart unless-stopped \
+  --env-file .env.production -p 4815:4815 dnh-api
+```
+
+`--init` (or `init: true` in compose) makes `docker stop` end the process promptly.
+
+### Logs
+
+The API logs to stdout/stderr:
+
+```bash
+docker compose logs -f api       # compose
+docker logs -f dnh-api           # plain docker run
+```
+
+With `LOGTAIL_SOURCE_TOKEN` and `LOGTAIL_HOST` set, errors and warnings also go to BetterStack.
 
 ---
 
