@@ -1,0 +1,38 @@
+---
+title: Yelima — Data Flow
+---
+flowchart LR
+  PA(["Patient<br/>mobile app"])
+  PU(["Patient<br/>basic phone"])
+  HC(["Clinician / pharmacy<br/>HCP web app"])
+  AT["Africa's Talking<br/>USSD · SMS"]
+
+  subgraph API["Yelima API"]
+    direction TB
+    A1["1 · Authenticate<br/>Firebase token or staff JWT"]
+    A2["2 · Authorise & validate<br/>role · record ownership · rate limit"]
+    A3["3 · Process request<br/>patients · medications · adherence ·<br/>vitals · appointments · concerns ·<br/>consent · data export"]
+    A4["4 · Write audit entry<br/>sign-ins · writes · staff reads of<br/>patient data · exports · denials"]
+    J["Scheduled jobs<br/>dose & appointment reminders ·<br/>missed doses · adherence rates"]
+    U1["USSD callback check<br/>shared key / IP allowlist<br/>(not audited)"]
+    A1 --> A2 --> A3 --> A4
+    A1 -. "rejected 401" .-> A4
+    A2 -. "rejected 403" .-> A4
+    U1 --> A3
+  end
+
+  DB[("MongoDB<br/>personal & health data<br/>Confidential")]
+  AU[("MongoDB<br/>audit_logs")]
+  RQ[("Redis<br/>job queues · cache")]
+  FB["Firebase<br/>accounts · files · push"]
+
+  PA <== "HTTPS: profile, medications, dose logs,<br/>vitals, appointment requests" ==> A1
+  HC <== "HTTPS: patient records, vitals,<br/>appointments, symptoms" ==> A1
+  PU -- "USSD session" --> AT
+  AT <-- "USSD callback: vitals" --> U1
+  A3 <-- "read / write" --> DB
+  A4 --> AU
+  A3 -- "queue reminder" --> RQ -- "plus hourly / daily schedules" --> J
+  J <-- "read schedules / save results" --> DB
+  J -- "push notification" --> FB -- "notification" --> PA
+  A3 -- "OTP · SMS" --> AT

@@ -1,0 +1,50 @@
+---
+title: Yelima — System Architecture (GHS hosting)
+---
+flowchart LR
+  subgraph Users
+    P["Patients<br/>Yelima mobile app (Flutter)"]
+    U["Patients on basic phones<br/>USSD"]
+    H["Clinicians & pharmacy staff<br/>HCP web app (Next.js)"]
+  end
+
+  subgraph GHS["GHS infrastructure"]
+    RP["Reverse proxy<br/>Nginx · TLS 443"]
+    subgraph APP["Application server"]
+      API["Yelima API<br/>NestJS · Node.js 22<br/>port 4815"]
+      W["Background jobs<br/>BullMQ workers<br/>(reminders, missed doses)"]
+    end
+    subgraph DB["Database server (private network)"]
+      M[("MongoDB ≥ 6<br/>app data + audit logs")]
+      R[("Redis ≥ 7<br/>cache · rate limits · OTPs ·<br/>idempotency keys · USSD sessions ·<br/>job queues")]
+    end
+  end
+
+  subgraph EXT["External services"]
+    FB["Firebase (GHS project)<br/>Auth · Firestore · Storage · Push (FCM)"]
+    AT["Africa's Talking<br/>SMS · USSD"]
+    SM["SMTP email"]
+    GO["Google OAuth<br/>(staff sign-in)"]
+    LG["Logging<br/>BetterStack → OpenObserve"]
+  end
+
+  P -- HTTPS --> RP
+  H -- HTTPS --> RP
+  U -. dial *code# .-> AT
+  AT -- USSD callback HTTPS --> RP
+  RP --> API
+  API <--> M
+  API <--> R
+  W <--> R
+  W <--> M
+  API -- tokens, files, push, profile docs --> FB
+  P -- sign-in --> FB
+  W -- push notifications --> FB
+  FB -. push .-> P
+  API -- OTP / SMS --> AT
+  API -- OTP / email --> SM
+  API -- verify ID token --> GO
+  API -- errors & warnings --> LG
+
+  classDef ext fill:#eef6f0,stroke:#1b6b3a;
+  class FB,AT,SM,GO,LG ext;
