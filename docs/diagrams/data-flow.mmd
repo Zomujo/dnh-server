@@ -1,0 +1,34 @@
+---
+title: Yelima — Data Flow
+---
+flowchart LR
+  PA(["Patient<br/>mobile app"])
+  PU(["Patient<br/>basic phone"])
+  HC(["Clinician / pharmacy<br/>HCP web app"])
+  AT["Africa's Talking<br/>USSD · SMS"]
+
+  subgraph API["Yelima API"]
+    direction TB
+    A1["1 · Authenticate<br/>Firebase token or staff JWT"]
+    A2["2 · Authorise & validate<br/>role · record ownership · rate limit"]
+    A3["3 · Process request<br/>patients · medications · adherence ·<br/>vitals · appointments · concerns ·<br/>consent · data export"]
+    A4["4 · Write audit entry<br/>who · what · when · outcome"]
+    J["Scheduled jobs<br/>dose & appointment reminders ·<br/>missed doses · adherence rates"]
+    A1 --> A2 --> A3 --> A4
+  end
+
+  DB[("MongoDB<br/>personal & health data<br/>Confidential")]
+  AU[("MongoDB<br/>audit_logs")]
+  RQ[("Redis<br/>job queues · cache")]
+  FB["Firebase<br/>accounts · files · push"]
+
+  PA <== "HTTPS: profile, medications, dose logs,<br/>vitals, appointment requests" ==> A1
+  HC <== "HTTPS: patient records, vitals,<br/>appointments, symptoms" ==> A1
+  PU -- "USSD session" --> AT
+  AT <-- "USSD callback: vitals" --> A1
+  A3 <-- "read / write" --> DB
+  A4 --> AU
+  A3 -- "queue reminder" --> RQ --> J
+  J <-- "read schedules / save results" --> DB
+  J -- "push notification" --> FB -- "notification" --> PA
+  A3 -- "OTP · SMS" --> AT

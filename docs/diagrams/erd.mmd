@@ -1,0 +1,211 @@
+---
+title: Yelima — Data Model (MongoDB collections)
+---
+erDiagram
+  FACILITY {
+    ObjectId _id PK
+    string name
+    string phoneNumber
+  }
+  PERSONNEL {
+    ObjectId _id PK
+    string userName
+    string phoneNumber "PII"
+    string personnelIdNumber
+    string role "clinician / pharmacist"
+    string referralCode UK
+    ObjectId facility FK
+    ObjectId_array personnelAccounts FK
+  }
+  PERSONNEL_ACCOUNT {
+    ObjectId _id PK
+    string provider "local / google"
+    string providerUserId
+    string email "PII"
+    string password "bcrypt hash"
+    string verificationStatus
+    ObjectId personnel FK
+  }
+  PATIENT {
+    ObjectId _id PK
+    string patientCode UK
+    string userId "Firebase uid or hcp-*"
+    string name "PII"
+    string phoneNumber "PII"
+    string ghanaCardNumber "PII"
+    string nhisNumber "PII"
+    date dateOfBirth "PII"
+    string gender
+    string_array allergies "health"
+    string_array chronicConditions "health"
+    number adherenceRate
+    object consent "status, policyVersion, channel, recordedBy"
+    object_array consentHistory
+    ObjectId facility FK
+    ObjectId createdBy FK
+    ObjectId_array doctorsVisited FK
+    ObjectId_array pharmaciesVisited FK
+  }
+  MEDICATION {
+    ObjectId _id PK
+    ObjectId patient FK
+    string userId
+    string name
+    string dosage
+    object frequency
+    object morning_afternoon_evening "dosing schedule"
+    object_array scheduleHistory
+    date startDate
+    date endDate
+    date deletedAt "soft delete"
+    ObjectId_array adherenceLogs FK
+  }
+  ADHERENCE_LOG {
+    ObjectId _id PK
+    ObjectId patient FK
+    ObjectId medication FK
+    string userId
+    string targetType
+    date scheduledFor
+    boolean taken
+    date takenAt
+    string status
+  }
+  ADHERENCE_PATTERN {
+    ObjectId _id PK
+    ObjectId patient FK
+    string targetType
+    string targetName
+    number adherenceRate
+    string notes
+  }
+  VITAL_HISTORY {
+    ObjectId _id PK
+    ObjectId patient FK
+    string vitalType "BP, glucose, weight..."
+    string value "health"
+    string unit
+    string severity
+    date recordedAt
+    ObjectId createdBy FK
+    ObjectId facility FK
+  }
+  CHRONIC_CONDITION {
+    ObjectId _id PK
+    ObjectId patient FK
+    string conditionName "health"
+    string severity
+    string currentStatus
+  }
+  CONCERN {
+    ObjectId _id PK
+    ObjectId patient FK
+    ObjectId host FK "facility"
+    string concernType "symptom, side effect..."
+    string severity
+    boolean resolved
+  }
+  SUMMARY {
+    ObjectId _id PK
+    ObjectId patient FK
+    map medications
+    map vitalHistories
+    map adherences
+    map concerns
+  }
+  APPOINTMENT_REQUEST {
+    ObjectId _id PK
+    ObjectId patient FK
+    ObjectId host FK "facility"
+    string type
+    date preferredDate
+    string status
+  }
+  APPOINTMENT {
+    ObjectId _id PK
+    ObjectId patient FK
+    ObjectId host FK "facility"
+    ObjectId hostPersonnel FK
+    date appointmentDate
+    string status
+    ObjectId rescheduledBy FK
+    ObjectId cancelledBy FK
+  }
+  AUGUR_NOTIFICATION {
+    ObjectId _id PK
+    ObjectId patient FK
+    string notificationType "dose / appointment reminder"
+    string targetName
+    string channel
+    date toBeNotifiedAt
+    string queueJobId
+  }
+  USER_TOKEN {
+    ObjectId _id PK
+    string userId
+    string fcmToken UK "device push token"
+    string userType
+  }
+  SEEDED_MED {
+    ObjectId _id PK
+    string name
+    string_array possibleDosages
+  }
+  AUDIT_LOG {
+    ObjectId _id PK
+    date timestamp "TTL 730 days"
+    object actor "kind, userId, personnelId, role, facilityId"
+    string action "CREATE READ EXPORT UPDATE DELETE LOGIN ACCESS_DENIED..."
+    string method
+    string route "route template, no query string"
+    string resourceType
+    string resourceId
+    string patientId
+    number statusCode
+    string outcome
+    string ip
+  }
+  CHAT_ROOM {
+    ObjectId _id PK
+    string_array participants "retired feature"
+  }
+  CHAT_MESSAGE {
+    ObjectId _id PK
+    string roomId
+    string senderId
+    string content "retired feature"
+    ObjectId parentMessageId FK
+  }
+  CLIENT_AI_CHAT {
+    ObjectId _id PK
+    string userId
+    string role
+    string content "retired AI feature"
+  }
+
+  FACILITY ||--o{ PERSONNEL : employs
+  PERSONNEL ||--|{ PERSONNEL_ACCOUNT : "signs in with"
+  FACILITY ||--o{ PATIENT : "registered at"
+  PERSONNEL ||--o{ PATIENT : "created / visited by"
+  PATIENT ||--o{ MEDICATION : takes
+  MEDICATION ||--o{ ADHERENCE_LOG : "dose logs"
+  PATIENT ||--o{ ADHERENCE_LOG : logs
+  PATIENT ||--o{ ADHERENCE_PATTERN : "adherence rates"
+  PATIENT ||--o{ VITAL_HISTORY : records
+  PERSONNEL |o--o{ VITAL_HISTORY : "recorded by"
+  PATIENT ||--o{ CHRONIC_CONDITION : has
+  PATIENT ||--o{ CONCERN : reports
+  FACILITY ||--o{ CONCERN : receives
+  PATIENT ||--o| SUMMARY : "summarised in"
+  PATIENT ||--o{ APPOINTMENT_REQUEST : requests
+  FACILITY ||--o{ APPOINTMENT_REQUEST : receives
+  PATIENT ||--o{ APPOINTMENT : attends
+  FACILITY ||--o{ APPOINTMENT : hosts
+  PERSONNEL ||--o{ APPOINTMENT : "hosts / reschedules"
+  PATIENT ||--o{ AUGUR_NOTIFICATION : "is reminded by"
+  MEDICATION |o--o{ AUGUR_NOTIFICATION : "dose reminders"
+  PATIENT ||..o{ USER_TOKEN : "devices (by userId)"
+  PATIENT ||..o{ AUDIT_LOG : "subject of (patientId)"
+  PERSONNEL ||..o{ AUDIT_LOG : "actor (personnelId)"
+  CHAT_ROOM ||..o{ CHAT_MESSAGE : "contains (roomId)"
+  PATIENT ||..o{ CLIENT_AI_CHAT : "chats (by userId)"
