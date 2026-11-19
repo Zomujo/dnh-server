@@ -979,7 +979,10 @@ export class ClientService {
 			userId,
 			'_id',
 		);
-		return this.medicationsService.create(dto, userId, patient!._id.toString());
+		if (!patient) {
+			throw new NotFoundException('Patient record not found');
+		}
+		return this.medicationsService.create(dto, userId, patient._id.toString());
 	}
 
 	async deleteMedication(id: string, userId: string) {

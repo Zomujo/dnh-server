@@ -271,6 +271,8 @@ export class ChatController {
 		// Before touching Storage: a non-participant must not be able to
 		// write files under the room's path or inject a message into it.
 		await this.chatService.assertParticipant(roomId, userId);
+		// Also before the upload, so a bad parent leaves no orphan file.
+		await this.chatService.assertParentInRoom(roomId, parentMessageId);
 
 		const mime = file.mimetype;
 

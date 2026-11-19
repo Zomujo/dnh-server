@@ -99,6 +99,21 @@ export class ChatService {
 		}
 	}
 
+	/**
+	 * A reply's parent must be a message in the same room. Without this, a
+	 * participant of one room could reply to any message id and get that
+	 * message's content and sender back, populated, from another room.
+	 */
+	async assertParentInRoom(roomId: string, parentMessageId?: string) {
+		if (!parentMessageId) return;
+		const inRoom =
+			isValidObjectId(parentMessageId) &&
+			(await this.messageModel.exists({ _id: parentMessageId, roomId }));
+		if (!inRoom) {
+			throw new NotFoundException('Parent message not found');
+		}
+	}
+
 	async saveMessage(
 		senderId: string,
 		roomId: string,
@@ -115,6 +130,7 @@ export class ChatService {
 		};
 
 		if (parentMessageId) {
+			await this.assertParentInRoom(roomId, parentMessageId);
 			payload.parentMessageId = new Types.ObjectId(parentMessageId);
 		}
 

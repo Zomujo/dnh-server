@@ -38,6 +38,42 @@ describe('ChatService', () => {
 		expect(service).toBeDefined();
 	});
 
+	describe('saveMessage reply parent', () => {
+		it('refuses a parent message from another room', async () => {
+			messageModel.exists.mockResolvedValue(null);
+			const parent = '6aff6f5a67dcbf4c51d3665a';
+
+			await expect(
+				service.saveMessage(
+					'patient-a',
+					'room-a',
+					'hi',
+					MessageType.TEXT,
+					parent,
+				),
+			).rejects.toThrow('Parent message not found');
+			expect(messageModel.exists).toHaveBeenCalledWith({
+				_id: parent,
+				roomId: 'room-a',
+			});
+			expect(messageModel.create).not.toHaveBeenCalled();
+		});
+
+		it('refuses a malformed parent id without querying', async () => {
+			await expect(
+				service.assertParentInRoom('room-a', 'not-an-id'),
+			).rejects.toThrow('Parent message not found');
+			expect(messageModel.exists).not.toHaveBeenCalled();
+		});
+
+		it('accepts a parent in the same room', async () => {
+			messageModel.exists.mockResolvedValue({ _id: 'p' } as any);
+			await expect(
+				service.assertParentInRoom('room-a', '6aff6f5a67dcbf4c51d3665a'),
+			).resolves.toBeUndefined();
+		});
+	});
+
 	describe('withSignedMedia', () => {
 		const media = (path: string) => ({
 			roomId: 'room-1',

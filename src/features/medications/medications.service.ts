@@ -96,9 +96,10 @@ export class MedicationsService {
 
 		const qdrantId = uuidv7();
 		const medication = await this.medicationModel.create({
+			...(dto as any),
+			// After the spread, so the DTO can never set the owner.
 			userId,
 			patient: patient as any,
-			...(dto as any),
 			startDate,
 			frequency: { repeatEvery, repetitionType: RepetitionType.DAILY },
 		});
