@@ -61,7 +61,12 @@ export class DhVectorsService implements OnModuleInit {
 		}
 	}
 
-	/** The store is configured and set up; false skips the operation. */
+	/**
+	 * The store is configured and set up; false skips the operation. Never
+	 * waits on setup: these calls sit on core request paths (e.g. saving a
+	 * medication), so a due retry runs in the background and the call is
+	 * skipped until setup has succeeded.
+	 */
 	private async isAvailable(): Promise<boolean> {
 		if (this.state === 'disabled') return false;
 		const retryDue =
@@ -70,8 +75,12 @@ export class DhVectorsService implements OnModuleInit {
 		if (retryDue || (this.state === 'pending' && !this.setup)) {
 			this.startSetup();
 		}
-		if (this.state === 'pending') await this.setup;
 		return this.state === 'ready';
+	}
+
+	/** Setup has finished (successfully or not); for tests. */
+	whenSetUp(): Promise<void> {
+		return this.setup ?? Promise.resolve();
 	}
 
 	private get store(): {
@@ -209,6 +218,7 @@ export class DhVectorsService implements OnModuleInit {
 				},
 			});
 		} catch (e) {
+			if (isMissingCollection(e)) return; // nothing was ever stored
 			this.logger.error('Error deleting dh vector by documentId', e);
 		}
 	}
@@ -222,11 +232,14 @@ export class DhVectorsService implements OnModuleInit {
 		if (!this.qdrant) return;
 		try {
 			await this.qdrant.delete(COLLECTION, {
+				wait: true,
 				filter: {
 					must: [{ key: 'userId', match: { value: userId } }],
 				},
 			});
 		} catch (e) {
+			// No collection: nothing was ever stored, so nothing to erase.
+			if (isMissingCollection(e)) return;
 			this.logger.error(`Could not erase vectors of user ${userId}`, e);
 			throw new Error(
 				'Erasure incomplete: could not delete the user’s vectors from Qdrant',
@@ -355,4 +368,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 		);
 	});
 	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** Qdrant's 404 for a collection that was never created. */
+function isMissingCollection(error: unknown): boolean {
+	const e = error as { status?: number; message?: string } | undefined;
+	return (
+		e?.status === 404 || /doesn'?t exist|not found/i.test(e?.message ?? '')
+	);
 }
