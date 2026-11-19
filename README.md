@@ -565,7 +565,7 @@ Create `.env.production` from `.envrc.example`: remove each `export ` prefix so 
 | `NODE_ENV` | `production` |
 | `DB_NAME`, `DB_CONNECTION_STRING` | MongoDB ≥ 6 (compose sets the connection string) |
 | `REDIS_URL` | Redis ≥ 7 (compose sets it) |
-| `JWT_SECRET`, `JWT_TTL`, `OTP_TTL` | Personnel auth |
+| `JWT_SECRET`, `JWT_TTL`, `OTP_TTL`, `JWT_TOKEN_ISSUER` | Personnel auth; staff login fails with a 500 if `JWT_TOKEN_ISSUER` is unset |
 | `FIREBASE_BASE_*`, `BASE_STORAGE_BUCKET` | Firebase service account and storage bucket |
 | `EMAIL_*` | SMTP for verification emails |
 | `CORS_ORIGINS` | Browser origins allowed to call the API (the HCP web app) |
