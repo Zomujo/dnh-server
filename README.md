@@ -314,11 +314,11 @@ Personnel roles: `clinician`, `pharmacy`.
 
 | Limit | Applies to | When reached |
 |---|---|---|
-| 5 wrong passwords per email in 15 minutes | `POST /personnel/auth/login` with email and password, whether or not the email has an account | That email's password sign-in returns 429 for 15 minutes, even with the right password. A correct sign-in resets the count. Google sign-in is unaffected |
-| 5 verification codes per email per hour | Every code sent: onboarding and `POST /personnel/auth/otp/re-send` | `otp/re-send` returns 429 until the hour is up. Onboarding still succeeds; a code sent earlier still works |
+| 5 sign-in attempts per email in 15 minutes; a correct one resets the count | `POST /personnel/auth/login` with email and password, whether or not the email has an account | The next attempt returns 429, and that email's password sign-in stays refused for 15 minutes, even with the right password. Google sign-in is unaffected |
+| 5 verification codes per email per hour | Every code sent: onboarding and `POST /personnel/auth/otp/re-send` | `otp/re-send` returns 429 for an hour. Onboarding still succeeds; a code sent earlier still works |
 | Per IP, per minute: signup 5, login 10, `otp/re-send` 3, `otp/verify` 10 | Those routes | 429 |
 
-The per-email counts live in Redis (`throttle:login-failure:<email>`, `throttle:otp-send:<email>`). To unlock an email early, delete its `throttle:*` and `throttle:block:*` keys.
+The per-email counts live in Redis (`throttle:login-attempt:<email>`, `throttle:otp-send:<email>`). Each check counts and compares in one atomic step, so parallel requests cannot get past a limit. To unlock an email early, delete its `throttle:*` and `throttle:block:*` keys.
 
 ---
 

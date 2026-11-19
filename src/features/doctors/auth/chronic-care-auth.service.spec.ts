@@ -64,8 +64,7 @@ describe('ChronicCareAuthService', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		attemptLimiter.assertAllowed.mockResolvedValue(undefined);
-		attemptLimiter.record.mockResolvedValue(0);
+		attemptLimiter.consume.mockResolvedValue(undefined);
 	});
 
 	it('should be defined', () => {
@@ -428,36 +427,17 @@ describe('ChronicCareAuthService', () => {
 	});
 
 	describe('login lockout', () => {
-		const wrongPassword = async () => {
-			personnelAccountModel.findOne.mockReturnValue({
-				populate: vi.fn().mockResolvedValue({
-					email: 'doc@example.com',
-					password: await bcrypt.hash('validPassword', 4),
-					verificationStatus: PersonnelAccountVerificationStatus.VERIFIED,
-				}),
-			} as any);
-		};
-
-		it('refuses a locked email before looking up the account', async () => {
-			attemptLimiter.assertAllowed.mockRejectedValue(new ThrottlerException());
+		it('refuses an email over its limit before looking up the account', async () => {
+			attemptLimiter.consume.mockRejectedValue(new ThrottlerException());
 
 			await expect(
 				service.login({ email: 'doc@example.com', password: 'x' }),
 			).rejects.toThrow(ThrottlerException);
-			expect(personnelAccountModel.findOne).not.toHaveBeenCalled();
-		});
-
-		it('counts a wrong password and locks on the last allowed one', async () => {
-			await wrongPassword();
-			attemptLimiter.record.mockResolvedValue(900);
-
-			await expect(
-				service.login({ email: 'doc@example.com', password: 'nope' }),
-			).rejects.toThrow(ThrottlerException);
-			expect(attemptLimiter.record).toHaveBeenCalledWith(
-				expect.objectContaining({ name: 'login-failure' }),
+			expect(attemptLimiter.consume).toHaveBeenCalledWith(
+				expect.objectContaining({ name: 'login-attempt' }),
 				'doc@example.com',
 			);
+			expect(personnelAccountModel.findOne).not.toHaveBeenCalled();
 		});
 
 		it('counts an unknown email the same way', async () => {
@@ -468,10 +448,25 @@ describe('ChronicCareAuthService', () => {
 			await expect(
 				service.login({ email: 'ghost@example.com', password: 'x' }),
 			).rejects.toThrow(UnauthorizedException);
-			expect(attemptLimiter.record).toHaveBeenCalledWith(
+			expect(attemptLimiter.consume).toHaveBeenCalledWith(
 				expect.anything(),
 				'ghost@example.com',
 			);
+		});
+
+		it('keeps the count after a wrong password', async () => {
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue({
+					email: 'doc@example.com',
+					password: await bcrypt.hash('validPassword', 4),
+					verificationStatus: PersonnelAccountVerificationStatus.VERIFIED,
+				}),
+			} as any);
+
+			await expect(
+				service.login({ email: 'doc@example.com', password: 'nope' }),
+			).rejects.toThrow(UnauthorizedException);
+			expect(attemptLimiter.reset).not.toHaveBeenCalled();
 		});
 
 		it('clears the count after the right password', async () => {
@@ -493,9 +488,20 @@ describe('ChronicCareAuthService', () => {
 				password: 'validPassword',
 			});
 			expect(attemptLimiter.reset).toHaveBeenCalledWith(
-				expect.objectContaining({ name: 'login-failure' }),
+				expect.objectContaining({ name: 'login-attempt' }),
 				'doc@example.com',
 			);
+		});
+
+		it('does not count Google sign-in', async () => {
+			personnelAccountModel.findOne.mockReturnValue({
+				populate: vi.fn().mockResolvedValue(null),
+			} as any);
+
+			await expect(
+				service.login({ providerUserId: 'g-1' } as any),
+			).rejects.toThrow(NotFoundException);
+			expect(attemptLimiter.consume).not.toHaveBeenCalled();
 		});
 	});
 

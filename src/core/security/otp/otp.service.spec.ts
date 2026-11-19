@@ -28,13 +28,13 @@ describe('OtpService', () => {
 	});
 
 	it('refuses a new code once the address hit its send limit', async () => {
-		limiter.assertAllowed.mockRejectedValue(new ThrottlerException());
+		limiter.consume.mockRejectedValue(new ThrottlerException());
 
 		await expect(
 			service.generate({ identifier: 'A@example.com' }),
 		).rejects.toThrow(ThrottlerException);
 		expect(store.size).toBe(0);
-		expect(limiter.assertAllowed).toHaveBeenCalledWith(
+		expect(limiter.consume).toHaveBeenCalledWith(
 			expect.objectContaining({ name: 'otp-send' }),
 			'a@example.com',
 		);

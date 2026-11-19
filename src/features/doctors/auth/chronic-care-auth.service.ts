@@ -13,11 +13,7 @@ import { isValidObjectId, Model } from 'mongoose';
 import { AuthService } from '@/core/auth/auth.service';
 import { GoogleLoginDto } from '@/core/auth/dto';
 import { UserType } from '@/core/auth/enums';
-import {
-	AttemptLimit,
-	AttemptLimiter,
-	tooMany,
-} from '@/core/caching/attempt-limiter';
+import { AttemptLimit, AttemptLimiter } from '@/core/caching/attempt-limiter';
 import { CommunicationsService } from '@/core/communications/communications.service';
 import { GenerateOtpDto, VerifyOtpDto } from '@/core/security/otp/dto';
 import { OtpService } from '@/core/security/otp/otp.service';
@@ -40,13 +36,14 @@ import {
 const OTP_REQUIRED_ROLES: PersonnelRoles[] = [PersonnelRoles.CLINICIAN];
 
 /**
- * Wrong passwords allowed per email before email login is locked. Counted
- * per email, not per IP, so spreading guesses across addresses does not help.
+ * Email/password sign-ins allowed per email in the window; a correct one
+ * resets the count, so in practice this limits wrong passwords. Counted per
+ * email, not per IP, so spreading guesses across addresses does not help.
  * Someone could lock a known staff email on purpose; it unlocks on its own,
  * and Google sign-in is unaffected.
  */
-export const LOGIN_FAILURE_LIMIT: AttemptLimit = {
-	name: 'login-failure',
+export const LOGIN_ATTEMPT_LIMIT: AttemptLimit = {
+	name: 'login-attempt',
 	max: 5,
 	windowMs: 15 * 60 * 1000,
 	blockMs: 15 * 60 * 1000,
@@ -286,7 +283,9 @@ export class ChronicCareAuthService {
 		const isGoogleLogin = !!dto.providerUserId;
 
 		if (!isGoogleLogin) {
-			await this.attemptLimiter.assertAllowed(LOGIN_FAILURE_LIMIT, dto.email);
+			// Counted before the password is checked, whether or not the email
+			// has an account, so the limit caps how many guesses are tried.
+			await this.attemptLimiter.consume(LOGIN_ATTEMPT_LIMIT, dto.email);
 		}
 
 		const personnelAccount = await this.personnelAccountModel
@@ -309,7 +308,7 @@ export class ChronicCareAuthService {
 				// separately whether to create one.
 				throw new NotFoundException('Personnel not found');
 			}
-			throw await this.loginFailure(dto.email);
+			throw new UnauthorizedException('Invalid credentials');
 		}
 
 		if (
@@ -327,9 +326,9 @@ export class ChronicCareAuthService {
 				personnelAccount.password ?? '',
 			);
 			if (!passwordMatch) {
-				throw await this.loginFailure(dto.email);
+				throw new UnauthorizedException('Invalid credentials');
 			}
-			await this.attemptLimiter.reset(LOGIN_FAILURE_LIMIT, dto.email);
+			await this.attemptLimiter.reset(LOGIN_ATTEMPT_LIMIT, dto.email);
 		}
 
 		const personnel = personnelAccount.personnel as any;
@@ -367,20 +366,6 @@ export class ChronicCareAuthService {
 		);
 
 		return { personnelId: personnel._id.toString(), token };
-	}
-
-	/**
-	 * Counts a wrong email or password against the email, whether or not an
-	 * account has it, so the lockout does not reveal which emails exist.
-	 */
-	private async loginFailure(email: string) {
-		const blockedFor = await this.attemptLimiter.record(
-			LOGIN_FAILURE_LIMIT,
-			email,
-		);
-		return blockedFor > 0
-			? tooMany(blockedFor)
-			: new UnauthorizedException('Invalid credentials');
 	}
 
 	async googleAuth(dto: GoogleLoginDto) {

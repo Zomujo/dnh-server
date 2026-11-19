@@ -38,39 +38,43 @@ describe('AttemptLimiter', () => {
 				};
 			},
 		);
-		storage.blockedFor.mockImplementation(async (key, name) =>
-			blocked.has(`${name}:${key}`) ? 120 : 0,
-		);
 		storage.reset.mockImplementation(async (key, name) => {
 			hits.delete(`${name}:${key}`);
 			blocked.delete(`${name}:${key}`);
 		});
 	});
 
-	it('blocks on the max-th attempt and refuses the next', async () => {
-		await expect(limiter.record(LIMIT, 'a')).resolves.toBe(0);
-		await expect(limiter.record(LIMIT, 'a')).resolves.toBe(0);
-		await expect(limiter.record(LIMIT, 'a')).resolves.toBe(120);
-		await expect(limiter.assertAllowed(LIMIT, 'a')).rejects.toThrow(
+	it('allows max attempts and refuses the next', async () => {
+		for (let i = 0; i < 3; i++) {
+			await expect(limiter.consume(LIMIT, 'a')).resolves.toBeUndefined();
+		}
+		await expect(limiter.consume(LIMIT, 'a')).rejects.toThrow(
 			ThrottlerException,
+		);
+		expect(storage.increment).toHaveBeenCalledWith(
+			'a',
+			60_000,
+			3,
+			120_000,
+			'test',
 		);
 	});
 
 	it('keeps subjects apart', async () => {
-		for (let i = 0; i < 3; i++) await limiter.record(LIMIT, 'a');
-		await expect(limiter.assertAllowed(LIMIT, 'b')).resolves.toBeUndefined();
+		for (let i = 0; i < 3; i++) await limiter.consume(LIMIT, 'a');
+		await expect(limiter.consume(LIMIT, 'b')).resolves.toBeUndefined();
 	});
 
 	it('reset clears the count and the block', async () => {
-		for (let i = 0; i < 3; i++) await limiter.record(LIMIT, 'a');
+		for (let i = 0; i < 3; i++) await limiter.consume(LIMIT, 'a');
+		await expect(limiter.consume(LIMIT, 'a')).rejects.toThrow();
 		await limiter.reset(LIMIT, 'a');
-		await expect(limiter.assertAllowed(LIMIT, 'a')).resolves.toBeUndefined();
-		await expect(limiter.record(LIMIT, 'a')).resolves.toBe(0);
+		await expect(limiter.consume(LIMIT, 'a')).resolves.toBeUndefined();
 	});
 
 	it('says how long to wait', async () => {
-		for (let i = 0; i < 3; i++) await limiter.record(LIMIT, 'a');
-		await expect(limiter.assertAllowed(LIMIT, 'a')).rejects.toThrow(
+		for (let i = 0; i < 3; i++) await limiter.consume(LIMIT, 'a');
+		await expect(limiter.consume(LIMIT, 'a')).rejects.toThrow(
 			'Try again in 2 minutes',
 		);
 	});

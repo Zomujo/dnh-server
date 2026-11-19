@@ -38,8 +38,7 @@ export class OtpService {
 	/** Throws a 429 once the identifier has had OTP_SEND_LIMIT codes. */
 	async generate(payload: GenerateOtpDto): Promise<number> {
 		const subject = payload.identifier.toLowerCase();
-		await this.attemptLimiter.assertAllowed(OTP_SEND_LIMIT, subject);
-		await this.attemptLimiter.record(OTP_SEND_LIMIT, subject);
+		await this.attemptLimiter.consume(OTP_SEND_LIMIT, subject);
 
 		const otp = crypto.randomInt(100000, 1000000);
 		const hashedOtp = await bcrypt.hash(otp.toString(), 10);
