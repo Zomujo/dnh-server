@@ -497,7 +497,7 @@ Leave these unset unless you are bringing the AI back (see [Retired features](#r
 ```bash
 # 1. Clone the repo
 git clone <repo-url>
-cd giz-dnh
+cd dnh-server
 
 # 2. Install dependencies
 pnpm install
