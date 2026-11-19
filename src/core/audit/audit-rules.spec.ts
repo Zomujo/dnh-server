@@ -150,6 +150,34 @@ describe('auditActionFor (skip rules)', () => {
 		expect(
 			auditActionFor('GET', '/api/v1/client/medications', patient),
 		).toBeUndefined();
+		expect(
+			auditActionFor('GET', '/api/v1/client/consent', patient),
+		).toBeUndefined();
+	});
+
+	it('records a consent change as an update by the patient', () => {
+		expect(auditActionFor('PUT', '/api/v1/client/consent', patient)).toBe(
+			AuditAction.UPDATE,
+		);
+	});
+
+	it('records full data exports as EXPORT, by patients and personnel', () => {
+		expect(auditActionFor('GET', '/api/v1/client/data-export', patient)).toBe(
+			AuditAction.EXPORT,
+		);
+		expect(
+			auditActionFor('GET', '/api/v1/hcp/patients/:id/data-export', personnel),
+		).toBe(AuditAction.EXPORT);
+		expect(
+			auditActionFor('GET', '/api/v1/client/data-export', anonymous),
+		).toBeUndefined();
+	});
+
+	it('ties a personnel export to the patient it exports', () => {
+		const id = new Types.ObjectId().toHexString();
+		expect(
+			extractResource('/api/v1/hcp/patients/:id/data-export', { id }),
+		).toEqual({ resourceType: 'patients', resourceId: id, patientId: id });
 	});
 
 	it('skips unauthenticated traffic outside the auth endpoints', () => {

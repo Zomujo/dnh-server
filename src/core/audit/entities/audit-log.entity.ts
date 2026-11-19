@@ -8,6 +8,8 @@ export const AUDIT_LOG_TTL_INDEX = 'timestamp_ttl';
 export enum AuditAction {
 	CREATE = 'CREATE',
 	READ = 'READ',
+	/** A full patient data export (right of access / portability). */
+	EXPORT = 'EXPORT',
 	UPDATE = 'UPDATE',
 	DELETE = 'DELETE',
 	LOGIN = 'LOGIN',

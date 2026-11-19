@@ -322,6 +322,7 @@ Every audited request adds one document to the `audit_logs` MongoDB collection (
 |---|---|
 | Every write (`POST`/`PUT`/`PATCH`/`DELETE`) by a signed-in patient or personnel | `PATCH /api/v1/hcp/patients/:id` |
 | Personnel reads of patient health data (routes under `patients`, `vital-histories`, `vitals`, `medications`, `adherence`, `symptoms`, `concerns`, `appointments`, `appointment-requests`, `chat`) | `GET /api/v1/hcp/patients/:patientId/medications` |
+| Full data exports (right of access / portability), by the patient or by a clinician, recorded as `EXPORT` | `GET /api/v1/client/data-export`, `GET /api/v1/hcp/patients/:id/data-export` |
 | Auth events, successful or not: personnel login (password and Google), signup, onboarding, OTP send/verify; patient signup and onboarding | `POST /api/v1/personnel/auth/login` → `LOGIN`, 401 |
 | Requests to token-protected routes rejected by `AuthGuard` (401: missing, expired or invalid token) or `RolesGuard` (403: wrong role) | `GET /api/v1/hcp/patients/:id` → `ACCESS_DENIED`, 403 |
 
@@ -329,7 +330,7 @@ Each entry holds:
 
 - `timestamp`
 - `actor`: `kind` (`personnel` / `patient` / `anonymous`), `userType` (token audience), `userId` (personnel id or patient Firebase uid), `role` and `facilityId` for personnel, `personnelId`/`patientId` when known. A failed login has no user id.
-- `action`: `CREATE`, `READ`, `UPDATE`, `DELETE`, `LOGIN`, `SIGNUP`, `ONBOARD`, `OTP_SEND`, `OTP_VERIFY`, `ACCESS_DENIED`. A rejected request is anonymous unless its token was valid and only the role check failed.
+- `action`: `CREATE`, `READ`, `EXPORT`, `UPDATE`, `DELETE`, `LOGIN`, `SIGNUP`, `ONBOARD`, `OTP_SEND`, `OTP_VERIFY`, `ACCESS_DENIED`. A rejected request is anonymous unless its token was valid and only the role check failed.
 - `method`, `route` (the route template, e.g. `/api/v1/hcp/patients/:id`, never the raw URL)
 - `resourceType`, `resourceId` (from the route params), `patientId` (the patient whose data was touched, when the route names one)
 - `statusCode`, `outcome` (`success` below 400, otherwise `failure`; `aborted` with no `statusCode` when the client disconnected and the handler then completed, i.e. the action ran but no response was delivered)
@@ -345,7 +346,7 @@ Not recorded: patients reading their own data, unauthenticated requests other th
 
 - `patientId` is empty for several personnel reads whose route doesn't name the patient: `appointments/:id`, `appointment-requests/:id`, `vital-histories/:id` (both `/hcp` and `/personnel/pharmacies`), chat room messages (`chat/hcp/rooms/:roomId/messages`), and patient lists (`hcp/patients`, `personnel/pharmacies/patients`). `resourceId` and `route` still say what was read, but finding "everyone who read patient X" needs a join through that resource.
 - An `Idempotency-Key` replay is recorded as a second entry (same action and resource), even though the handler did not run again.
-- Patients reading their own data are not recorded (by decision).
+- Patients reading their own data are not recorded (by decision), except a full data export. A consent change (`PUT /api/v1/client/consent`) is recorded as an `UPDATE` by the patient; reading consent is not. A patient's own export and consent change name no patient in the route, so `patientId` is empty and the patient is `actor.userId` (Firebase uid).
 
 ### Retention
 

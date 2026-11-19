@@ -236,10 +236,15 @@ export function actorFromRequest(
  * - the public auth endpoints (login, OTP, signup, onboarding), always
  * - any write (POST/PUT/PATCH/DELETE) by an authenticated user
  * - a personnel GET on a route that reads patient health data
+ * - a full data export (`.../data-export`) by anyone, patients included,
+ *   recorded as EXPORT
  *
  * Unauthenticated traffic otherwise (health check, public facility lists,
  * the USSD callback) is not audited; Swagger isn't a Nest route at all.
  */
+/** Last path segment of the full patient data export routes. */
+const DATA_EXPORT_SEGMENT = 'data-export';
+
 export function auditActionFor(
 	method: string,
 	route: string,
@@ -253,6 +258,10 @@ export function auditActionFor(
 	const action = actionForMethod(method);
 	if (!action) return undefined;
 	if (action !== AuditAction.READ) return action;
+
+	if (staticSegments(route).at(-1) === DATA_EXPORT_SEGMENT) {
+		return AuditAction.EXPORT;
+	}
 
 	const readsPatientData = staticSegments(route).some((segment) =>
 		PATIENT_DATA_SEGMENTS.has(segment),
