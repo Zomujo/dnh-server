@@ -472,43 +472,53 @@ pnpm start:prod
 
 ## Running with Docker
 
-The `Dockerfile` builds a production image (Node 22, runs as the non-root `node` user, `NODE_ENV=production`, `TZ=Africa/Accra`, port `4815`). Its `HEALTHCHECK` calls `GET /`, which answers `{"status":"OK"}`. The image holds no secrets: configuration comes from environment variables at run time. Qdrant and the AI providers aren't part of this deployment.
+The `Dockerfile` builds a production image (Node 22, runs as the non-root `node` user, `NODE_ENV=production`, `TZ=Africa/Accra`, port `4815`). Its `HEALTHCHECK` calls `GET /`, which answers `{"status":"OK"}`. The image holds no secrets: configuration comes from environment variables at run time. Qdrant and the AI providers aren't part of this deployment. On `SIGTERM` (`docker stop`) Nest runs its shutdown hooks, closing queue workers and the MongoDB/Redis connections before exiting.
+
+**TLS**: the API speaks plain HTTP. Terminate TLS at a reverse proxy (nginx, Caddy or the GHS load balancer) in front of it, and don't expose port `4815` publicly.
 
 ### Configuration
 
-Create `.env.production` from `.envrc.example`: remove each `export ` prefix so every line is a plain `KEY=value`, then fill in the values. Don't wrap values in quotes: `docker run --env-file` keeps quotes as part of the value. Keep the escaped `\n` sequences in `FIREBASE_BASE_PRIVATE_KEY` on one line. The file is ignored by git and by the Docker build. At minimum set:
+Create `.env.production` from `.envrc.example`: remove each `export ` prefix so every line is a plain `KEY=value`, then fill in the values. Keep the escaped `\n` sequences in `FIREBASE_BASE_PRIVATE_KEY` on one line. The file is ignored by git and by the Docker build. At minimum set:
 
 | Variable | Notes |
 |---|---|
 | `NODE_ENV` | `production` |
-| `DB_NAME`, `DB_CONNECTION_STRING` | MongoDB ≥ 6 (overridden by compose, see below) |
-| `REDIS_URL` | Redis ≥ 7 (overridden by compose) |
+| `DB_NAME`, `DB_CONNECTION_STRING` | MongoDB ≥ 6 (compose sets the connection string) |
+| `REDIS_URL` | Redis ≥ 7 (compose sets it) |
 | `JWT_SECRET`, `JWT_TTL`, `OTP_TTL` | Personnel auth |
 | `FIREBASE_BASE_*`, `BASE_STORAGE_BUCKET` | Firebase service account and storage bucket |
 | `EMAIL_*` | SMTP for verification emails |
-| `CORS_ORIGINS`, `TRUST_PROXY` | Browser origins allowed; proxy hops in front of the API |
+| `CORS_ORIGINS` | Browser origins allowed to call the API (the HCP web app) |
+| `TRUST_PROXY` | **Exact** number of proxies in front of the API: `1` for one reverse proxy, `2` for a load balancer plus proxy, `0` (or `false`) if clients connect directly. Defaults to `1` when unset. Too high a value lets clients spoof `X-Forwarded-For`, which bypasses `USSD_ALLOWED_IPS` and per-IP rate limiting. Compose sets it from `.env`. |
 
 See [Environment Variables](#environment-variables) for the full list. Leave `QUEUE_TLS` empty unless Redis uses TLS: any non-empty value, even `false`, turns TLS on.
 
+**Quoting**: `.env.production` is written for Docker Compose, whose parser expands `$VAR` / `${VAR}` and treats ` #` as the start of a comment in unquoted values. `docker run --env-file` does neither, but keeps quotes as part of the value. So avoid `$` and ` #` in secret values (`openssl rand -hex 32` makes safe ones). If a value must contain them, wrap it in single quotes; that file then works only with compose.
+
 ### Docker Compose (API + MongoDB + Redis)
 
+Compose needs a second file, `.env`, next to `docker-compose.yml` for the stack's own settings:
+
 ```bash
+cp .env.compose.example .env     # set MONGO_ROOT_PASSWORD, REDIS_PASSWORD, TRUST_PROXY
 docker compose up -d --build     # build the image and start everything
 docker compose ps                # api shows "healthy" once GET / answers
-curl http://localhost:4815/      # {"status":"OK"}
+curl http://127.0.0.1:4815/      # {"status":"OK"}, from the Docker host
 ```
 
-Compose points the API at the bundled services (`DB_CONNECTION_STRING=mongodb://mongo:27017`, `REDIS_URL=redis://redis:6379`), whatever `.env.production` says. Data persists in the `mongo-data` and `redis-data` volumes (Redis runs with `appendonly`). MongoDB and Redis aren't published on the host; only the API is, on port `4815`. The API starts after both report healthy.
+- MongoDB is created with a root user (`MONGO_ROOT_USERNAME` / `MONGO_ROOT_PASSWORD`) and Redis requires `REDIS_PASSWORD`. Use URL-safe passwords, because compose builds `DB_CONNECTION_STRING` (`mongodb://user:pass@mongo:27017/?authSource=admin`) and `REDIS_URL` (`redis://:pass@redis:6379`) from them, whatever `.env.production` says. The Mongo user is created only on the first start of an empty `mongo-data` volume.
+- Data persists in the `mongo-data` and `redis-data` volumes (Redis runs with `appendonly`). MongoDB and Redis aren't published on the host. The API starts after both report healthy.
+- The API is published on `127.0.0.1:4815` only, for a reverse proxy on the same host. Docker-published ports bypass host firewalls such as `ufw`, so don't bind it to `0.0.0.0`. If the proxy runs on another machine, set `API_BIND_ADDRESS` in `.env` to a private interface address and restrict access to that address in the network.
 
 ### Image only (external MongoDB and Redis)
 
 ```bash
 docker build -t dnh-api .
 docker run -d --name dnh-api --init --restart unless-stopped \
-  --env-file .env.production -p 4815:4815 dnh-api
+  --env-file .env.production -p 127.0.0.1:4815:4815 dnh-api
 ```
 
-`--init` (or `init: true` in compose) makes `docker stop` end the process promptly.
+`--init` (or `init: true` in compose) passes `docker stop`'s `SIGTERM` to Node so the shutdown hooks run.
 
 ### Logs
 
