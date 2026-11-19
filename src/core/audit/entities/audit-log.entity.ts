@@ -15,11 +15,18 @@ export enum AuditAction {
 	ONBOARD = 'ONBOARD',
 	OTP_SEND = 'OTP_SEND',
 	OTP_VERIFY = 'OTP_VERIFY',
+	/** Rejected by AuthGuard/RolesGuard (401/403) before the handler ran. */
+	ACCESS_DENIED = 'ACCESS_DENIED',
 }
 
 export enum AuditOutcome {
 	SUCCESS = 'success',
 	FAILURE = 'failure',
+	/**
+	 * The client disconnected before a response was sent and the handler
+	 * then completed: the action ran, but no status reached the client.
+	 */
+	ABORTED = 'aborted',
 }
 
 export enum AuditActorKind {
@@ -95,8 +102,9 @@ export class AuditLog {
 	@Prop()
 	patientId?: string;
 
-	@Prop({ required: true })
-	statusCode: number;
+	/** Absent when the outcome is `aborted` (no response was sent). */
+	@Prop()
+	statusCode?: number;
 
 	@Prop({ required: true, enum: AuditOutcome })
 	outcome: AuditOutcome;

@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { UserType } from '@/core/auth/enums';
 import {
 	AuditAction,
@@ -116,10 +117,22 @@ function staticSegments(route: string) {
 		.filter((segment) => segment && !segment.startsWith(':'));
 }
 
-function cleanId(value: unknown): string | undefined {
-	return typeof value === 'string' && ID_PATTERN.test(value)
-		? value
-		: undefined;
+/** An id as a string: id-shaped strings and ObjectIds; anything else is dropped. */
+export function cleanId(value: unknown): string | undefined {
+	if (typeof value === 'string') {
+		return ID_PATTERN.test(value) ? value : undefined;
+	}
+	if (value instanceof Types.ObjectId) return value.toHexString();
+	// An ObjectId from another copy of bson (e.g. the native driver's).
+	if (
+		value &&
+		typeof value === 'object' &&
+		(value as { _bsontype?: unknown })._bsontype === 'ObjectId' &&
+		typeof (value as { toHexString?: unknown }).toHexString === 'function'
+	) {
+		return cleanId((value as { toHexString(): string }).toHexString());
+	}
+	return undefined;
 }
 
 /**
@@ -274,9 +287,11 @@ export function actorForAuthEvent(
 	}
 
 	if (event.kind === AuditActorKind.PERSONNEL) {
-		const personnelId = cleanId(
-			(data as { personnelId?: unknown } | undefined)?.personnelId,
-		);
+		// Login returns { personnelId, token }; signup and onboarding return
+		// the personnel id itself (an ObjectId). OTP routes return nothing.
+		const personnelId =
+			cleanId((data as { personnelId?: unknown } | undefined)?.personnelId) ??
+			cleanId(data);
 		if (personnelId) {
 			next.userId ??= personnelId;
 			next.personnelId ??= personnelId;
@@ -322,7 +337,10 @@ export function buildAuditEntry(input: {
 	route: string;
 	action: AuditAction;
 	actor: AuditActor;
-	statusCode: number;
+	/** Omitted for an aborted request (no response was sent). */
+	statusCode?: number;
+	/** Defaults to the outcome implied by the status code. */
+	outcome?: AuditOutcome;
 	now?: Date;
 }): AuditLog {
 	const { request, route, action, actor, statusCode } = input;
@@ -334,7 +352,11 @@ export function buildAuditEntry(input: {
 		route,
 		...extractResource(route, request.params),
 		statusCode,
-		outcome: outcomeFor(statusCode),
+		outcome:
+			input.outcome ??
+			(statusCode === undefined
+				? AuditOutcome.ABORTED
+				: outcomeFor(statusCode)),
 		ip: request.ip,
 		userAgent: userAgentFrom(request.headers),
 		requestId: requestIdFrom(request.headers),

@@ -7,9 +7,10 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { type Mocked, TestBed } from '@suites/unit';
-import { firstValueFrom, of, throwError } from 'rxjs';
+import { firstValueFrom, of, Subject, throwError } from 'rxjs';
 import { UserType } from '@/core/auth/enums';
 import { AuditInterceptor } from './audit.interceptor';
+import { AUDIT_INTERCEPTED } from './audit.markers';
 import { AuditService } from './audit.service';
 import {
 	AuditAction,
@@ -21,9 +22,11 @@ import {
 class FakeResponse extends EventEmitter {
 	statusCode = 200;
 	headersSent = false;
+	writableFinished = false;
 	end(statusCode = this.statusCode) {
 		this.statusCode = statusCode;
 		this.headersSent = true;
+		this.writableFinished = true;
 		this.emit('finish');
 		this.emit('close');
 	}
@@ -195,7 +198,7 @@ describe('AuditInterceptor', () => {
 		expect(JSON.stringify(entry)).not.toMatch(/hunter2|nurse@example\.com/);
 	});
 
-	it('uses the error status when the client hangs up before the error response', async () => {
+	it('uses the error status when the client hangs up after the handler failed', async () => {
 		const response = new FakeResponse();
 		await expect(
 			firstValueFrom(
@@ -213,6 +216,72 @@ describe('AuditInterceptor', () => {
 			statusCode: 500,
 			outcome: AuditOutcome.FAILURE,
 		});
+	});
+
+	it('waits for the handler when the client hangs up first, then records its error', async () => {
+		reflector.getAllAndOverride.mockReturnValue(undefined);
+		const response = new FakeResponse();
+		const handler = new Subject<unknown>();
+		const result = firstValueFrom(
+			interceptor.intercept(
+				httpContext(
+					{
+						method: 'POST',
+						route: { path: '/api/v1/personnel/auth/login' },
+						params: {},
+						headers: {},
+					},
+					response,
+				),
+				{ handle: () => handler.asObservable() } as CallHandler,
+			),
+		);
+
+		// Client disconnects while the login is still being checked.
+		response.emit('close');
+		expect(auditService.record).not.toHaveBeenCalled();
+
+		const error = new UnauthorizedException('Invalid credentials');
+		handler.error(error);
+		await expect(result).rejects.toBe(error);
+
+		expect(recorded()).toHaveLength(1);
+		expect(recorded()[0]).toMatchObject({
+			action: AuditAction.LOGIN,
+			statusCode: 401,
+			outcome: AuditOutcome.FAILURE,
+		});
+	});
+
+	it('records a handler that completes after the client hung up as aborted, with no status', async () => {
+		const response = new FakeResponse();
+		const handler = new Subject<unknown>();
+		const result = firstValueFrom(
+			interceptor.intercept(
+				httpContext(personnelRequest({ method: 'PATCH' }), response),
+				{ handle: () => handler.asObservable() } as CallHandler,
+			),
+		);
+
+		response.emit('close');
+		handler.next({ data: 'updated' });
+		handler.complete();
+		await result;
+
+		expect(recorded()).toHaveLength(1);
+		const [entry] = recorded();
+		expect(entry.outcome).toBe(AuditOutcome.ABORTED);
+		expect(entry.statusCode).toBeUndefined();
+	});
+
+	it('marks the request as intercepted, so the denied-request middleware skips it', async () => {
+		const request = personnelRequest();
+		await firstValueFrom(
+			interceptor.intercept(httpContext(request, new FakeResponse()), {
+				handle: () => of('ok'),
+			} as CallHandler),
+		);
+		expect((request as Record<symbol, unknown>)[AUDIT_INTERCEPTED]).toBe(true);
 	});
 
 	it('identifies the personnel on a successful login without storing the token', async () => {

@@ -1,9 +1,11 @@
+import { Types } from 'mongoose';
 import { UserType } from '@/core/auth/enums';
 import {
 	actorForAuthEvent,
 	actorFromRequest,
 	auditActionFor,
 	buildAuditEntry,
+	cleanId,
 	extractResource,
 	requestIdFrom,
 	routeTemplate,
@@ -265,13 +267,41 @@ describe('actorForAuthEvent', () => {
 		});
 	});
 
-	it('records the patient record id from onboarding', () => {
+	it('records the patient record id (an ObjectId) from onboarding', () => {
+		const patientId = new Types.ObjectId();
 		expect(
 			actorForAuthEvent('POST', '/api/v1/auth/onboard', patient, {
-				data: '665f1c2e9b1d4a0012345678',
+				data: patientId,
 			}),
-		).toEqual({ ...patient, patientId: '665f1c2e9b1d4a0012345678' });
+		).toEqual({ ...patient, patientId: patientId.toHexString() });
 	});
+
+	it('records the patient Firebase uid from signup', () => {
+		expect(
+			actorForAuthEvent('POST', '/api/v1/auth/signup', anonymous, {
+				data: 'Xy9fUidFromFirebase01',
+			}),
+		).toEqual({
+			kind: AuditActorKind.PATIENT,
+			userType: UserType.DH_CLIENTS,
+			userId: 'Xy9fUidFromFirebase01',
+		});
+	});
+
+	it.each(['/api/v1/personnel/auth/signup', '/api/v1/personnel/auth/onboard'])(
+		'records the personnel id (an ObjectId) returned by %s',
+		(route) => {
+			const personnelId = new Types.ObjectId();
+			expect(
+				actorForAuthEvent('POST', route, anonymous, { data: personnelId }),
+			).toEqual({
+				kind: AuditActorKind.PERSONNEL,
+				userType: UserType.CHRONIC_CARE,
+				userId: personnelId.toHexString(),
+				personnelId: personnelId.toHexString(),
+			});
+		},
+	);
 
 	it('ignores non-auth routes', () => {
 		expect(
@@ -360,6 +390,39 @@ describe('buildAuditEntry (redaction)', () => {
 				statusCode: 200,
 			}).outcome,
 		).toBe(AuditOutcome.SUCCESS);
+	});
+
+	it('is aborted, with no status, when no response was sent', () => {
+		const entry = buildAuditEntry({
+			request,
+			route: '/api/v1/personnel/auth/login',
+			action: AuditAction.LOGIN,
+			actor: anonymous,
+		});
+		expect(entry.outcome).toBe(AuditOutcome.ABORTED);
+		expect(entry.statusCode).toBeUndefined();
+	});
+});
+
+describe('cleanId', () => {
+	it('accepts id-shaped strings and ObjectIds', () => {
+		const id = new Types.ObjectId();
+		expect(cleanId(id)).toBe(id.toHexString());
+		expect(cleanId(id.toHexString())).toBe(id.toHexString());
+		expect(cleanId('abc_DEF-123')).toBe('abc_DEF-123');
+	});
+
+	it('drops anything else', () => {
+		for (const value of [
+			undefined,
+			null,
+			42,
+			{ id: 'x' },
+			'jane@example.com',
+			'has space',
+		]) {
+			expect(cleanId(value)).toBeUndefined();
+		}
 	});
 });
 

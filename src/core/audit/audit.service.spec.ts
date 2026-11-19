@@ -26,7 +26,12 @@ function setup(ttl?: string) {
 	const command = vi.fn().mockResolvedValue({ ok: 1 });
 	Object.defineProperty(model, 'db', { value: { db: { command } } });
 	Object.defineProperty(model, 'collection', {
-		value: { collectionName: 'audit_logs', createIndex: vi.fn() },
+		value: {
+			collectionName: 'audit_logs',
+			createIndex: vi.fn(),
+			dropIndex: vi.fn(),
+			indexes: vi.fn(),
+		},
 	});
 	const config = {
 		get: vi.fn().mockReturnValue(ttl),
@@ -37,6 +42,8 @@ function setup(ttl?: string) {
 		model,
 		command,
 		createIndex: model.collection.createIndex as ReturnType<typeof vi.fn>,
+		dropIndex: model.collection.dropIndex as ReturnType<typeof vi.fn>,
+		indexes: model.collection.indexes as ReturnType<typeof vi.fn>,
 	};
 }
 
@@ -95,6 +102,46 @@ describe('AuditService', () => {
 				expireAfterSeconds: 365 * 86_400,
 			},
 		});
+	});
+
+	it('drops and recreates the index when collMod is refused (readWrite-only user)', async () => {
+		const { service, createIndex, dropIndex, command } = setup('365');
+		createIndex
+			.mockRejectedValueOnce(
+				Object.assign(new Error('IndexOptionsConflict'), { code: 85 }),
+			)
+			.mockResolvedValueOnce('timestamp_ttl');
+		command.mockRejectedValue(
+			Object.assign(new Error('not authorized'), { code: 13 }),
+		);
+
+		await service.ensureTtlIndex();
+
+		expect(dropIndex).toHaveBeenCalledWith(AUDIT_LOG_TTL_INDEX);
+		expect(createIndex).toHaveBeenLastCalledWith(
+			{ timestamp: 1 },
+			{ name: AUDIT_LOG_TTL_INDEX, expireAfterSeconds: 365 * 86_400 },
+		);
+		expect(Logger.prototype.log).toHaveBeenCalledWith(
+			'Audit log retention updated to 365 days',
+		);
+	});
+
+	it('logs the retention still in force when the index cannot be changed', async () => {
+		const { service, createIndex, dropIndex, command, indexes } = setup('365');
+		createIndex.mockRejectedValue(
+			Object.assign(new Error('IndexOptionsConflict'), { code: 85 }),
+		);
+		command.mockRejectedValue(new Error('not authorized'));
+		dropIndex.mockRejectedValue(new Error('not authorized'));
+		indexes.mockResolvedValue([
+			{ name: AUDIT_LOG_TTL_INDEX, expireAfterSeconds: 730 * 86_400 },
+		]);
+
+		await expect(service.ensureTtlIndex()).resolves.toBeUndefined();
+		expect(Logger.prototype.error).toHaveBeenCalledWith(
+			'Audit log retention still in force: 730 days (wanted 365)',
+		);
 	});
 
 	it('logs other index errors without throwing', async () => {

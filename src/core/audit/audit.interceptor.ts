@@ -8,9 +8,10 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Response } from 'express';
-import { Observable, tap } from 'rxjs';
+import { finalize, Observable, tap } from 'rxjs';
 import { USER_TYPE_KEY } from '@/common/decorators';
 import { UserType } from '@/core/auth/enums';
+import { AUDIT_INTERCEPTED, type AuditMarkedRequest } from './audit.markers';
 import { AuditService } from './audit.service';
 import {
 	type AuditRequest,
@@ -20,17 +21,26 @@ import {
 	buildAuditEntry,
 	routeTemplate,
 } from './audit-rules';
+import { AuditOutcome } from './entities/audit-log.entity';
+
+interface Hooks {
+	next(body: unknown): void;
+	error(error: unknown): void;
+	settled(): void;
+}
 
 /**
  * Records an audit entry for each audited request (see `auditActionFor`).
  *
- * The entry is written once the response has gone out (`finish`/`close`),
- * so it carries the real status code, including errors mapped by Nest's
- * exception handling. The stream is never altered: errors pass through
- * untouched and nothing here can throw into the request.
+ * Normally the entry is written when the response finishes, so it carries
+ * the status code actually sent, including errors mapped by Nest's
+ * exception handling. If the client disconnects first, the entry waits
+ * for the handler to settle: an error is recorded with its status, and a
+ * handler that completes is recorded as `aborted` with no status.
  *
- * Interceptors run after guards, so requests rejected by AuthGuard or
- * RolesGuard (401/403) are not recorded here.
+ * The stream is only observed: errors pass through untouched and nothing
+ * here can throw into the request. Requests rejected by the guards never
+ * reach interceptors; AuditDeniedMiddleware records those.
  */
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
@@ -44,33 +54,29 @@ export class AuditInterceptor implements NestInterceptor {
 	intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
 		if (context.getType() !== 'http') return next.handle();
 
-		let observe: Partial<{
-			next: (body: unknown) => void;
-			error: (error: unknown) => void;
-		}> = {};
+		let hooks: Hooks | undefined;
 		try {
-			observe = this.watch(context) ?? {};
+			hooks = this.watch(context);
 		} catch (error) {
 			this.logFailure(error);
 		}
+		if (!hooks) return next.handle();
+		const { next: onNext, error: onError, settled } = hooks;
 
-		return next.handle().pipe(
-			tap({
-				next: (body) => observe.next?.(body),
-				error: (error) => observe.error?.(error),
-			}),
-		);
+		return next
+			.handle()
+			.pipe(tap({ next: onNext, error: onError }), finalize(settled));
 	}
 
 	/**
 	 * Decides whether the request is audited and, if so, arranges for the
-	 * entry to be written when the response ends. Returns the hooks that
-	 * capture the handler's result (for auth event ids) or error.
+	 * entry to be written. Returns the hooks that observe the handler.
 	 */
-	private watch(context: ExecutionContext) {
+	private watch(context: ExecutionContext): Hooks | undefined {
 		const http = context.switchToHttp();
-		const request = http.getRequest<AuditRequest>();
+		const request = http.getRequest<AuditRequest & AuditMarkedRequest>();
 		const response = http.getResponse<Response>();
+		request[AUDIT_INTERCEPTED] = true;
 
 		const route = routeTemplate(request);
 		if (!route) return undefined;
@@ -85,20 +91,16 @@ export class AuditInterceptor implements NestInterceptor {
 
 		let responseBody: unknown;
 		let errorStatus: number | undefined;
+		let settled = false;
+		let aborted = false;
 		let written = false;
 
-		const write = () => {
+		const write = (statusCode: number | undefined, outcome?: AuditOutcome) => {
 			if (written) return;
 			written = true;
-			response.off?.('finish', write);
-			response.off?.('close', write);
+			response.off?.('finish', onFinish);
+			response.off?.('close', onClose);
 			try {
-				// Closed before the error response went out (client hung up):
-				// fall back to the status the error would have produced.
-				const statusCode =
-					!response.headersSent && errorStatus !== undefined
-						? errorStatus
-						: response.statusCode;
 				this.auditService.record(
 					buildAuditEntry({
 						request,
@@ -108,9 +110,12 @@ export class AuditInterceptor implements NestInterceptor {
 							request.method,
 							route,
 							actor,
-							statusCode < 400 ? responseBody : undefined,
+							statusCode !== undefined && statusCode < 400
+								? responseBody
+								: undefined,
 						),
 						statusCode,
+						outcome,
 					}),
 				);
 			} catch (error) {
@@ -118,15 +123,37 @@ export class AuditInterceptor implements NestInterceptor {
 			}
 		};
 
-		response.once('finish', write);
-		response.once('close', write);
+		// Client gone before a response went out: the status code on the
+		// response object is just the default, so use the handler's result.
+		const writeAborted = () => {
+			if (errorStatus !== undefined) write(errorStatus);
+			else write(undefined, AuditOutcome.ABORTED);
+		};
+
+		const onFinish = () => write(response.statusCode);
+		const onClose = () => {
+			if (response.writableFinished) return onFinish();
+			aborted = true;
+			if (settled) writeAborted();
+		};
+
+		response.once('finish', onFinish);
+		response.once('close', onClose);
 
 		return {
-			next: (body: unknown) => {
+			next: (body) => {
 				responseBody = body;
 			},
-			error: (error: unknown) => {
+			error: (error) => {
 				errorStatus = error instanceof HttpException ? error.getStatus() : 500;
+			},
+			settled: () => {
+				settled = true;
+				try {
+					if (aborted) writeAborted();
+				} catch (error) {
+					this.logFailure(error);
+				}
 			},
 		};
 	}
