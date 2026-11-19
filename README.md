@@ -6,6 +6,8 @@ Built with **NestJS 12**, **MongoDB/Mongoose**, **Firebase**, and **Redis**.
 
 > **Retired features.** The AI layer (LangGraph agents on Google Gemini, Whisper transcription, the Qdrant vector store) and the real-time patient–HCP chat (Socket.IO) are retired for now. Their code is kept so they can come back, but they need **no configuration**: the server boots and every core feature works without them. See [Retired features](#retired-features).
 
+Data protection (Ghana Data Protection Act, 2012): see [`docs/data-protection.md`](docs/data-protection.md) for the data inventory, data subject rights endpoints and the data controller checklist.
+
 ---
 
 ## Table of Contents
