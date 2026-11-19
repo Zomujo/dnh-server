@@ -1,7 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Model } from 'mongoose';
-import { mockDeep } from 'vitest-mock-extended';
 import { AuditService } from './audit.service';
 import {
 	AUDIT_LOG_TTL_INDEX,
@@ -22,28 +21,31 @@ const entry: AuditLog = {
 };
 
 function setup(ttl?: string) {
-	const model = mockDeep<Model<AuditLog>>();
+	// A plain stub: the model's surface used here is create, collection and
+	// db. (A deep mock of Mongoose's Model type is very costly for tsc.)
 	const command = vi.fn().mockResolvedValue({ ok: 1 });
-	Object.defineProperty(model, 'db', { value: { db: { command } } });
-	Object.defineProperty(model, 'collection', {
-		value: {
-			collectionName: 'audit_logs',
-			createIndex: vi.fn(),
-			dropIndex: vi.fn(),
-			indexes: vi.fn(),
-		},
-	});
+	const collection = {
+		collectionName: 'audit_logs',
+		createIndex: vi.fn(),
+		dropIndex: vi.fn(),
+		indexes: vi.fn(),
+	};
+	const model = {
+		create: vi.fn(),
+		collection,
+		db: { db: { command } },
+	};
 	const config = {
 		get: vi.fn().mockReturnValue(ttl),
 	} as unknown as ConfigService;
-	const service = new AuditService(model, config);
+	const service = new AuditService(model as unknown as Model<AuditLog>, config);
 	return {
 		service,
 		model,
 		command,
-		createIndex: model.collection.createIndex as ReturnType<typeof vi.fn>,
-		dropIndex: model.collection.dropIndex as ReturnType<typeof vi.fn>,
-		indexes: model.collection.indexes as ReturnType<typeof vi.fn>,
+		createIndex: collection.createIndex,
+		dropIndex: collection.dropIndex,
+		indexes: collection.indexes,
 	};
 }
 
@@ -63,7 +65,7 @@ describe('AuditService', () => {
 
 	it('writes without waiting and swallows a rejected write', async () => {
 		const { service, model } = setup();
-		model.create.mockRejectedValue(new Error('mongo down') as never);
+		model.create.mockRejectedValue(new Error('mongo down'));
 
 		expect(service.record(entry)).toBeUndefined();
 		await new Promise((resolve) => setImmediate(resolve));
