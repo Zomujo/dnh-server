@@ -37,11 +37,12 @@ export class OtpService {
 	 */
 	async verify(payload: VerifyOtpDto): Promise<boolean> {
 		const cacheKey = `otp:${payload.identifier}`;
-		const hashedOtp = await this.cacheService.get(cacheKey);
+		// take() hands the stored code to one caller only, so parallel
+		// requests cannot each try a guess against the same code.
+		const hashedOtp = await this.cacheService.take(cacheKey);
 		if (!hashedOtp) {
 			return false;
 		}
-		await this.cacheService.delete(cacheKey);
 		return bcrypt.compare(payload.code.toString(), hashedOtp);
 	}
 }

@@ -17,7 +17,10 @@ describe('OtpService', () => {
 			store.set(k, v);
 		});
 		cache.get.mockImplementation(async (k: string) => store.get(k) ?? null);
-		cache.delete.mockImplementation(async (k: string) => store.delete(k));
+		cache.take.mockImplementation(async (k: string) => {
+			const v = store.get(k) ?? null;
+			return store.delete(k) ? v : null;
+		});
 	});
 
 	it('accepts the generated code once', async () => {
@@ -49,7 +52,7 @@ describe('OtpService', () => {
 		await expect(
 			service.verify({ identifier: '*@example.com', code: 123456 }),
 		).resolves.toBe(false);
-		expect(cache.get).toHaveBeenCalledWith('otp:*@example.com');
+		expect(cache.take).toHaveBeenCalledWith('otp:*@example.com');
 		expect(store.has('otp:victim@example.com')).toBe(true);
 	});
 });
