@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
+import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CachingModule } from './caching/caching.module';
 import { CommunicationsModule } from './communications/communications.module';
@@ -22,6 +23,7 @@ import { SecurityModule } from './security/security.module';
 		DatabaseModule,
 		CommunicationsModule,
 		SecurityModule,
+		AuditModule,
 	],
 })
 export class CoreModule {}
