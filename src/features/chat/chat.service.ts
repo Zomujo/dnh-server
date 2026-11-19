@@ -114,6 +114,19 @@ export class ChatService {
 		}
 	}
 
+	/**
+	 * How a reply's parent is populated. `match` drops a parent from another
+	 * room (replies written before assertParentInRoom existed), and roomId is
+	 * selected so signContent can sign a media parent.
+	 */
+	private parentPopulate(roomId: string) {
+		return {
+			path: 'parentMessageId',
+			select: 'content senderId messageType roomId deletedForEveryone',
+			match: { roomId },
+		};
+	}
+
 	async saveMessage(
 		senderId: string,
 		roomId: string,
@@ -137,10 +150,7 @@ export class ChatService {
 		const message = await this.messageModel.create(payload);
 
 		if (parentMessageId) {
-			return message.populate({
-				path: 'parentMessageId',
-				select: 'content senderId messageType',
-			});
+			return message.populate(this.parentPopulate(roomId));
 		}
 
 		return message;
@@ -211,10 +221,7 @@ export class ChatService {
 			.sort({ createdAt: -1 })
 			.skip(pageFilter.offset)
 			.limit(pageFilter.limit)
-			.populate({
-				path: 'parentMessageId',
-				select: 'content senderId messageType',
-			})
+			.populate(this.parentPopulate(roomId))
 			.lean();
 
 		const plainRows = messages.map((msg: any) => {
@@ -226,6 +233,13 @@ export class ChatService {
 			};
 			if (row.deletedForEveryone) {
 				row.content = 'This message was deleted';
+			}
+			const parent = row.parentMessageId;
+			if (parent && typeof parent === 'object' && parent.deletedForEveryone) {
+				row.parentMessageId = {
+					...parent,
+					content: 'This message was deleted',
+				};
 			}
 			return row;
 		});
