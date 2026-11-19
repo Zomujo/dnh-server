@@ -98,7 +98,7 @@ export class AuthGuard implements CanActivate {
 		const contact = `+${user.phone_number.dial_code}${user.phone_number.number}`;
 		const fiftyMinsTtl = 50 * 60000;
 
-		const userCache = await this.userCacheService.set(
+		await this.userCacheService.set(
 			userId,
 			{
 				name: user.name,
@@ -106,6 +106,5 @@ export class AuthGuard implements CanActivate {
 			},
 			fiftyMinsTtl,
 		);
-		this.logger.log('user cached successfully', userCache);
 	}
 }

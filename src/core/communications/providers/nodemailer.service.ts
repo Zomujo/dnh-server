@@ -23,8 +23,9 @@ export class NodemailerService {
 				template: payload.template,
 				context: payload.context,
 			})
+			// Only the message id: the SMTP response lists the recipients.
 			.then((success) => {
-				this.logger.log('mail sent!', success);
+				this.logger.log(`mail sent: ${success?.messageId ?? 'no message id'}`);
 			})
 			.catch((err) => {
 				this.logger.error('mail sending error!', err);

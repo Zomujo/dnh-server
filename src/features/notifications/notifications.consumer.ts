@@ -96,7 +96,6 @@ export class NotificationsConsumer extends WorkerHost {
 			throw new NotFoundException('Notification not found');
 		}
 		const goals = data.groupedNotifications.map((not) => not.goal);
-		this.logger.log('goals', { goals });
 
 		const text = await this.composeReminder(
 			notification,
@@ -191,7 +190,6 @@ export class NotificationsConsumer extends WorkerHost {
 		// 		updatedAt: addSeconds(timestamp, 1),
 		// 	},
 		// ]);
-		this.logger.log('Ai Output: ' + text);
 		return;
 	}
 
