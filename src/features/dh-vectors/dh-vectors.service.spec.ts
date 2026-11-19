@@ -1,6 +1,7 @@
 import type { QdrantClient } from '@qdrant/js-client-rest';
 import { type Mocked, TestBed } from '@suites/unit';
 import { Types } from 'mongoose';
+import { mockDeep } from 'vitest-mock-extended';
 import { DhVectorsService } from './dh-vectors.service';
 import { DHDocumentType } from './dto';
 
@@ -9,11 +10,30 @@ describe('DhVectorsService', () => {
 	let qdrantClient: Mocked<QdrantClient>;
 
 	beforeAll(async () => {
+		// Configured store: a key and URL are set (no network is used).
+		vi.stubEnv('GOOGLE_API_KEY', 'test-key');
+		vi.stubEnv('QDRANT_URL', 'http://qdrant.test:6333');
 		const { unit, unitRef } =
 			await TestBed.solitary(DhVectorsService).compile();
 
 		service = unit;
 		qdrantClient = unitRef.get('QDRANT_CLIENT');
+		qdrantClient.getCollections.mockResolvedValue({
+			collections: [{ name: 'dh_vectors' }],
+		} as any);
+		qdrantClient.getCollection.mockResolvedValue({
+			payload_schema: {
+				userId: {},
+				patient: {},
+				documentType: {},
+				documentId: {},
+			},
+		} as any);
+		service.onModuleInit();
+	});
+
+	afterAll(() => {
+		vi.unstubAllEnvs();
 	});
 
 	beforeEach(() => {
@@ -169,5 +189,70 @@ describe('DhVectorsService', () => {
 				},
 			});
 		});
+	});
+});
+
+describe('DhVectorsService without a vector store', () => {
+	const dto = {
+		userId: 'u1',
+		patient: new Types.ObjectId().toString(),
+		documentType: DHDocumentType.MEDICATION,
+		documentId: 'doc-123',
+		summary: 'Take Metformin 500mg daily',
+	};
+
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	it('turns every operation into a no-op when nothing is configured', async () => {
+		vi.stubEnv('GOOGLE_API_KEY', '');
+		vi.stubEnv('QDRANT_URL', '');
+		// The module's factory provides null when the store isn't configured.
+		const service = new DhVectorsService(null);
+
+		expect(() => service.onModuleInit()).not.toThrow();
+		await expect(service.create(dto as any)).resolves.toBeUndefined();
+		await expect(service.index(dto as any)).resolves.toBeUndefined();
+		await expect(service.bulkCreate([dto as any])).resolves.toBeUndefined();
+		await expect(
+			service.findSimilar({ ...dto, query: 'metformin' }),
+		).resolves.toEqual([]);
+		await expect(service.findAll({ ...dto, query: 'x' })).resolves.toEqual([]);
+		await expect(service.search([0.1], dto)).resolves.toEqual([]);
+		await expect(service.deleteByDocumentId('doc-123')).resolves.toBe(
+			undefined,
+		);
+		await expect(service.cleanOrphans('u1')).resolves.toBeUndefined();
+	});
+
+	it('stays off when Qdrant is set but Gemini (for embeddings) is not', async () => {
+		vi.stubEnv('GOOGLE_API_KEY', '');
+		vi.stubEnv('QDRANT_URL', 'http://qdrant.test:6333');
+		const qdrant = mockDeep<QdrantClient>();
+		const service = new DhVectorsService(qdrant);
+
+		service.onModuleInit();
+		await expect(service.cleanOrphans('u1')).resolves.toBeUndefined();
+		expect(qdrant.getCollections).not.toHaveBeenCalled();
+		expect(qdrant.delete).not.toHaveBeenCalled();
+	});
+
+	it('does not fail startup when Qdrant is unreachable, and skips calls', async () => {
+		vi.stubEnv('GOOGLE_API_KEY', 'test-key');
+		vi.stubEnv('QDRANT_URL', 'http://127.0.0.1:6399');
+		const qdrant = mockDeep<QdrantClient>();
+		qdrant.getCollections.mockRejectedValue(new Error('ECONNREFUSED'));
+		const service = new DhVectorsService(qdrant);
+
+		expect(() => service.onModuleInit()).not.toThrow();
+		await expect(
+			service.findSimilar({ ...dto, query: 'metformin' }),
+		).resolves.toEqual([]);
+		await expect(service.index(dto as any)).resolves.toBeUndefined();
+		await expect(service.cleanOrphans('u1')).resolves.toBeUndefined();
+		expect(qdrant.query).not.toHaveBeenCalled();
+		expect(qdrant.upsert).not.toHaveBeenCalled();
+		expect(qdrant.delete).not.toHaveBeenCalled();
 	});
 });
