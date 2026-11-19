@@ -184,14 +184,20 @@ export class UssdService {
 			);
 
 			this.audit(requestInfo, AuditAction.CREATE, patient, vitalHistoryId);
-			await this.cacheService.delete(cacheKey);
-
-			return 'END Reading logged successfully.\nStay healthy!';
 		} catch (error) {
 			this.logger.error('USSD save reading failed', error);
 			if (patient) this.audit(requestInfo, AuditAction.CREATE, patient);
 			return 'END Could not save your reading. Please try again later.';
 		}
+
+		// The reading is saved; a cache failure here must not tell the patient
+		// otherwise (they would enter it again). The session expires anyway.
+		try {
+			await this.cacheService.delete(cacheKey);
+		} catch (error) {
+			this.logger.warn(`USSD session cleanup failed: ${String(error)}`);
+		}
+		return 'END Reading logged successfully.\nStay healthy!';
 	}
 
 	/**
@@ -199,7 +205,8 @@ export class UssdService {
 	 * it; the save is recorded here instead. Menu steps aren't audited, only
 	 * the write (or its refusal for an unknown number). The phone number is
 	 * never written: the patient is named by id. Without a vital id the save
-	 * failed.
+	 * failed. USSD replies are always HTTP 200, so `statusCode` is 200 even
+	 * on ACCESS_DENIED; the outcome carries the result.
 	 */
 	private audit(
 		requestInfo: UssdRequestInfo,

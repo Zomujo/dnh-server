@@ -120,6 +120,19 @@ export const EXPORT_MODEL_NAMES = [
  * the Firestore profile mirror and the Firebase Auth record. See
  * docs/data-protection.md.
  */
+/** Drops tool results and AI turns that only call tools (no text). */
+function isSaidToOrByPatient(message: BaseMessage) {
+	const type = message.getType();
+	if (type === 'tool') return false;
+	if (type !== 'ai') return true;
+	const toolCalls = (message as { tool_calls?: unknown[] }).tool_calls;
+	const hasText =
+		typeof message.content === 'string'
+			? message.content.trim().length > 0
+			: Array.isArray(message.content) && message.content.length > 0;
+	return hasText || !toolCalls?.length;
+}
+
 @Injectable()
 export class PatientDataExportService {
 	private checkpointer?: MongoDBSaver;
@@ -205,12 +218,18 @@ export class PatientDataExportService {
 	 * The latest LangGraph checkpoint for the patient's thread, decoded:
 	 * every message on the thread (dose reminders, and AI chat turns when
 	 * the assistant is on) and the profile copy the graph keeps (name,
-	 * phone, language). Empty when the patient has no thread.
+	 * phone, language). Empty when the patient has no thread. The AI's
+	 * internal tool turns (tool results, tool-call-only messages) are left
+	 * out: they are working state, not something said to the patient.
+	 *
+	 * A checkpoint that can't be read fails the whole export (500) rather
+	 * than returning it with this section silently missing.
 	 */
 	async conversationHistory(userId: string) {
 		this.checkpointer ??= new MongoDBSaver({
 			client: this.connection.getClient() as any,
-			dbName: this.connection.db?.databaseName,
+			// Same database the reminder writer and the AI use.
+			dbName: process.env.DB_NAME,
 		});
 		const tuple = await this.checkpointer.getTuple({
 			configurable: { thread_id: userId },
@@ -225,11 +244,13 @@ export class PatientDataExportService {
 		return {
 			updatedAt: tuple?.checkpoint.ts ?? null,
 			profile: values.user ?? null,
-			messages: (values.messages ?? []).map((message) => ({
-				id: message.id,
-				role: message.getType(),
-				content: message.content,
-			})),
+			messages: (values.messages ?? [])
+				.filter(isSaidToOrByPatient)
+				.map((message) => ({
+					id: message.id,
+					role: message.getType(),
+					content: message.content,
+				})),
 		};
 	}
 

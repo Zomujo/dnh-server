@@ -235,6 +235,42 @@ describe('UssdService', () => {
 			);
 		});
 
+		it('reports a saved reading as saved when the session cleanup fails', async () => {
+			vitalHistoriesService.loadVitalHistory.mockResolvedValue(
+				new Types.ObjectId(),
+			);
+			cacheService.delete.mockRejectedValueOnce(new Error('redis down'));
+
+			const res = await service.handleSession(
+				'sess-1',
+				phone,
+				'2*5.6*1',
+				requestInfo,
+			);
+
+			expect(res).toContain('END Reading logged successfully.');
+			expect(auditService.record).toHaveBeenCalledTimes(1);
+			expect(auditService.record).toHaveBeenCalledWith(
+				expect.objectContaining({ outcome: AuditOutcome.SUCCESS }),
+			);
+		});
+
+		it('records nothing when the patient lookup itself fails', async () => {
+			patientsService.findPatientByPhoneNumber.mockRejectedValueOnce(
+				new Error('db down'),
+			);
+
+			const res = await service.handleSession(
+				'sess-1',
+				phone,
+				'2*5.6*1',
+				requestInfo,
+			);
+
+			expect(res).toContain('END Could not save your reading.');
+			expect(auditService.record).not.toHaveBeenCalled();
+		});
+
 		it('records an unknown number as refused, without the number', async () => {
 			patientsService.findPatientByPhoneNumber.mockResolvedValue(null);
 

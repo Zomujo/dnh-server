@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { TestBed } from '@suites/unit';
 import { Types } from 'mongoose';
@@ -86,6 +86,36 @@ describe('PatientDataExportService', () => {
 	let checkpointer: { getTuple: ReturnType<typeof vi.fn> };
 
 	describe('conversation history (LangGraph checkpoints)', () => {
+		it("leaves out the AI's tool turns", async () => {
+			checkpointer.getTuple.mockResolvedValue({
+				checkpoint: {
+					ts: '2026-11-01T08:00:00.000Z',
+					channel_values: {
+						messages: [
+							new HumanMessage({ id: 'h1', content: 'My sugar is high' }),
+							new AIMessage({
+								id: 'a1',
+								content: '',
+								tool_calls: [{ id: 'c1', name: 'getVitals', args: {} }],
+							}),
+							new ToolMessage({
+								id: 't1',
+								content: '{"vitals":[]}',
+								tool_call_id: 'c1',
+							}),
+							new AIMessage({ id: 'a2', content: 'Please see your clinician' }),
+						],
+					},
+				},
+			});
+
+			const result = await service.exportByUserId('uid-1');
+
+			expect(
+				result.conversationHistory.messages.map((m: { id?: string }) => m.id),
+			).toEqual(['h1', 'a2']);
+		});
+
 		it("reads the latest checkpoint on the patient's thread", async () => {
 			const result = await service.exportByUserId('uid-1');
 
