@@ -2,7 +2,7 @@
 	"name": "dnh-server",
 	"version": "0.1.0",
 	"description": "Api for the GIZ-AYA Diabetes and Hypertension Application",
-	"author": "zomujo",
+	"author": "zyptyk",
 	"private": false,
 	"license": "MIT",
 	"scripts": {
