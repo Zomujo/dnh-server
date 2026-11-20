@@ -144,6 +144,54 @@ describe('OpenObserveTransport', () => {
 		expect(report.mock.calls[0][0]).toContain('2 record(s) were dropped');
 	});
 
+	it('keeps one send loop however many records arrive while a send is slow', async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const fetchMock = vi.fn(async () => {
+			await gate;
+			return new Response('{}', { status: 200 });
+		}) as any;
+		const transport = new OpenObserveTransport(
+			{ ...config, maxBatch: 10 },
+			fetchMock,
+		);
+
+		for (let i = 0; i < 500; i++)
+			transport.send({ level: 'log', message: `m${i}` });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		release();
+		await transport.flush();
+
+		expect(fetchMock).toHaveBeenCalledTimes(50);
+		const messages = fetchMock.mock.calls.flatMap((_: unknown, i: number) =>
+			sentRecords(fetchMock, i).map((r: { message: string }) => r.message),
+		);
+		expect(messages).toEqual(Array.from({ length: 500 }, (_, i) => `m${i}`));
+	});
+
+	it('gives up on close after a few seconds when OpenObserve hangs', async () => {
+		vi.useFakeTimers();
+		const fetchMock = vi.fn(
+			() =>
+				new Promise<Response>(() => {
+					// never settles: OpenObserve hangs
+				}),
+		) as any;
+		const transport = new OpenObserveTransport(config, fetchMock);
+
+		transport.send({ level: 'log', message: 'x' });
+		let closed = false;
+		void transport.close().then(() => {
+			closed = true;
+		});
+		await vi.advanceTimersByTimeAsync(2_999);
+		expect(closed).toBe(false);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(closed).toBe(true);
+	});
+
 	it('truncates very long messages', async () => {
 		const fetchMock = okFetch();
 		const transport = new OpenObserveTransport(config, fetchMock);

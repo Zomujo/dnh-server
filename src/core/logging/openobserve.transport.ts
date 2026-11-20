@@ -36,6 +36,8 @@ export interface LogRecord {
 /** Longest message or stack kept, so one huge error can't fill a batch. */
 const MAX_FIELD_LENGTH = 16_000;
 const REPORT_EVERY_MS = 60_000;
+/** Longest close() waits, so a hung OpenObserve can't hold up shutdown. */
+const CLOSE_DEADLINE_MS = 3_000;
 
 export class OpenObserveTransport {
 	private readonly endpoint: string;
@@ -46,7 +48,7 @@ export class OpenObserveTransport {
 	private readonly requestTimeoutMs: number;
 	private queue: Record<string, unknown>[] = [];
 	private timer?: NodeJS.Timeout;
-	private sending?: Promise<void>;
+	private draining?: Promise<void>;
 	private dropped = 0;
 	private lastReportAt = 0;
 
@@ -81,7 +83,7 @@ export class OpenObserveTransport {
 			this.dropped += excess;
 		}
 		if (this.queue.length >= this.maxBatch) {
-			void this.flush();
+			void this.drain();
 		} else {
 			this.schedule();
 		}
@@ -89,32 +91,52 @@ export class OpenObserveTransport {
 
 	/** Sends everything queued; resolves once done. Never rejects. */
 	async flush(): Promise<void> {
+		while (this.queue.length > 0 || this.draining) await this.drain();
+	}
+
+	/**
+	 * Sends what is left, for application shutdown, but gives up after a few
+	 * seconds: whatever isn't sent by then is still in the container log.
+	 */
+	async close(): Promise<void> {
+		let deadline: NodeJS.Timeout | undefined;
+		await Promise.race([
+			this.flush(),
+			new Promise<void>((resolve) => {
+				deadline = setTimeout(resolve, CLOSE_DEADLINE_MS);
+				deadline.unref();
+			}),
+		]);
+		clearTimeout(deadline);
+	}
+
+	/**
+	 * The one loop that sends: callers share it instead of each waiting their
+	 * turn, so a slow OpenObserve can't pile up waiting promises. One request
+	 * at a time keeps records in order.
+	 */
+	private drain(): Promise<void> {
 		if (this.timer) {
 			clearTimeout(this.timer);
 			this.timer = undefined;
 		}
-		// One request at a time keeps records in order and bounds concurrency.
-		while (this.sending) await this.sending;
-		if (this.queue.length === 0) return;
-
-		const batch = this.queue.splice(0, this.maxBatch);
-		this.sending = this.post(batch).finally(() => {
-			this.sending = undefined;
+		this.draining ??= (async () => {
+			while (this.queue.length > 0) {
+				await this.post(this.queue.splice(0, this.maxBatch));
+			}
+		})().finally(() => {
+			this.draining = undefined;
+			// Records that arrived as the loop finished go with the next batch.
+			if (this.queue.length > 0) this.schedule();
 		});
-		await this.sending;
-		if (this.queue.length > 0) await this.flush();
-	}
-
-	/** Stops the timer and sends what is left; for application shutdown. */
-	async close(): Promise<void> {
-		await this.flush();
+		return this.draining;
 	}
 
 	private schedule() {
 		if (this.timer) return;
 		this.timer = setTimeout(() => {
 			this.timer = undefined;
-			void this.flush();
+			void this.drain();
 		}, this.flushIntervalMs);
 		// A pending log send must not keep the process alive.
 		this.timer.unref();

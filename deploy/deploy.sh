@@ -147,6 +147,10 @@ check_env_file() {
     problems+=("OPENOBSERVE_TOKEN is the same as in $OTHER_ENV_FILE; create a service account per environment (deploy/openobserve.sh)")
   fi
   if [ "$url" = "$BUNDLED_OPENOBSERVE_URL" ]; then
+    user="$(env_value "$ENV_FILE" OPENOBSERVE_USER)"
+    if [ -n "$user" ] && [ "$user" != "api-$ENV_NAME@dnh.local" ]; then
+      problems+=("OPENOBSERVE_USER must be api-$ENV_NAME@dnh.local, the account deploy/openobserve.sh made for $ENV_NAME")
+    fi
     if [ ! -f "$OPENOBSERVE_ENV_FILE" ]; then
       problems+=("$OPENOBSERVE_ENV_FILE is missing; see deploy/RUNBOOK.md section 10")
     else

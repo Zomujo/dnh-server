@@ -57,6 +57,15 @@ describe('DomainLogger', () => {
 		expect(second.stack).toContain('db down');
 	});
 
+	it('sends the result of a lazily built message, not its source', () => {
+		const transport = fakeTransport();
+		const logger = new DomainLogger(undefined, transport);
+
+		logger.log(() => 'built later', 'Jobs');
+
+		expect(transport.send.mock.calls[0][0].message).toBe('built later');
+	});
+
 	it('does not send levels that are switched off', () => {
 		const transport = fakeTransport();
 		const logger = new DomainLogger(undefined, transport);

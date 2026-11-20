@@ -66,7 +66,7 @@ export class DomainLogger
 				(message instanceof Error ? message.stack : undefined);
 			this.transport!.send({
 				level: logLevel ?? 'log',
-				message: stringifyLogMessage(message),
+				message: stringifyLogMessage(this.resolveMessage(message)),
 				context: context || undefined,
 				stack,
 			});
