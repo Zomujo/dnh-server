@@ -113,11 +113,11 @@ revoke issued tokens.
 | Google Firebase (GHS's own project) | Patient sign-in (email, password), Firestore profile mirror and notification feed, push notification content (titles/bodies such as a medication name), Storage objects | Data is stored by Google in the region chosen for the project; confirm the region and Google's data processing terms |
 | Africa's Talking | Phone numbers and USSD input (vital readings) of patients using USSD; SMS one-time codes to staff | Ghana-operating provider; needs a processor agreement |
 | SMTP email provider | Staff email addresses and one-time codes | Choose a provider and sign a processor agreement |
-| Log service (BetterStack today, self-hosted OpenObserve planned) | Error/warning/debug lines from the server | After this change, request logs carry only method, route pattern, status and duration. Self-hosting removes this processor |
+| Log service: none | — | Logs go to OpenObserve, self-hosted on the API's own VPS (`deploy/RUNBOOK.md` section 10), so they stay with the hosting provider. Request logs carry only method, route pattern, status and duration |
 | Retired: Google Gemini, OpenAI, Qdrant | Nothing while disabled | See the AI note in [section 1](#1-summary) |
 
 The Act applies to processing in Ghana. Several processors store data outside Ghana
-(Firebase, BetterStack, possibly the email provider); GHS should confirm with the DPC
+(Firebase, possibly the email provider); GHS should confirm with the DPC
 whether any additional conditions apply to that transfer and record it in the DPIA.
 
 ## 5. Lawful basis and consent
@@ -211,7 +211,7 @@ In place (section 28 requires appropriate technical and organisational measures)
 - **Logs (fixed in this change):**
   - Request logging (`TelemetryInterceptor`) sent every request's headers, including the
     `Authorization` bearer token, and body (readings, names, phone numbers, passwords,
-    OTPs) to BetterStack in every non-development environment. It now logs only the
+    OTPs) to the log service (then BetterStack) in every non-development environment. It now logs only the
     method, route pattern (`/hcp/patients/:id`, not the concrete id or query), status and
     duration.
   - Push notifications no longer log device tokens or message content (which can name a
@@ -229,7 +229,7 @@ Gaps and recommendations (technical):
 | G1 | No audit trail of who viewed or changed a patient record | `feat/audit-logs` PR; GHS to decide `AUDIT_LOG_TTL_DAYS` and who reviews the logs |
 | G2 | Access scope: facility is deliberately *not* an access boundary. Any clinician can open any patient by id, and any pharmacy user can look a patient up by patient code | Confirm this matches GHS policy in the DPIA. If not, scope reads to the patient's facilities / care team. The audit log makes broad access reviewable |
 | G3 | Ghana Card / NHIS numbers and health data rely on database-level encryption at rest | Enable encryption at rest on MongoDB, Redis persistence and backups; restrict operator access; consider field-level encryption for the ID numbers |
-| G4 | Error logs can still include whole error objects (for example a database validation error quoting a value) | Self-host the log service (OpenObserve) so logs stay under GHS control, restrict access to it and set a short retention |
+| G4 | Error logs can still include whole error objects (for example a database validation error quoting a value) | Logs are now self-hosted (OpenObserve on the VPS). Restrict who has a login and keep the retention short (`ZO_COMPACT_DATA_RETENTION_DAYS`, 30 days suggested) |
 | G5 | No automatic retention for clinical data ([section 8](#8-retention)) | Decide a schedule; implement as TTL indexes or a scheduled purge |
 | G6 | The data export does not include the Firestore profile mirror or the Firebase Auth record | Both hold only data the patient entered and sees in the app (name, phone, email, notification feed); GHS can export them from the Firebase console on request |
 | G7 | Retired chat: the data export leaves out chat rooms and messages (erasure does delete them, room media in Storage included) | Only relevant if chat is re-enabled; add them to the export first |

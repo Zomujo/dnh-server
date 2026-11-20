@@ -1,40 +1,79 @@
-import { Logtail } from '@logtail/node';
-import { ConsoleLogger, Injectable, Optional } from '@nestjs/common';
+import {
+	ConsoleLogger,
+	Injectable,
+	LogLevel,
+	OnApplicationShutdown,
+	Optional,
+} from '@nestjs/common';
+import {
+	createOpenObserveTransport,
+	OpenObserveTransport,
+	stringifyLogMessage,
+} from './openobserve.transport';
 
+/**
+ * The app's logger outside development: prints like Nest's ConsoleLogger
+ * (the container log) and also sends every printed line to OpenObserve when
+ * OPENOBSERVE_URL, OPENOBSERVE_USER and OPENOBSERVE_TOKEN are set.
+ */
 @Injectable()
-export class DomainLogger extends ConsoleLogger {
-	private logtail: Logtail;
+export class DomainLogger
+	extends ConsoleLogger
+	implements OnApplicationShutdown
+{
+	private readonly transport: OpenObserveTransport | null;
 
-	constructor(@Optional() context?: string) {
+	constructor(
+		@Optional() context?: string,
+		@Optional() transport?: OpenObserveTransport | null,
+	) {
 		super(context || 'DefaultContext');
-		const sourceToken = process.env.LOGTAIL_SOURCE_TOKEN!;
-		this.logtail = new Logtail(sourceToken, {
-			endpoint: process.env.LOGTAIL_HOST,
+		this.transport =
+			transport === undefined ? createOpenObserveTransport() : transport;
+		if (!this.transport && process.env.NODE_ENV !== 'development') {
+			super.warn(
+				'OPENOBSERVE_URL, OPENOBSERVE_USER or OPENOBSERVE_TOKEN is not set: logs go to the console only.',
+				'DomainLogger',
+			);
+		}
+	}
+
+	// Every level ends up here once ConsoleLogger has worked out the context and
+	// stack and checked the level is enabled, so OpenObserve gets exactly what
+	// the console prints.
+	protected printMessages(
+		messages: unknown[],
+		context?: string,
+		logLevel?: LogLevel,
+		writeStreamType?: 'stdout' | 'stderr',
+		errorStack?: unknown,
+		params?: Record<string, any>,
+	): void {
+		super.printMessages(
+			messages,
+			context,
+			logLevel,
+			writeStreamType,
+			errorStack,
+			params,
+		);
+		if (!this.transport) return;
+		messages.forEach((message, index) => {
+			const stack =
+				(index === 0 && typeof errorStack === 'string'
+					? errorStack
+					: undefined) ??
+				(message instanceof Error ? message.stack : undefined);
+			this.transport!.send({
+				level: logLevel ?? 'log',
+				message: stringifyLogMessage(message),
+				context: context || undefined,
+				stack,
+			});
 		});
 	}
 
-	log(message: any, ...optionalParams: any[]) {
-		super.log(message, ...optionalParams);
-		// this.logtail.info(message, { optionalParams }).catch(console.error);
-	}
-
-	error(message: any, trace?: string, ...optionalParams: any[]) {
-		super.error(message, trace, ...optionalParams);
-		this.logtail.error(message, { trace, optionalParams }).catch(console.error);
-	}
-
-	warn(message: any, ...optionalParams: any[]) {
-		super.warn(message, ...optionalParams);
-		this.logtail.warn(message, { optionalParams }).catch(console.error);
-	}
-
-	debug(message: any, ...optionalParams: any[]) {
-		super.debug(message, ...optionalParams);
-		this.logtail.debug(message, { optionalParams }).catch(console.error);
-	}
-
-	verbose(message: any, ...optionalParams: any[]) {
-		super.verbose(message, ...optionalParams);
-		this.logtail.info(message, { optionalParams }).catch(console.error);
+	async onApplicationShutdown(): Promise<void> {
+		await this.transport?.close();
 	}
 }

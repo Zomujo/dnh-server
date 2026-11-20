@@ -7,7 +7,7 @@
 #   deploy.sh <staging|production> --rollback <sha>
 #
 # A deploy clones the environment's branch, builds dnh-api:<env>-<sha>, makes
-# sure that environment's Redis is up, then points dnh-api:<env> at the new
+# sure that environment's Redis and the shared OpenObserve are up, then points dnh-api:<env> at the new
 # image and recreates only that environment's API. A failed build never
 # touches the running API. A rollback re-points dnh-api:<env> at a kept image
 # and never builds. MongoDB is schemaless and is not run here, so there is no
@@ -69,6 +69,8 @@ esac
 SERVICE="api-$ENV_NAME"
 REDIS_SERVICE="dnh-redis-$ENV_NAME"
 ENV_FILE="$APP_DIR/.env.$ENV_NAME"
+OPENOBSERVE_ENV_FILE="$APP_DIR/.env.openobserve"
+BUNDLED_OPENOBSERVE_URL="http://openobserve:5080"
 OTHER_ENV_FILE="$APP_DIR/.env.$OTHER_ENV"
 
 compose() {
@@ -124,15 +126,43 @@ check_env_file() {
   [ "$(env_value "$ENV_FILE" NODE_ENV)" = "$ENV_NAME" ] \
     || problems+=("NODE_ENV must be $ENV_NAME")
 
-  for key in DB_CONNECTION_STRING DB_NAME JWT_SECRET JWT_TOKEN_ISSUER TRUST_PROXY LOGTAIL_SOURCE_TOKEN; do
+  for key in DB_CONNECTION_STRING DB_NAME JWT_SECRET JWT_TOKEN_ISSUER TRUST_PROXY \
+    OPENOBSERVE_URL OPENOBSERVE_USER OPENOBSERVE_TOKEN; do
     [ -n "$(env_value "$ENV_FILE" "$key")" ] || problems+=("$key must be set")
   done
 
-  # The API won't start outside development without the Logtail token, and the
-  # endpoint replaces the library's default: unset, the API crashes on start;
-  # empty, every log send fails silently.
-  [[ "$(env_value "$ENV_FILE" LOGTAIL_HOST)" =~ ^https:// ]] \
-    || problems+=("LOGTAIL_HOST must be the BetterStack source's https:// ingesting host")
+  # Logs: the API runs without OpenObserve (console only), so a mistake here
+  # would go unnoticed until someone needed the logs.
+  url="$(env_value "$ENV_FILE" OPENOBSERVE_URL)"
+  if [ -n "$url" ] && [ "$url" != "$BUNDLED_OPENOBSERVE_URL" ] && ! [[ "$url" =~ ^https:// ]]; then
+    problems+=("OPENOBSERVE_URL must be $BUNDLED_OPENOBSERVE_URL (the one in compose.yml) or an https:// address")
+  fi
+  local org
+  org="$(env_value "$ENV_FILE" OPENOBSERVE_ORG)"
+  if [ -n "$org" ] && [ "$org" != "$ENV_NAME" ]; then
+    problems+=("OPENOBSERVE_ORG must be $ENV_NAME (or unset): each environment logs to its own organization")
+  fi
+  if [ -r "$OTHER_ENV_FILE" ] && [ -n "$(env_value "$ENV_FILE" OPENOBSERVE_TOKEN)" ] \
+    && [ "$(env_value "$ENV_FILE" OPENOBSERVE_TOKEN)" = "$(env_value "$OTHER_ENV_FILE" OPENOBSERVE_TOKEN)" ]; then
+    problems+=("OPENOBSERVE_TOKEN is the same as in $OTHER_ENV_FILE; create a service account per environment (deploy/openobserve.sh)")
+  fi
+  if [ "$url" = "$BUNDLED_OPENOBSERVE_URL" ]; then
+    if [ ! -f "$OPENOBSERVE_ENV_FILE" ]; then
+      problems+=("$OPENOBSERVE_ENV_FILE is missing; see deploy/RUNBOOK.md section 10")
+    else
+      mode="$(stat -c '%a' "$OPENOBSERVE_ENV_FILE" 2>/dev/null || stat -f '%Lp' "$OPENOBSERVE_ENV_FILE")"
+      [ "$mode" = "600" ] || problems+=("$OPENOBSERVE_ENV_FILE has mode $mode; run chmod 600 $OPENOBSERVE_ENV_FILE")
+      for key in ZO_ROOT_USER_EMAIL ZO_ROOT_USER_PASSWORD; do
+        [ -n "$(env_value "$OPENOBSERVE_ENV_FILE" "$key")" ] || problems+=("$key must be set in $OPENOBSERVE_ENV_FILE")
+      done
+      # Both APIs can reach OpenObserve, so its admin password is all that keeps
+      # one environment out of the other's logs. Require a long random one.
+      root_password="$(env_value "$OPENOBSERVE_ENV_FILE" ZO_ROOT_USER_PASSWORD)"
+      if [ -n "$root_password" ] && [ "${#root_password}" -lt 24 ]; then
+        problems+=("ZO_ROOT_USER_PASSWORD in $OPENOBSERVE_ENV_FILE must be at least 24 characters (openssl rand -base64 32)")
+      fi
+    fi
+  fi
 
   url="$(env_value "$ENV_FILE" REDIS_URL)"
   [[ "$url" =~ ^redis://$REDIS_SERVICE:6379(/[0-9]+)?$ ]] \
@@ -189,6 +219,27 @@ live_tag() {
 start_redis() {
   echo "Starting $REDIS_SERVICE..."
   compose up -d --wait --wait-timeout 60 "$REDIS_SERVICE"
+}
+
+# Starts the shared OpenObserve if this environment logs to it, and waits for
+# it to answer. A failure here is reported but does not stop the deploy: the
+# API keeps logging to its container log.
+start_openobserve() {
+  local waited=0
+  [ "$(env_value "$ENV_FILE" OPENOBSERVE_URL)" = "$BUNDLED_OPENOBSERVE_URL" ] || return 0
+  echo "Starting openobserve..."
+  if ! compose up -d openobserve; then
+    echo "WARNING: OpenObserve did not start; logs stay in the container log only." >&2
+    return 0
+  fi
+  until curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:5080/healthz; do
+    if [ "$waited" -ge 60 ]; then
+      echo "WARNING: OpenObserve is not answering on 127.0.0.1:5080; logs stay in the container log until it does." >&2
+      return 0
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
 }
 
 release() {
@@ -257,6 +308,7 @@ if [ -n "$ROLLBACK_SHA" ]; then
     confirm "$ROLLBACK_SHA (rollback)"
   fi
   start_redis
+  start_openobserve
   release "$TAG" "$PREVIOUS"
   exit 0
 fi
@@ -279,5 +331,6 @@ docker build \
   "$WORK/src"
 
 start_redis
+start_openobserve
 release "$TAG" "$PREVIOUS"
 prune
