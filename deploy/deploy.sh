@@ -19,7 +19,7 @@ set -euo pipefail
 # the VPS. On the server, set the repository in $APP_DIR/deploy.conf instead
 # (REPO=...), so that copying a new deploy.sh never resets it.
 APP_DIR="${DNH_SERVER_DIR:-/opt/dnh-server}"
-REPO="git@github.com-dnh-server:Zomujo/dnh-server.git"
+REPO="git@github.com-dnh-server:projectyelima-source/dnh-server.git"
 if [ -f "$APP_DIR/deploy.conf" ]; then
   # shellcheck source=/dev/null
   . "$APP_DIR/deploy.conf"

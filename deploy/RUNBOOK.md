@@ -208,7 +208,7 @@ sudo ssh-keygen -t ed25519 -N '' -C dnh-server-vps -f /root/.ssh/dnh-server
 sudo cat /root/.ssh/dnh-server.pub
 ```
 
-Add the public key on GitHub: repository → Settings → Deploy keys → Add, **without** write access. Then:
+Add the public key on GitHub to the GHS repository, `projectyelima-source/dnh-server`: Settings → Deploy keys → Add, **without** write access. Then:
 
 ```bash
 sudo tee -a /root/.ssh/config >/dev/null <<'EOF'
@@ -221,7 +221,7 @@ EOF
 sudo ssh -T git@github.com-dnh-server        # "successfully authenticated", answer yes to the host key
 ```
 
-`deploy.sh` clones `git@github.com-dnh-server:Zomujo/dnh-server.git`. To deploy from another repository (a fork), put its URL in `/opt/dnh-server/deploy.conf` (root, 644), using the same `github.com-dnh-server` host alias:
+`deploy.sh` clones `git@github.com-dnh-server:projectyelima-source/dnh-server.git`, the GHS repository (`projectyelima-source/dnh-server` on GitHub). To deploy from another repository, put its URL in `/opt/dnh-server/deploy.conf` (root, 644), using the same `github.com-dnh-server` host alias:
 
 ```bash
 echo 'REPO=git@github.com-dnh-server:<owner>/dnh-server.git' | sudo tee /opt/dnh-server/deploy.conf
