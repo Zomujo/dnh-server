@@ -13,6 +13,7 @@ flowchart LR
     subgraph APP["Application server"]
       API["Yelima API<br/>NestJS · Node.js 22<br/>port 4815"]
       W["Background jobs<br/>BullMQ workers<br/>(reminders, missed doses)"]
+      LG["OpenObserve<br/>logs · UI via SSH tunnel"]
     end
     subgraph DB["Database server (private network)"]
       M[("MongoDB ≥ 6<br/>app data + audit logs")]
@@ -25,7 +26,6 @@ flowchart LR
     AT["Africa's Talking<br/>SMS · USSD"]
     SM["SMTP email"]
     GO["Google OAuth<br/>(staff sign-in)"]
-    LG["Logging<br/>BetterStack → OpenObserve"]
   end
 
   P -- HTTPS --> RP
@@ -44,7 +44,7 @@ flowchart LR
   API -- OTP / SMS --> AT
   API -- OTP / email --> SM
   API -- verify ID token --> GO
-  API -- errors & warnings --> LG
+  API -- all log lines --> LG
 
   classDef ext fill:#eef6f0,stroke:#1b6b3a;
-  class FB,AT,SM,GO,LG ext;
+  class FB,AT,SM,GO ext;

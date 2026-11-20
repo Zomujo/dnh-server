@@ -66,8 +66,11 @@ export EMAIL_PORT=<email-port>
 # =========================
 # Logging / Observability
 # =========================
-export LOGTAIL_HOST=<logtail-host>
-export LOGTAIL_SOURCE_TOKEN=<logtail-token>
+# Optional outside development: send logs to an OpenObserve as well as the
+# console (see deploy/RUNBOOK.md section 10). Development logs to the console.
+# export OPENOBSERVE_URL=http://localhost:5080
+# export OPENOBSERVE_USER=<service account email>
+# export OPENOBSERVE_TOKEN=<service account token>
 
 # =========================
 # Queue Configuration

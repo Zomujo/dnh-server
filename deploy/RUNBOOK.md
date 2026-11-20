@@ -18,21 +18,25 @@ How to deploy the DNH API to a VPS with Docker, written so that someone who has 
    │ http://127.0.0.1:4815 (production) / :4816 (staging)
    ▼
  dnh-api-<env> ──── dnh-redis-<env>     internal network, no published port
+   │  │
+   │  └── logs ──► dnh-openobserve      one per VPS, org per environment, UI on 127.0.0.1:5080
    │
-   └── egress ──► MongoDB (another server), Firebase, Africa's Talking, SMTP, BetterStack
+   └── egress ──► MongoDB (another server), Firebase, Africa's Talking, SMTP
 ```
 
-Each environment has its own Redis, settings file and database. Nothing is shared between them. MongoDB is **not** run on this VPS: each settings file points `DB_CONNECTION_STRING` at the database server.
+Each environment has its own Redis, settings file and database. The only shared container is OpenObserve, where each environment logs to its own organization with its own account (section 10). MongoDB is **not** run on this VPS: each settings file points `DB_CONNECTION_STRING` at the database server.
 
 Everything lives in one directory on the VPS:
 
 ```
 /opt/dnh-server/                 root:root 755
 ├── deploy.sh                    755  builds and swaps the API      (from deploy/deploy.sh)
-├── compose.yml                  644  runs the APIs and Redis       (from deploy/compose.yml)
+├── compose.yml                  644  runs the APIs, Redis, OpenObserve (from deploy/compose.yml)
+├── openobserve.sh               755  creates each environment's log account (from deploy/openobserve.sh)
 ├── deploy.conf                  644  optional: REPO=<git url>
 ├── .env.staging                 600  staging settings              (from deploy/.env.example)
 ├── .env.production              600  production settings
+├── .env.openobserve             600  OpenObserve admin login       (section 10)
 └── .deploy.lock                      stops two deploys running at once
 ```
 
@@ -49,7 +53,7 @@ The root `docker-compose.yml` in the repo is a different thing: a single-host st
 | Linux (Ubuntu 22.04/24.04 or Debian 12) | — | `cat /etc/os-release` |
 | Docker Engine | 25 or newer | `docker version` |
 | Docker Compose plugin | 2.24 or newer | `docker compose version` |
-| git, flock (util-linux) | any | `git --version; flock --version` |
+| git, flock (util-linux), curl | any | `git --version; flock --version; curl --version` |
 | A reverse proxy with TLS | — | section 8 |
 | Firewall: only 22, 80 and 443 open | — | `sudo ufw status` |
 
@@ -233,6 +237,7 @@ Copy `compose.yml` and `deploy.sh` as in section 6. Fill in `.env.<env>` from `d
 - `JWT_TOKEN_ISSUER` is `dnh-server-<env>`.
 - `TRUST_PROXY=1` for a reverse proxy on this VPS.
 - Every secret is generated separately for each environment.
+- The `OPENOBSERVE_*` lines come from section 10; do that before the first deploy.
 
 ### 7.3 First deploy
 
@@ -301,6 +306,89 @@ Recreate the API after changing them (section 5). Deploy the API before the web 
 - **No `export ` prefix in the settings files.** A copy of `.envrc` has them; `deploy.sh` refuses such a file.
 - **Staging and production must not share a database.** Both run the reminder and notification jobs, so staging on production data would message real patients. `deploy.sh` refuses two files with the same `DB_NAME`.
 - **Redis data is persistent** (`redis_<env>` volume, append-only file): queued jobs survive restarts. Removing the volume drops queued jobs, OTPs and USSD sessions, nothing else.
-- **Logs** are rotated by Docker (5 × 10 MB per container). Errors and warnings also go to BetterStack; `LOGTAIL_SOURCE_TOKEN` and `LOGTAIL_HOST` (with `https://`) are required.
+- **Logs** are rotated by Docker (5 × 10 MB per container) and also sent to OpenObserve (section 10). If OpenObserve is down the API keeps running and prints one `[OpenObserve]` line a minute; the container log still has everything.
 - **Database backups** are the database server's job, not this VPS's.
 - **Avoid `$` and ` #` in setting values.** Compose expands `$VAR` and treats ` #` as a comment in unquoted values; `openssl rand -hex 32` makes safe secrets. Wrap a value that needs them in single quotes.
+
+---
+
+## 10. Logs (OpenObserve)
+
+The API sends every log line to OpenObserve, which `compose.yml` runs on the same VPS
+(`dnh-openobserve`, data in the `openobserve_data` volume). Nothing leaves the VPS.
+Each environment logs to its own **organization** (`staging`, `production`) with its own
+service account, which can write and read only that organization. OpenObserve publishes
+no port to the internet: its web UI is on `127.0.0.1:5080`, reached through an SSH tunnel.
+
+OpenObserve needs about 1 GB of RAM and disk space for the logs it keeps (set below).
+
+### 10.1 One-time setup
+
+1. Create the admin login, readable only by root. The password must be long and random
+   (`deploy.sh` refuses fewer than 24 characters): both APIs can reach OpenObserve, so this
+   password is what keeps one environment out of the other's logs.
+
+   ```bash
+   sudo install -m 600 /dev/null /opt/dnh-server/.env.openobserve
+   sudo tee /opt/dnh-server/.env.openobserve >/dev/null <<EOF
+   ZO_ROOT_USER_EMAIL=admin@example.org
+   ZO_ROOT_USER_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=')
+   ZO_COMPACT_DATA_RETENTION_DAYS=30
+   EOF
+   ```
+
+   Use a real mailbox for the email. Store the password in the team's password manager
+   (`sudo cat` the file once). OpenObserve reads these two only the **first** time it
+   starts; changing them later does nothing (change the password in the UI instead).
+
+   `ZO_COMPACT_DATA_RETENTION_DAYS` is how long logs are kept. Keep it short: error logs can
+   still quote values from the database (see `docs/data-protection.md`, G4).
+
+2. Copy `deploy/openobserve.sh` to `/opt/dnh-server/openobserve.sh` (root, 755), like
+   `deploy.sh` in section 6, then create each environment's account:
+
+   ```bash
+   sudo bash /opt/dnh-server/openobserve.sh setup staging
+   sudo bash /opt/dnh-server/openobserve.sh setup production
+   ```
+
+   Each prints three lines (`OPENOBSERVE_URL`, `OPENOBSERVE_USER`, `OPENOBSERVE_TOKEN`).
+   Put them in the master copy of that environment's settings file and upload it
+   (section 5). The token is shown once.
+
+3. Deploy (section 3). `deploy.sh` starts OpenObserve before the API and refuses a
+   settings file without the three lines, or with the other environment's token.
+
+### 10.2 Reading the logs
+
+From your own machine:
+
+```bash
+ssh -L 5080:127.0.0.1:5080 <you>@<vps>
+```
+
+Open `http://localhost:5080`, sign in as the admin, pick the organization (top right),
+then **Logs** → stream `api`. Useful fields: `level`, `context`, `message`, `stack`.
+For example `level='error'` shows only errors.
+
+Give other people their own login (IAM → Users) in only the organization they need,
+rather than sharing the admin login.
+
+### 10.3 Rotating a token
+
+If a settings file leaked, or someone with a copy leaves:
+
+```bash
+sudo bash /opt/dnh-server/openobserve.sh setup staging --rotate
+```
+
+Put the new `OPENOBSERVE_TOKEN` in the settings file and upload it (section 5). The old
+token stops working at once, so the API logs only to its container log until it is
+recreated with the new one.
+
+### 10.4 Using another OpenObserve
+
+To log to an OpenObserve elsewhere (GHS's own, or OpenObserve Cloud), set
+`OPENOBSERVE_URL` to its `https://` address and `OPENOBSERVE_USER`/`OPENOBSERVE_TOKEN`
+to an account in an organization named after the environment. `deploy.sh` then does not
+start the bundled one, and `.env.openobserve` is not needed.

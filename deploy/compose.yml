@@ -9,19 +9,25 @@
 # reach it and staging can never touch production's queues, OTPs or sessions.
 # MongoDB is not run here: DB_CONNECTION_STRING in each settings file points
 # at the database server, which may be another VPS. Each API also joins its
-# own egress network so it can reach MongoDB, Firebase, Africa's Talking,
-# SMTP and BetterStack.
+# own egress network so it can reach MongoDB, Firebase, Africa's Talking
+# and SMTP.
+#
+# Logs go to one OpenObserve on this VPS. Each environment has its own
+# organization in it, and each API reaches it over its own internal network,
+# so the two APIs still share no network. Its UI is published on loopback
+# only: open it through an SSH tunnel (deploy/RUNBOOK.md, section 10).
 #
 # The APIs publish on loopback only (Docker-published ports bypass ufw); a
 # reverse proxy on the VPS (nginx, Caddy or a Cloudflare Tunnel) terminates
 # TLS and forwards to them:
 #   production  127.0.0.1:4815, built from main
 #   staging     127.0.0.1:4816, built from staging
+#   OpenObserve 127.0.0.1:5080 (UI and API; not exposed to the internet)
 #
 # Every env_file is required: false because Compose reads all of them on
 # every command: otherwise production could not deploy until .env.staging
 # existed. deploy.sh refuses to run without the file of the environment it
-# deploys. Needs Docker Engine 25+ and Compose 2.24+.
+# deploys, or without .env.openobserve. Needs Docker Engine 25+ and Compose 2.24+.
 
 name: dnh-server
 
@@ -65,6 +71,40 @@ x-api: &api
   logging: *logging
 
 services:
+  # --- logs: shared by both environments, one organization each ---
+
+  openobserve:
+    image: openobserve/openobserve:v1.1.2
+    container_name: dnh-openobserve
+    restart: unless-stopped
+    # ZO_ROOT_USER_EMAIL / ZO_ROOT_USER_PASSWORD (the admin login) and,
+    # optionally, ZO_COMPACT_DATA_RETENTION_DAYS. Root only, mode 600.
+    env_file:
+      - path: .env.openobserve
+        required: false
+    environment:
+      ZO_DATA_DIR: /data
+      # No usage reports to the vendor: this server holds health-system logs.
+      ZO_TELEMETRY: "false"
+      ZO_WEB_URL: http://127.0.0.1:5080
+      # Its query cache (MB). Kept small so it fits under mem_limit beside the APIs.
+      ZO_MEMORY_CACHE_MAX_SIZE: "256"
+      ZO_MEMORY_CACHE_DATAFUSION_MAX_SIZE: "256"
+    volumes:
+      - openobserve_data:/data
+    # The image has no shell or HTTP client, so deploy.sh checks /healthz from
+    # the host instead of a container health check.
+    mem_limit: 1g
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    networks: [observe, observe-staging, observe-production]
+    ports:
+      - "127.0.0.1:5080:5080"
+    logging: *logging
+
   # --- staging: built from the staging branch ---
 
   dnh-redis-staging:
@@ -81,7 +121,7 @@ services:
     env_file:
       - path: .env.staging
         required: false
-    networks: [staging, staging-egress]
+    networks: [staging, staging-egress, observe-staging]
     ports:
       - "127.0.0.1:4816:4815"
     depends_on:
@@ -104,7 +144,7 @@ services:
     env_file:
       - path: .env.production
         required: false
-    networks: [production, production-egress]
+    networks: [production, production-egress, observe-production]
     ports:
       - "127.0.0.1:4815:4815"
     depends_on:
@@ -121,7 +161,16 @@ networks:
   # network.
   staging-egress:
   production-egress:
+  # Each API reaches OpenObserve over its own internal network.
+  observe-staging:
+    internal: true
+  observe-production:
+    internal: true
+  # Lets Docker publish OpenObserve's port on the host's loopback; an
+  # internal-only container can't publish one.
+  observe:
 
 volumes:
   redis_staging:
   redis_production:
+  openobserve_data:

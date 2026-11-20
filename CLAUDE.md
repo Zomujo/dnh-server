@@ -44,7 +44,7 @@ The AI layer (Gemini, Whisper, Qdrant via `dh-vectors`) and the Socket.IO `chat`
 | `CachingModule` | Redis cache (`@nestjs/cache-manager` + `keyv/redis`) and BullMQ queues — both use `REDIS_URL` |
 | `FirebaseModule` | Single Firebase app (Firestore, Storage, FCM, Auth) via `firebase-admin` |
 | `DatabaseModule` | MongoDB via Mongoose (`DB_CONNECTION_STRING`, `DB_NAME`) |
-| `LoggingModule` | `DomainLogger` — extends `ConsoleLogger`, forwards errors/warns to BetterStack (Logtail) in non-dev environments |
+| `LoggingModule` | `DomainLogger` — extends `ConsoleLogger`; outside development it also sends every printed line to OpenObserve (`OPENOBSERVE_*`) in batches, never throwing or blocking if OpenObserve is down |
 
 ### Auth flow
 

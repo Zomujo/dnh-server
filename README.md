@@ -50,7 +50,7 @@ Data protection (Ghana Data Protection Act, 2012): see [`docs/data-protection.md
 | AI Memory (retired, optional) | LangGraph `MongoDBSaver` checkpointer |
 | Push Notifications | Firebase Cloud Messaging (FCM) |
 | File Storage | Firebase Storage |
-| Observability | BetterStack (Logtail) via `@logtail/node` |
+| Observability | OpenObserve (self-hosted beside the API, see `deploy/compose.yml`) |
 | Linter/Formatter | Biome |
 | Test Runner | Vitest + Supertest |
 | Package Manager | pnpm |
@@ -150,7 +150,7 @@ The `private_key` value must be stored with escaped `\n` sequences (e.g. `"-----
 
 #### LoggingModule
 
-`DomainLogger` extends NestJS's `ConsoleLogger`. In non-development environments it additionally forwards `error` and `warn` calls to BetterStack (Logtail) using `LOGTAIL_SOURCE_TOKEN` and `LOGTAIL_HOST`. In development the NestJS default console logger is used and Logtail forwarding is silent.
+`DomainLogger` extends NestJS's `ConsoleLogger`. Outside development it also sends every line it prints (all enabled levels, with context and error stacks) to OpenObserve, using `OPENOBSERVE_URL`, `OPENOBSERVE_USER` and `OPENOBSERVE_TOKEN`. Records are batched every 2 seconds; if OpenObserve is down the batch is dropped with one stderr line a minute, and the API carries on. In development the NestJS default console logger is used.
 
 #### AuditModule (`@Global`)
 
@@ -478,8 +478,11 @@ After any change to `.envrc`, run `direnv allow` again to reload.
 | `FIREBASE_BASE_CLIENT_CERT_URL` | Yes | Firebase client certificate URL |
 | `BASE_STORAGE_BUCKET` | Yes | Firebase Storage bucket name |
 | `GOOGLE_CLIENT_ID` | Yes | OAuth client IDs the staff app's Google sign-in tokens are issued for, comma-separated (Android, iOS, web). Google sign-in returns 503 while it is empty |
-| `LOGTAIL_SOURCE_TOKEN` | Staging/Prod | BetterStack source token |
-| `LOGTAIL_HOST` | Staging/Prod | BetterStack ingestion endpoint |
+| `OPENOBSERVE_URL` | Staging/Prod | OpenObserve address; `http://openobserve:5080` for the one in `deploy/compose.yml` |
+| `OPENOBSERVE_USER` | Staging/Prod | The environment's service account (`api-<env>@dnh.local`), from `deploy/openobserve.sh` |
+| `OPENOBSERVE_TOKEN` | Staging/Prod | That service account's token |
+| `OPENOBSERVE_ORG` | Optional | Organization; defaults to `NODE_ENV` |
+| `OPENOBSERVE_STREAM` | Optional | Log stream; defaults to `api` |
 | `QUEUE_TLS` | No | Set to `true` to enable TLS for the Redis/BullMQ connection |
 | `NANOID_GEN` | No | Custom nanoid alphabet for code generation |
 | `AUDIT_LOG_TTL_DAYS` | No | Days audit log entries are kept before MongoDB deletes them. Defaults to `730` (2 years), pending GHS sign-off |
@@ -619,7 +622,7 @@ docker compose logs -f api       # compose
 docker logs -f dnh-api           # plain docker run
 ```
 
-With `LOGTAIL_SOURCE_TOKEN` and `LOGTAIL_HOST` set, errors and warnings also go to BetterStack.
+With the `OPENOBSERVE_*` settings, every log line also goes to OpenObserve (see `deploy/RUNBOOK.md` section 10 for reading them).
 
 ---
 

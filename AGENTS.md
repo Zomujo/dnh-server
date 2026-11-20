@@ -32,7 +32,7 @@ NestJS 11 API at `/api/v1` (except `GET /` which is a health-check):
 AppModule
 ├── CommonModule    – response interceptors (@HandleSuccess, @HandleCreate, etc.)
 ├── CoreModule      – Auth (global guards), DB (Mongoose), Caching (Redis+BullMQ),
-│                     Firebase (Admin SDK), Logging (BetterStack in non-dev)
+│                     Firebase (Admin SDK), Logging (OpenObserve in non-dev)
 └── FeaturesModule  – 16 domain modules: client, doctors, patients,
     chronic-conditions, medications, adherences, vital-histories,
     concerns, notifications, pharmacies, dh-vectors, facilities,
