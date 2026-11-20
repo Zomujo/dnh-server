@@ -201,7 +201,9 @@ In place (section 28 requires appropriate technical and organisational measures)
 - **Storage:** uploaded files have no public download token; they are read through
   short-lived signed URLs.
 - **USSD callbacks** are accepted only with the shared secret / from the provider. A callback refused by that check (forged or misconfigured) is written to the server log, not the audit log.
-- **API docs (Swagger)** are disabled in production; CORS is restricted to listed origins.
+- **API docs (Swagger)** are disabled in production. CORS allows only the origins in
+  `CORS_ORIGINS` (the HCP web app's address); while that is empty any origin is allowed and
+  the API logs a warning on start in production, so set it once the web app's address is known.
 - **List endpoints return limited fields:** patient lists return name, date of birth,
   conditions and adherence only (or name and patient code). Ghana Card and NHIS numbers are
   returned only by the single-patient endpoints (`GET /hcp/patients/:id`,

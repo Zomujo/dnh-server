@@ -282,6 +282,17 @@ api.example.gov.gh {
 
 Any of these is one proxy hop: `TRUST_PROXY=1`. Then register the USSD callback with Africa's Talking as `https://<host>/api/v1/ussd?key=<USSD_CALLBACK_SECRET>`.
 
+### The HCP web app
+
+The web app is deployed on the same VPS with its own kit, from the `HCP-WebApp` repository: see its `deploy/RUNBOOK.md` (it serves `127.0.0.1:3000` for production and `127.0.0.1:3001` for staging, from `/opt/hcp-web`). It calls this API from the browser, so for each environment:
+
+| In this API's settings | Set to |
+|---|---|
+| `CORS_ORIGINS` | the web app's public address, e.g. `https://hcp.example.gov.gh` |
+| `GOOGLE_CLIENT_ID` | includes the web app's `NEXT_PUBLIC_GOOGLE_CLIENT_ID` |
+
+Recreate the API after changing them (section 5). Deploy the API before the web app: the web app's build needs this API's public address.
+
 ---
 
 ## 9. Gotchas
